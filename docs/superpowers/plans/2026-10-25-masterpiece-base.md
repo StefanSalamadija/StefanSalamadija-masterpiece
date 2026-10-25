@@ -17,7 +17,7 @@
 
 - **Runtime:** Node 22, npm. Project root `/home/user/masterpiece`.
 - **Dependencies (exact ranges):**
-  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, and `xlsx` (SheetJS CE). SheetJS is installed **only in Task 5** with `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
+  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0` (both installed in Task 13), and `xlsx` (SheetJS CE). SheetJS is installed **only in Task 5** with `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
     - This needs `cdn.sheetjs.com` allowed in the environment's network policy. If the download is refused, stop at Task 5 and report; do not substitute another package.
     - Never use the npm-registry `xlsx@0.18.5`, which is outdated and has known vulnerabilities.
   - Dev: `vite@^8.3.5`, `@preact/preset-vite@^2.10.6`, `@babel/core@^7`, `vite-plugin-pwa@^2.0.0`, `workbox-window@^7.4.1`, `vitest@^5.0.5`, `fake-indexeddb@^6.2.6`, `typescript@^7.0.2`, `@playwright/test@1.63.0` (exact: it must match the preinstalled browsers in `/opt/pw-browsers`; never run `playwright install`).
@@ -972,7 +972,20 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
     - First ship screen: heading `Create your first ship`, label `Ship name`, select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`), button `Create ship`, and link `Import a backup instead` → `#/settings/import`.
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
-  - **Night theme:** every colour token is pure red on black, with green and blue channels both 0. Background `#000000`, text `#cc0000`, muted `#7a0000`, borders `#4d0000`.
+  - **Visual style "Bridge Console"** (user-chosen; spec §4.9; reference mockups at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x, artboards "A · Bridge Console — Home/Crew list" and "Night mode"):
+    - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
+    - **Day tokens** (CSS variables on `:root[data-theme="day"]`):
+      - `--bg #0B1622`, `--surface #12243A`, `--line #1E3550`, `--nav-bg #0E1B2B`
+      - `--text #E6EDF5`, `--muted #9FB3C8`
+      - `--accent #5FD4CE` (`--on-accent #04211F`)
+      - `--amber #F2B33D` (`--on-amber #241703`)
+      - `--red #FF6B5E` (`--on-red #1A0503`)
+    - **Shapes:** cards and rows use radius 10–12 px; badges are pills.
+    - **Layout:**
+      - Header: brand line, ship name, clock (Plex Mono), theme button 44×44.
+      - Bottom nav bar: Home / Ship / Profiles / Settings, each with an inline stroke icon, the active one in `--accent`.
+      - Ship sub-nav: a horizontal chip row, the active chip filled `--accent`.
+  - **Night theme:** every colour token is pure red on black, with green and blue channels both 0. Background `#000000`, text `#F00000`, borders `#4D0000`. There is no separate muted colour: secondary text uses the same red at a smaller size. Filled badges are `#F00000` with black text; amber badges are outlined.
   - **High contrast:** black on white, `font-weight: 600`, minimum touch target 48 px.
   - **Print:** `@media print` forces background `#ffffff` and text `#000000` and hides nav, header buttons and banners, whatever the theme.
   - **e2e helpers** in `e2e/helpers.ts`:

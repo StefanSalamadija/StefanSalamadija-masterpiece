@@ -220,8 +220,15 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 
 ### 4.9 Display themes
 
-- **Day:** normal colours.
-- **Night:** red-on-black, low brightness, with no white or blue light, to keep night vision on the bridge.
+**Visual style, chosen by the user: "A · Bridge Console".** Mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x.
+- Typefaces: IBM Plex Sans for text; IBM Plex Mono for clock times and rank codes. Both are bundled, so they work offline.
+- Cards and list rows have 10–12 px rounded corners on a dark surface. Status is shown as pill badges.
+- The main navigation is a bottom bar: Home, Ship, Profiles, Settings. The ship's sections are a row of chips under the header.
+- The header shows the ship's name, the ship's clock and the theme button.
+
+Themes:
+- **Day (Bridge Console):** dark navy background `#0B1622`, cards `#12243A`, lines `#1E3550`, text `#E6EDF5`, secondary text `#9FB3C8`, teal accent `#5FD4CE`, amber warnings `#F2B33D`, red alarms `#FF6B5E`.
+- **Night:** pure red on black, with no white or blue light, to keep night vision on the bridge. Text `#F00000` is used for legibility (about 4.7:1 contrast). Brightness is lowered with the phone's own screen brightness.
 - **High contrast:** black on white, bold text and larger touch targets, for bright sun on deck.
 
 The header has a one-tap toggle, and the choice is remembered per device.
