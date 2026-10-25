@@ -128,12 +128,16 @@ describe('resolveField: voyage', () => {
     expect(resolveField('voyage.no', ctx)).toBe('V-12');
     expect(resolveField('voyage.lastPort', ctx)).toBe('Santos');
     expect(resolveField('voyage.eta', ctx)).toBe('2026-11-02T08:00');
+    // The ETA is local time at the destination (+01:00), which is not the ship's +03:00.
+    expect(resolveField('voyage.etaTimeZone', ctx)).toBe('UTC+01:00');
     expect(resolveField('voyage.cargo', ctx)).toBe('Soya');
     expect(resolveField('voyage.charterers', ctx)).toBe('ACME');
     expect(resolveField('voyage.agents', ctx)).toBe('Port Agents BV');
   });
   it('is undefined with no active, non-deleted voyage', () => {
     expect(resolveField('voyage.nextPort', { ...ctx, voyages: [] })).toBeUndefined();
+    expect(resolveField('voyage.etaTimeZone', { ...ctx, voyages: [] })).toBeUndefined();
+    expect(resolveField('voyage.etaTimeZone', { ...ctx, voyages: [{ ...voyage, active: false }] })).toBeUndefined();
     expect(resolveField('voyage.nextPort', { ...ctx, voyages: [{ ...voyage, active: false }] })).toBeUndefined();
     expect(resolveField('voyage.nextPort', { ...ctx, voyages: [{ ...voyage, deleted: true }] })).toBeUndefined();
   });
@@ -178,7 +182,7 @@ describe('FIELD_NAMES', () => {
       'vessel.name', 'vessel.imo', 'vessel.callSign', 'vessel.mmsi', 'vessel.flag', 'vessel.portOfRegistry',
       'vessel.gt', 'vessel.nt', 'vessel.dwt', 'vessel.loa', 'vessel.beam', 'vessel.yearBuilt',
       'vessel.owners', 'vessel.managers', 'vessel.pandi', 'vessel.classSociety',
-      'voyage.no', 'voyage.lastPort', 'voyage.nextPort', 'voyage.eta', 'voyage.cargo', 'voyage.charterers', 'voyage.agents',
+      'voyage.no', 'voyage.lastPort', 'voyage.nextPort', 'voyage.eta', 'voyage.etaTimeZone', 'voyage.cargo', 'voyage.charterers', 'voyage.agents',
       'today', 'now', 'nowUtc', 'ship.timeZone', 'crew.onboard', 'crew.onboardCount',
     ]);
   });

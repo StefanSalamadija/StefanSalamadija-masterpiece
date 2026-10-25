@@ -18,10 +18,17 @@ const VESSEL_KEYS: readonly (keyof Particulars)[] = [
   'owners', 'managers', 'pandi', 'classSociety',
 ];
 
-/** Dictionary name after `voyage.` → the `Voyage` field it reads. */
-const VOYAGE_FIELDS: Readonly<Record<string, keyof Voyage>> = {
-  no: 'voyageNo', lastPort: 'lastPort', nextPort: 'nextPort', eta: 'etaLocal',
-  cargo: 'cargo', charterers: 'charterers', agents: 'agents',
+/** Dictionary name after `voyage.` → how it is read from the active `Voyage`. */
+const VOYAGE_FIELDS: Readonly<Record<string, (v: Voyage) => string>> = {
+  no: (v) => v.voyageNo,
+  lastPort: (v) => v.lastPort,
+  nextPort: (v) => v.nextPort,
+  // Local time at the destination, `YYYY-MM-DDTHH:mm`; its UTC offset is `etaTimeZone`, which can differ from the ship's.
+  eta: (v) => v.etaLocal,
+  etaTimeZone: (v) => formatOffset(v.etaOffsetMinutes),
+  cargo: (v) => v.cargo,
+  charterers: (v) => v.charterers,
+  agents: (v) => v.agents,
 };
 
 const CERT_FIELDS: readonly (keyof Certificate)[] = ['number', 'issuedBy', 'issueDate', 'expiryDate', 'nextSurveyDue'];
@@ -73,7 +80,7 @@ export function resolveField(name: string, ctx: FieldContext, opts?: { asAt?: st
   if (parts.length === 2 && parts[0] === 'voyage') {
     if (!Object.hasOwn(VOYAGE_FIELDS, parts[1])) return undefined;
     const voyage = ctx.voyages.find((v) => !v.deleted && v.active);
-    return voyage && scalar(voyage[VOYAGE_FIELDS[parts[1]]]);
+    return voyage && VOYAGE_FIELDS[parts[1]](voyage);
   }
 
   if (parts.length === 4 && parts[0] === 'crew' && parts[1] === 'byRank') {
