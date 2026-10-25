@@ -25,7 +25,9 @@ export const TABLE_NAMES: readonly TableName[] = ['ships', 'crew', 'voyages', 'c
 export type Tables = Record<TableName, SyncRecord[]>;
 export interface PinHash { salt: string; hash: string; iterations: number }
 export interface LockoutState { failures: number; lockedUntil?: string }
-export interface PinSettings { hash: PinHash; relockMinutes: number; lockout: LockoutState }
+/** A fingerprint (WebAuthn platform credential) registered on this device. Verified locally; there is no server. */
+export interface FingerprintCredential { credentialId: string /* base64url */; publicKey: string /* SPKI, base64 */; alg: -7 | -257 }
+export interface PinSettings { hash: PinHash; relockMinutes: number; lockout: LockoutState; fingerprint?: FingerprintCredential }
 export type Theme = 'day' | 'night' | 'contrast';
 export interface Settings { key: 'device'; deviceId: string; deviceName: string; activeShipId?: string; backupReminderDays: number;
   lastExportAt?: string; lastSync: Record<string, string>; theme: Theme; pin?: PinSettings; firstExportDone?: boolean }
