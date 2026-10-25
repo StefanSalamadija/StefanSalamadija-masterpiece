@@ -197,6 +197,29 @@ describe('samePerson', () => {
     expect(samePerson(ivan({ passportNo: '', surname: 'Šašić', givenNames: 'Marko  Ivan' }), ivan({ passportNo: '', surname: 'SASIC', givenNames: ' marko\u00a0ivan ' }))).toBe(true);
     expect(samePerson(ivan({ passportNo: '', givenNames: 'Jean-Luc' }), ivan({ passportNo: '', givenNames: 'jean-luc' }))).toBe(true);
   });
+  it('reads Đ as DJ, as passports spell it: Đorđević, Djordjević, DJORDJEVIC and Dordevic are one name', () => {
+    const forms = ['ĐORĐEVIĆ', 'Djordjević', 'DJORDJEVIC', 'Dordevic', 'đorđević'];
+    for (const a of forms) {
+      for (const b of forms) {
+        expect(samePerson(ivan({ passportNo: '', surname: a }), ivan({ passportNo: '', surname: b })), `${a} ${b}`).toBe(true);
+      }
+    }
+    // The date of birth still has to match, so that two people with names that fold alike are not taken for one.
+    expect(samePerson(ivan({ passportNo: '', surname: 'Đorđević' }), ivan({ passportNo: '', surname: 'Dordevic', dateOfBirth: '1980-03-15' }))).toBe(false);
+  });
+  it('folds the letters that have no combining mark: Ł, ß, Ø, Æ, Œ, Ħ, ı and Ð', () => {
+    const same = (a: string, b: string) => samePerson(ivan({ passportNo: '', surname: a }), ivan({ passportNo: '', surname: b }));
+    expect(same('Wałęsa', 'Walesa')).toBe(true);
+    expect(same('ŁUKASZ', 'Lukasz')).toBe(true);
+    expect(same('Strauß', 'STRAUSS')).toBe(true);
+    expect(same('Søren', 'Soren')).toBe(true);
+    expect(same('Ærø', 'Aero')).toBe(true);
+    expect(same('Œuvre', 'Oeuvre')).toBe(true);
+    expect(same('Ħamrun', 'Hamrun')).toBe(true);
+    expect(same('Işık', 'Isik')).toBe(true);
+    expect(same('Ðorđe', 'Dorde')).toBe(true);
+    expect(same('Wałęsa', 'Walensa')).toBe(false);
+  });
   it('still tells different names apart', () => {
     expect(samePerson(ivan({ passportNo: '', surname: 'Petrović' }), ivan({ passportNo: '', surname: 'Petrovac' }))).toBe(false);
     expect(samePerson(ivan({ passportNo: '', surname: "O'Brien" }), ivan({ passportNo: '', surname: 'OBrien' }))).toBe(false);

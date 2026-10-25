@@ -85,12 +85,25 @@ interface Identity {
   name?: string;
 }
 
+/** Letters that no combining mark can be taken off, as an ICAO passport spells them without the letter. */
+const SPELLED_PLAIN: Readonly<Record<string, string>> = {
+  Đ: 'D', Ð: 'D', Ł: 'L', Ø: 'O', Æ: 'AE', Œ: 'OE', Ħ: 'H',
+};
+
 /**
- * A name to compare: accents and other combining marks are dropped (`Petrović`, `Petrovic` and `Petrovic` + a
- * combining acute are one), the case is folded, and any run of white space (a no-break space too) is one space.
+ * A name to compare, so that the spellings of one name on different papers meet:
+ * - accents and other combining marks are dropped (`Petrović`, `Petrovic` and `Petrovic` + a combining acute are one);
+ * - the case is folded, which also turns ß into SS and the dotless ı into I;
+ * - the letters that have no combining mark are spelled plain (Đ, Ð to D; Ł, Ø, Æ, Œ, Ħ), and DJ is D, because
+ *   passports write Đ as DJ (`Đorđević`, `Djordjević`, `DJORDJEVIC` and `Dordevic` are one name);
+ * - any run of white space (a no-break space too) is one space.
+ * It is only ever used together with the date of birth, which keeps names that fold alike from being taken for one person.
  */
 function foldName(s: string): string {
-  return s.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/\s+/gu, ' ').trim();
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
+    .replace(/[ĐÐŁØÆŒĦ]/gu, (letter) => SPELLED_PLAIN[letter])
+    .replace(/DJ/gu, 'D')
+    .replace(/\s+/gu, ' ').trim();
 }
 
 function identityOf(m: PersonFields): Identity {
