@@ -1,10 +1,10 @@
 import type { RefObject } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { navigate } from '../../app/router';
 import { createRecord, listForShip, softDelete, updateRecord } from '../../db/records';
 import { rankLabel } from '../../domain/catalogues';
-import { canRejoin, fullName, rejoinDraft, visibleCrew } from '../../domain/crew';
+import { fullName, rejoinableIds, rejoinDraft, visibleCrew } from '../../domain/crew';
 import { crewDocBand } from '../../domain/expiry';
 import type { CrewMember, FieldError } from '../../domain/types';
 import { BandBadge } from '../components/BandBadge';
@@ -149,6 +149,8 @@ function CrewList({ shipId }: { shipId: string }) {
 
   const asAt = resolveAsAt(looking.asAt, shipToday);
   const rows = crew && visibleCrew(crew, looking.view, asAt);
+  // Worked out when the crew changes, not on every render (every keystroke in the As-at date is one).
+  const canRejoin = useMemo(() => (crew ? rejoinableIds(crew) : new Set<string>()), [crew]);
   const look = (change: Partial<CrewListView>): void => setLooking(setCrewListView(change));
 
   // A dialog about a contract that is gone, or was changed meanwhile (here or in another tab), is closed.
@@ -208,7 +210,7 @@ function CrewList({ shipId }: { shipId: string }) {
                 <div class="row-actions">
                   <button type="button" class="btn btn-outline btn-small" onClick={() => navigate(`/ship/crew/${encodeURIComponent(m.id)}`)}>Edit</button>
                   <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'signOff', member: m })}>Sign off</button>
-                  {crew && canRejoin(m, crew) && (
+                  {canRejoin.has(m.id) && (
                     <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'rejoin', member: m })}>Re-join</button>
                   )}
                   <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'delete', member: m })}>Delete</button>

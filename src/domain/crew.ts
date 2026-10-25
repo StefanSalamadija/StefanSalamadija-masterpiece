@@ -77,26 +77,51 @@ export function rejoinDraft(m: CrewMember, signOnDate: string, signOnPort: strin
   };
 }
 
-/** Upper case with the spaces tidied, so `Petrović  Ivan` and `PETROVIĆ ivan` match. */
-function normaliseName(s: string): string {
-  return s.trim().replace(/\s+/g, ' ').toUpperCase();
+type PersonFields = Pick<CrewMember, 'passportNo' | 'surname' | 'givenNames' | 'dateOfBirth'>;
+
+/** What a contract is known by: its passport number and its name with date of birth, each only when it has one. */
+interface Identity {
+  passport?: string;
+  name?: string;
 }
 
 /**
- * Who a contract belongs to: the passport number (spaces and case ignored) when there is one, else the surname, given
- * names and date of birth, but only when all three are filled in. `undefined` when neither can be had: such a
- * contract is not linked to any other.
+ * A name to compare: accents and other combining marks are dropped (`Petrović`, `Petrovic` and `Petrovic` + a
+ * combining acute are one), the case is folded, and any run of white space (a no-break space too) is one space.
  */
-export function personKey(m: Pick<CrewMember, 'passportNo' | 'surname' | 'givenNames' | 'dateOfBirth'>): string | undefined {
-  const passport = normalisePassport(m.passportNo);
-  if (passport) return `passport:${passport}`;
-  const surname = normaliseName(m.surname);
-  const givenNames = normaliseName(m.givenNames);
-  const dateOfBirth = m.dateOfBirth.trim();
-  return surname && givenNames && dateOfBirth ? `name:${surname}|${givenNames}|${dateOfBirth}` : undefined;
+function foldName(s: string): string {
+  return s.normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/\s+/gu, ' ').trim();
 }
 
-type ContractSpan = Pick<CrewMember, 'passportNo' | 'surname' | 'givenNames' | 'dateOfBirth' | 'signOnDate' | 'signOffDate'>;
+function identityOf(m: PersonFields): Identity {
+  const passport = normalisePassport(m.passportNo);
+  const surname = foldName(m.surname);
+  const givenNames = foldName(m.givenNames);
+  const dateOfBirth = m.dateOfBirth.trim();
+  return {
+    ...(passport && { passport }),
+    ...(surname && givenNames && dateOfBirth && { name: `${surname}|${givenNames}|${dateOfBirth}` }),
+  };
+}
+
+const isKnown = (who: Identity): boolean => who.passport !== undefined || who.name !== undefined;
+
+/** Either the passport number or the name with date of birth is the same, so a renewed passport does not part them. */
+function linked(a: Identity, b: Identity): boolean {
+  return (a.passport !== undefined && a.passport === b.passport) || (a.name !== undefined && a.name === b.name);
+}
+
+/**
+ * Whether two contracts are the same person's. They are when their passport numbers are the same (spaces and case
+ * ignored, and not both blank), or when their surname, given names and date of birth are all filled in and the same
+ * (accents and case ignored). Either is enough, so a passport that was renewed, added or lost between contracts does
+ * not part them. A contract with neither is not linked to any other.
+ */
+export function samePerson(a: PersonFields, b: PersonFields): boolean {
+  return linked(identityOf(a), identityOf(b));
+}
+
+type ContractSpan = PersonFields & Pick<CrewMember, 'signOnDate' | 'signOffDate'>;
 
 /** True when two contracts share a day. Both end days count, and a contract without a sign-off has no end. */
 function overlaps(a: Pick<CrewMember, 'signOnDate' | 'signOffDate'>, b: Pick<CrewMember, 'signOnDate' | 'signOffDate'>): boolean {
@@ -109,26 +134,42 @@ function overlaps(a: Pick<CrewMember, 'signOnDate' | 'signOffDate'>, b: Pick<Cre
  * are left out. Nothing is found while the sign-on date is empty or not a date, since there is no span to check.
  */
 export function overlappingContract(candidate: ContractSpan & { id?: string }, crew: CrewMember[]): CrewMember | undefined {
-  const key = personKey(candidate);
-  if (!key || !isValidIsoDate(candidate.signOnDate)) return undefined;
+  const who = identityOf(candidate);
+  if (!isKnown(who) || !isValidIsoDate(candidate.signOnDate)) return undefined;
   let first: CrewMember | undefined;
   for (const m of crew) {
-    if (m.deleted || m.id === candidate.id || personKey(m) !== key || !overlaps(candidate, m)) continue;
+    if (m.deleted || m.id === candidate.id || !overlaps(candidate, m) || !linked(who, identityOf(m))) continue;
     if (!first || m.signOnDate < first.signOnDate) first = m;
   }
   return first;
 }
 
 /**
- * Whether the contract `m` can be followed by a new one: it is signed off, it is the person's latest (by sign-on), and
- * none of the person's contracts is open. A contract that cannot be linked to anyone stands alone.
+ * The ids of the contracts that can be followed by a new one: signed off, and with no other contract of the same
+ * person that is open or starts later (so only the person's latest, and never while one is open). A contract that
+ * cannot be linked to anyone stands alone. Deleted contracts are not counted and are never in the set. It is made for
+ * the whole crew at once, in one pass over the contracts, so that a list can ask it once and not once per row.
  */
-export function canRejoin(m: CrewMember, crew: CrewMember[]): boolean {
-  if (!m.signOffDate) return false;
-  const key = personKey(m);
-  if (!key) return true;
-  // A contract of the same person that is still open, or that starts later.
-  const sameLater = (other: CrewMember): boolean =>
-    !other.deleted && other.id !== m.id && personKey(other) === key && (!other.signOffDate || other.signOnDate > m.signOnDate);
-  return !crew.some(sameLater);
+export function rejoinableIds(crew: CrewMember[]): Set<string> {
+  const live = crew.filter((m) => !m.deleted);
+  const who = live.map(identityOf);
+  const byPassport = new Map<string, number[]>();
+  const byName = new Map<string, number[]>();
+  const add = (index: Map<string, number[]>, key: string | undefined, at: number): void => {
+    if (key !== undefined) index.set(key, [...(index.get(key) ?? []), at]);
+  };
+  who.forEach((identity, at) => {
+    add(byPassport, identity.passport, at);
+    add(byName, identity.name, at);
+  });
+
+  const ids = new Set<string>();
+  live.forEach((m, at) => {
+    if (!m.signOffDate) return;
+    const { passport, name } = who[at];
+    const sameAsM = [...(passport === undefined ? [] : byPassport.get(passport) ?? []), ...(name === undefined ? [] : byName.get(name) ?? [])];
+    const followed = sameAsM.some((other) => other !== at && (!live[other].signOffDate || live[other].signOnDate > m.signOnDate));
+    if (!followed) ids.add(m.id);
+  });
+  return ids;
 }

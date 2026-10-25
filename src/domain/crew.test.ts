@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   fullName,
-  canRejoin,
   isOnboardAt,
   latestContractByPassport,
   normalisePassport,
   onboardAt,
   overlappingContract,
-  personKey,
+  rejoinableIds,
   rejoinDraft,
+  samePerson,
   visibleCrew,
 } from './crew';
 import type { CrewMember } from './types';
@@ -153,26 +153,56 @@ describe('visibleCrew', () => {
   });
 });
 
-describe('personKey', () => {
-  it('is the passport number, whatever its spaces and case', () => {
-    expect(personKey(crewMember({ passportNo: 'p 123 456' }))).toBe(personKey(crewMember({ passportNo: 'P123456', surname: 'Other' })));
-    expect(personKey(crewMember({ passportNo: 'P123456' }))).not.toBe(personKey(crewMember({ passportNo: 'P123457' })));
+describe('samePerson', () => {
+  const ivan = (over: Partial<CrewMember> = {}) =>
+    crewMember({ passportNo: 'P1', surname: 'Petrović', givenNames: 'Ivan', dateOfBirth: '1980-03-14', ...over });
+
+  it('links two contracts with the same passport number, whatever its spaces and case and whatever the names', () => {
+    expect(samePerson(ivan({ passportNo: 'p 1 ' }), ivan({ passportNo: 'P1', surname: 'Other', givenNames: 'Someone', dateOfBirth: '1999-01-01' }))).toBe(true);
+    expect(samePerson(ivan({ passportNo: 'P1' }), ivan({ passportNo: 'P2', dateOfBirth: '1999-01-01' }))).toBe(false);
   });
-  it('is the name and date of birth when there is no passport number, whatever their case and spacing', () => {
-    const a = crewMember({ passportNo: '', surname: 'Petrović', givenNames: 'Ivan  Marko', dateOfBirth: '1980-03-14' });
-    const b = crewMember({ passportNo: ' ', surname: 'PETROVIĆ ', givenNames: 'ivan marko', dateOfBirth: '1980-03-14' });
-    expect(personKey(a)).toBeDefined();
-    expect(personKey(a)).toBe(personKey(b));
-    expect(personKey({ ...b, dateOfBirth: '1980-03-15' })).not.toBe(personKey(a));
-    expect(personKey({ ...b, givenNames: 'Ivan' })).not.toBe(personKey(a));
+  it('links them by name and date of birth when the passport number changed between the contracts', () => {
+    expect(samePerson(ivan({ passportNo: 'P1' }), ivan({ passportNo: 'P2' }))).toBe(true);
+  });
+  it('links them when a passport number was added later, or lost', () => {
+    expect(samePerson(ivan({ passportNo: '' }), ivan({ passportNo: 'P2' }))).toBe(true);
+    expect(samePerson(ivan({ passportNo: 'P2' }), ivan({ passportNo: ' ' }))).toBe(true);
+  });
+  it('does not link different passport numbers when the date of birth or a name differs', () => {
+    expect(samePerson(ivan({ passportNo: 'P1' }), ivan({ passportNo: 'P2', dateOfBirth: '1980-03-15' }))).toBe(false);
+    expect(samePerson(ivan({ passportNo: 'P1' }), ivan({ passportNo: 'P2', givenNames: 'Ivo' }))).toBe(false);
+    expect(samePerson(ivan({ passportNo: 'P1' }), ivan({ passportNo: 'P2', surname: 'Petrovac' }))).toBe(false);
+  });
+  it('knows a person by name and date of birth when neither contract has a passport number', () => {
+    expect(samePerson(ivan({ passportNo: '' }), ivan({ passportNo: '' }))).toBe(true);
+    expect(samePerson(ivan({ passportNo: '' }), ivan({ passportNo: '', dateOfBirth: '1981-01-01' }))).toBe(false);
+  });
+  it('does not take two blank passport numbers for the same passport', () => {
+    expect(samePerson(ivan({ passportNo: '', givenNames: 'Ivan' }), ivan({ passportNo: ' ', givenNames: 'Ivo' }))).toBe(false);
+  });
+  it('links nothing without a passport number or a full name and date of birth', () => {
+    const none = (over: Partial<CrewMember> = {}) => ivan({ passportNo: '', dateOfBirth: '', ...over });
+    expect(samePerson(none(), none())).toBe(false);
+    expect(samePerson(ivan({ passportNo: '', givenNames: '' }), ivan({ passportNo: '', givenNames: '' }))).toBe(false);
+    expect(samePerson(ivan({ passportNo: '', surname: ' ' }), ivan({ passportNo: '', surname: ' ' }))).toBe(false);
+  });
+  it('ignores case, accents and the spacing of names: composed, decomposed and plain forms all match', () => {
+    const composed = ivan({ passportNo: '', surname: 'PETROVIĆ' });
+    const decomposed = ivan({ passportNo: '', surname: 'Petrovic\u0301' }); // c + combining acute
+    const plain = ivan({ passportNo: '', surname: 'petrovic' });
+    expect(decomposed.surname).not.toBe(composed.surname);
+    expect(samePerson(composed, decomposed)).toBe(true);
+    expect(samePerson(composed, plain)).toBe(true);
+    expect(samePerson(decomposed, plain)).toBe(true);
+    expect(samePerson(ivan({ passportNo: '', surname: 'Šašić', givenNames: 'Marko  Ivan' }), ivan({ passportNo: '', surname: 'SASIC', givenNames: ' marko\u00a0ivan ' }))).toBe(true);
+    expect(samePerson(ivan({ passportNo: '', givenNames: 'Jean-Luc' }), ivan({ passportNo: '', givenNames: 'jean-luc' }))).toBe(true);
+  });
+  it('still tells different names apart', () => {
+    expect(samePerson(ivan({ passportNo: '', surname: 'Petrović' }), ivan({ passportNo: '', surname: 'Petrovac' }))).toBe(false);
+    expect(samePerson(ivan({ passportNo: '', surname: "O'Brien" }), ivan({ passportNo: '', surname: 'OBrien' }))).toBe(false);
   });
   it('does not take a passport number for a name, or the other way round', () => {
-    expect(personKey(crewMember({ passportNo: 'IVAN' }))).not.toBe(personKey(crewMember({ passportNo: '', givenNames: 'Ivan', surname: '', dateOfBirth: '' })));
-  });
-  it('is undefined when there is no passport number and the name or the date of birth is missing', () => {
-    expect(personKey(crewMember({ passportNo: '', givenNames: '' }))).toBeUndefined();
-    expect(personKey(crewMember({ passportNo: '', surname: ' ' }))).toBeUndefined();
-    expect(personKey(crewMember({ passportNo: '', dateOfBirth: '' }))).toBeUndefined();
+    expect(samePerson(ivan({ passportNo: 'IVAN', givenNames: '', surname: '' }), ivan({ passportNo: '', givenNames: 'Ivan', surname: '' }))).toBe(false);
   });
 });
 
@@ -184,7 +214,7 @@ describe('overlappingContract', () => {
 
   it('is nothing when the person has no other contract', () => {
     expect(overlappingContract(span('2026-06-01'), [])).toBeUndefined();
-    expect(overlappingContract(span('2026-06-01'), [crewMember({ passportNo: 'P2' })])).toBeUndefined();
+    expect(overlappingContract(span('2026-06-01'), [crewMember({ passportNo: 'P2', surname: 'Kovač' })])).toBeUndefined();
   });
   it('finds a contract of the same person that the dates run into', () => {
     expect(overlappingContract(span('2026-08-01', '2026-09-01'), [first])).toBe(first);
@@ -206,7 +236,7 @@ describe('overlappingContract', () => {
     expect(overlappingContract(span('2026-10-20', ''), [crewMember({ passportNo: 'P1', signOnDate: '2026-10-15', signOffDate: '' })])).toBeDefined();
   });
   it('never counts the contract itself, a deleted one, or another person\'s', () => {
-    const other = crewMember({ passportNo: 'P2', signOnDate: '2026-06-01' });
+    const other = crewMember({ passportNo: 'P2', surname: 'Kovač', signOnDate: '2026-06-01' });
     const gone = crewMember({ passportNo: 'P1', signOnDate: '2026-06-01', deleted: true });
     expect(overlappingContract({ ...span('2026-07-01'), id: first.id }, [first])).toBeUndefined();
     expect(overlappingContract(span('2026-07-01'), [other, gone])).toBeUndefined();
@@ -220,6 +250,17 @@ describe('overlappingContract', () => {
     const anonymous = crewMember({ passportNo: '', dateOfBirth: '', signOnDate: '2026-06-01' });
     expect(overlappingContract(span('2026-07-01', undefined, { passportNo: '', dateOfBirth: '' }), [anonymous])).toBeUndefined();
   });
+  it('still finds the person after the passport was renewed, by name and date of birth, and by the passport after a new name', () => {
+    const open = crewMember({ passportNo: 'P2', signOnDate: '2026-10-15' });
+    expect(overlappingContract(span('2026-11-01', undefined, { passportNo: 'P1' }), [open])).toBe(open); // the old passport again
+    expect(overlappingContract(span('2026-11-01', undefined, { passportNo: 'P3' }), [open])).toBe(open); // a third one
+    expect(overlappingContract(span('2026-11-01', undefined, { passportNo: 'P2', surname: 'Other', dateOfBirth: '1999-01-01' }), [open])).toBe(open);
+    expect(overlappingContract(span('2026-11-01', undefined, { passportNo: 'P3', dateOfBirth: '1999-01-01' }), [open])).toBeUndefined();
+  });
+  it('finds the person whatever the accents and case of the name', () => {
+    const open = crewMember({ passportNo: '', surname: 'PETROVIĆ', signOnDate: '2026-10-15' });
+    expect(overlappingContract(span('2026-11-01', undefined, { passportNo: '', surname: 'Petrovic' }), [open])).toBe(open);
+  });
   it('is the one that started first when several overlap', () => {
     const later = crewMember({ passportNo: 'P1', signOnDate: '2026-09-01' });
     expect(overlappingContract(span('2026-01-01'), [later, first])).toBe(first);
@@ -230,38 +271,57 @@ describe('overlappingContract', () => {
   });
 });
 
-describe('canRejoin', () => {
+describe('rejoinableIds', () => {
   const a = crewMember({ passportNo: 'P1', signOnDate: '2026-06-01', signOffDate: '2026-10-10' });
+  const can = (m: CrewMember, crew: CrewMember[]) => rejoinableIds(crew).has(m.id);
 
-  it('is true for a signed-off contract that is the only one of the person', () => {
-    expect(canRejoin(a, [a])).toBe(true);
+  it('has a signed-off contract that is the only one of the person', () => {
+    expect(can(a, [a])).toBe(true);
   });
-  it('is false for a contract that is not signed off', () => {
+  it('has no contract that is not signed off', () => {
     const open = crewMember({ passportNo: 'P1', signOffDate: undefined });
-    expect(canRejoin(open, [open])).toBe(false);
-    expect(canRejoin({ ...open, signOffDate: '' }, [open])).toBe(false);
+    expect(can(open, [open])).toBe(false);
+    expect(can({ ...open, signOffDate: '' }, [{ ...open, signOffDate: '' }])).toBe(false);
   });
-  it('is false once the person has joined again, whether or not that contract is open', () => {
+  it('has no contract once the person has joined again, whether or not that contract is open', () => {
     const b = crewMember({ passportNo: 'p1', signOnDate: '2026-10-15' });
-    expect(canRejoin(a, [a, b])).toBe(false);
-    expect(canRejoin(a, [a, { ...b, signOffDate: '2026-11-01' }])).toBe(false);
+    expect(can(a, [a, b])).toBe(false);
+    expect(can(a, [a, { ...b, signOffDate: '2026-11-01' }])).toBe(false);
   });
-  it('is true on the latest contract, once the later one is signed off', () => {
+  it('has the latest contract, once the later one is signed off', () => {
     const b = crewMember({ passportNo: 'P1', signOnDate: '2026-10-15', signOffDate: '2026-11-01' });
-    expect(canRejoin(b, [a, b])).toBe(true);
-    expect(canRejoin(a, [a, b])).toBe(false);
+    expect(can(b, [a, b])).toBe(true);
+    expect(can(a, [a, b])).toBe(false);
   });
-  it('is false when any contract of the person is open', () => {
+  it('has no contract of a person who has one open', () => {
     const open = crewMember({ passportNo: 'P1', signOnDate: '2026-01-01' });
-    expect(canRejoin(a, [open, a])).toBe(false);
+    expect(can(a, [open, a])).toBe(false);
   });
-  it('does not count deleted contracts or other people', () => {
+  it('does not count deleted contracts or other people, and never has a deleted contract', () => {
     const deletedLater = crewMember({ passportNo: 'P1', signOnDate: '2026-10-15', deleted: true });
-    const someoneElse = crewMember({ passportNo: 'P2', signOnDate: '2026-10-15' });
-    expect(canRejoin(a, [a, deletedLater, someoneElse])).toBe(true);
+    const someoneElse = crewMember({ passportNo: 'P2', surname: 'Kovač', signOnDate: '2026-10-15' });
+    expect(can(a, [a, deletedLater, someoneElse])).toBe(true);
+    expect(can(deletedLater, [a, { ...deletedLater, signOffDate: '2026-12-01' }])).toBe(false);
   });
-  it('offers a signed-off contract that cannot be linked to anyone', () => {
+  it('has a signed-off contract that cannot be linked to anyone', () => {
     const alone = crewMember({ passportNo: '', dateOfBirth: '', signOffDate: '2026-10-10' });
-    expect(canRejoin(alone, [alone])).toBe(true);
+    expect(can(alone, [alone])).toBe(true);
+  });
+  it('still sees the person after the passport was renewed on the later contract', () => {
+    const b = crewMember({ passportNo: 'P2', signOnDate: '2026-10-15' }); // re-joined, then the passport was renewed
+    expect(can(a, [a, b])).toBe(false);
+    const signedOff = { ...b, signOffDate: '2026-11-01' };
+    expect(can(a, [a, signedOff])).toBe(false);
+    expect(can(signedOff, [a, signedOff])).toBe(true);
+  });
+  it('links through a passport added later, and through the name when the passports differ', () => {
+    const later = crewMember({ passportNo: '', signOnDate: '2026-10-15' });
+    expect(can(a, [a, later])).toBe(false);
+    expect(can(a, [a, crewMember({ passportNo: 'P3', signOnDate: '2026-10-15', surname: 'Kovač' })])).toBe(true);
+  });
+  it('is one set for the whole crew', () => {
+    const b = crewMember({ passportNo: 'P1', signOnDate: '2026-10-15' });
+    const c = crewMember({ passportNo: 'P9', surname: 'Kovač', givenNames: 'Marko', signOnDate: '2026-01-01', signOffDate: '2026-05-01' });
+    expect([...rejoinableIds([a, b, c])]).toEqual([c.id]);
   });
 });

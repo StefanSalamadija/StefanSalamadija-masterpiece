@@ -633,7 +633,7 @@ test('crew edit: without a passport number a person is known by name and date of
   await freshApp(page); await setupShip(page);
   await addMember(page, { surname: 'PETROVIĆ', signOn: '2026-06-01' });
   await page.goto('./#/ship/crew/new');
-  await page.getByLabel('Surname').fill('petrović'); await page.getByLabel('Given names').fill('IVAN');
+  await page.getByLabel('Surname').fill('petrovic'); await page.getByLabel('Given names').fill('IVAN'); // no accent, other case
   await page.getByLabel('Rank').selectOption({ label: 'AB' });
   await page.getByLabel('Date of birth').fill('1985-01-05');
   await page.getByLabel('Sign-on date').fill('2026-08-01');
@@ -644,6 +644,44 @@ test('crew edit: without a passport number a person is known by name and date of
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(/#\/ship\/crew$/);
   expect(await storedCrew(page)).toHaveLength(2);
+});
+
+test('crew: a renewed passport does not part a person from the earlier contract', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const { first, second } = await twoContracts(page); // both with passport P 123456; A signed off, B open
+  await second.getByRole('button', { name: 'Edit' }).click();
+  await page.getByLabel('Passport no.').fill('Q 777888');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  await expect(second).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Re-join' })).toHaveCount(0); // A is still followed by B, by name and date of birth
+
+  const message = "This overlaps Ivan PETROVIĆ's contract from 2026-10-15 (still onboard).";
+  await page.goto('./#/ship/crew/new');
+  await page.getByLabel('Surname').fill('PETROVIĆ'); await page.getByLabel('Given names').fill('Ivan');
+  await page.getByLabel('Rank').selectOption({ label: 'AB' });
+  await page.getByLabel('Date of birth').fill('1985-01-05');
+  await page.getByLabel('Passport no.').fill('P 123456'); // the old passport: it matches A, and B by name
+  await page.getByLabel('Sign-on date').fill('2026-11-01');
+  await expect(page.getByRole('alert')).toHaveText(message);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew\/new$/);
+
+  await page.getByLabel('Surname').fill('SOMEONE'); await page.getByLabel('Given names').fill('Else'); // the new passport alone
+  await page.getByLabel('Date of birth').fill('1999-09-09');
+  await page.getByLabel('Passport no.').fill('q777888');
+  await expect(page.getByRole('alert')).toHaveText(message);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew\/new$/);
+  expect(await storedCrew(page)).toHaveLength(2);
+
+  await page.getByLabel('Passport no.').fill('Z 000111'); // nothing links them now
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await page.goto('./#/ship/crew');
+  await signOff(page, second, '2026-11-01');
+  await expect(second.getByRole('button', { name: 'Re-join' })).toHaveCount(1); // only the latest contract
+  await expect(first.getByRole('button', { name: 'Re-join' })).toHaveCount(0);
 });
 
 test('crew list: in All, a contract signed off before the date shows that, not a badge', async ({ page }) => {
