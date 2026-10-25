@@ -4,6 +4,8 @@ import { ErrorToast } from '../ui/components/ErrorToast';
 import { Header } from '../ui/components/Header';
 import { Nav, ShipNav } from '../ui/components/Nav';
 import { UpdateBanner } from '../ui/components/UpdateBanner';
+import { Crew } from '../ui/screens/Crew';
+import { CrewEdit } from '../ui/screens/CrewEdit';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
 import { Particulars } from '../ui/screens/Particulars';
@@ -11,11 +13,15 @@ import { Profiles } from '../ui/screens/Profiles';
 import { AppStateProvider, useAppState } from './AppState';
 import { useRoute } from './router';
 import type { RoutePath } from './router';
+import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
 
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
   '/ship/particulars': Particulars,
+  '/ship/crew': Crew,
+  '/ship/crew/new': CrewEdit,
+  '/ship/crew/:id': CrewEdit,
   '/profiles': Profiles,
 };
 
@@ -35,9 +41,8 @@ function Shell() {
   const route = useRoute();
   const paramValues = Object.values(route.params).join('/');
 
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [route.path, paramValues]);
+  // A new screen starts at the top, but a list is returned to the place it was left at.
+  useEffect(() => scrollToWhenTallEnough(scrollMemory.positionFor(route.path)), [route.path, paramValues]);
 
   if (!activeShip) {
     return (

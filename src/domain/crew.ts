@@ -14,16 +14,26 @@ function rankOrder(m: CrewMember): number {
   return i < 0 ? RANKS.length : i;
 }
 
+/** Rank order, then sign-on date, then surname. */
+function compareCrew(a: CrewMember, b: CrewMember): number {
+  return (
+    rankOrder(a) - rankOrder(b) ||
+    (a.signOnDate < b.signOnDate ? -1 : a.signOnDate > b.signOnDate ? 1 : 0) ||
+    a.surname.localeCompare(b.surname)
+  );
+}
+
 /** Non-deleted crew onboard at `date`, as a new array sorted by rank order, then sign-on date, then surname. */
 export function onboardAt(crew: CrewMember[], date: string): CrewMember[] {
-  return crew
-    .filter((m) => !m.deleted && isOnboardAt(m, date))
-    .sort(
-      (a, b) =>
-        rankOrder(a) - rankOrder(b) ||
-        (a.signOnDate < b.signOnDate ? -1 : a.signOnDate > b.signOnDate ? 1 : 0) ||
-        a.surname.localeCompare(b.surname),
-    );
+  return crew.filter((m) => !m.deleted && isOnboardAt(m, date)).sort(compareCrew);
+}
+
+/** Which contracts the crew list shows: those onboard at a date, or every one. */
+export type CrewView = 'onboard' | 'all';
+
+/** What the crew list shows: `onboardAt(crew, asAt)`, or every non-deleted contract in the same order, whatever the date. */
+export function visibleCrew(crew: CrewMember[], view: CrewView, asAt: string): CrewMember[] {
+  return view === 'onboard' ? onboardAt(crew, asAt) : crew.filter((m) => !m.deleted).sort(compareCrew);
 }
 
 export function fullName(m: Pick<CrewMember, 'givenNames' | 'surname'>): string {

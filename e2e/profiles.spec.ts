@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, holdWrites, releaseWrites, setupShip } from './helpers';
 
 const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
@@ -43,57 +43,6 @@ function storedShips(page: Page): Promise<{ particulars: Record<string, unknown>
         };
       }),
   );
-}
-
-type TestHooks = { restoreWrites?: () => void; releaseWrites?: () => void };
-
-/** From now on every write fails the way a full disk does, until `allowWrites`. */
-function failWrites(page: Page): Promise<void> {
-  return page.evaluate(() => {
-    const original = IDBObjectStore.prototype.put;
-    (window as unknown as TestHooks).restoreWrites = () => {
-      IDBObjectStore.prototype.put = original;
-    };
-    IDBObjectStore.prototype.put = () => {
-      throw new DOMException('The disk is full.', 'QuotaExceededError');
-    };
-  });
-}
-
-function allowWrites(page: Page): Promise<void> {
-  return page.evaluate(() => (window as unknown as TestHooks).restoreWrites?.());
-}
-
-/** A second connection keeps a write transaction on the ship tables open, so the app's own writes have to wait for `releaseWrites`. */
-function holdWrites(page: Page): Promise<void> {
-  return page.evaluate(
-    () =>
-      new Promise<void>((started, failed) => {
-        let hold = true;
-        (window as unknown as TestHooks).releaseWrites = () => {
-          hold = false;
-        };
-        const open = indexedDB.open('masterpiece');
-        open.onerror = () => failed(open.error);
-        open.onsuccess = () => {
-          const db = open.result;
-          const tx = db.transaction(['ships', 'clockChanges', 'settings'], 'readwrite');
-          tx.oncomplete = () => db.close();
-          const store = tx.objectStore('settings');
-          const keepOpen = (): void => {
-            if (hold) store.get('device').onsuccess = keepOpen;
-          };
-          store.get('device').onsuccess = () => {
-            started();
-            keepOpen();
-          };
-        };
-      }),
-  );
-}
-
-function releaseWrites(page: Page): Promise<void> {
-  return page.evaluate(() => (window as unknown as TestHooks).releaseWrites?.());
 }
 
 test('particulars validation and save', async ({ page }) => {

@@ -4,12 +4,16 @@ import './ui/print.css';
 import { render } from 'preact';
 import { App } from './app/App';
 import { reportError } from './app/errors';
+import { rememberPlaceOnLeaving, scrollMemory } from './app/scrollMemory';
 import './app/swUpdate';
 import { getDb } from './db/schema';
 import { getSettings } from './db/settings';
 import { applyTheme } from './ui/theme';
 
 window.addEventListener('unhandledrejection', (event) => reportError(event.reason));
+
+// Before the router exists, so that this is the first to hear of a screen change (see `rememberPlaceOnLeaving`).
+rememberPlaceOnLeaving(scrollMemory);
 
 // index.html has already put the mirrored theme on <html> for the first paint. This reads the real setting from IndexedDB
 // before the first render and corrects the mirror (and the page) if they differ.

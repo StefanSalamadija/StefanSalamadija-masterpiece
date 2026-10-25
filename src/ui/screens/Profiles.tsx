@@ -1,8 +1,7 @@
 import type { ComponentChildren, RefObject } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
-import { describeError, reportError } from '../../app/errors';
-import type { ErrorNotice } from '../../app/errors';
+import { reportError } from '../../app/errors';
 import { updateRecord } from '../../db/records';
 import { updateSettings } from '../../db/settings';
 import { copyShip, createShip, deleteShip, deleteSummary, listShips } from '../../db/ships';
@@ -13,31 +12,10 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { OffsetSelect } from '../components/OffsetSelect';
 import { SHIP_NAME_REQUIRED } from '../messages';
+import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
 
 const NAME_REQUIRED: FieldError = { field: 'name', severity: 'error', message: SHIP_NAME_REQUIRED };
-
-/**
- * Runs a dialog's action. `busy` while it runs. A failure is kept in `failure`, for the dialog to show, and the dialog
- * stays open with what was typed; on success the action closes the dialog itself.
- */
-function useDialogAction(): { busy: boolean; failure: ErrorNotice | undefined; run: (action: () => Promise<void>) => Promise<void> } {
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<ErrorNotice>();
-
-  async function run(action: () => Promise<void>): Promise<void> {
-    setBusy(true);
-    setFailure(undefined);
-    try {
-      await action();
-    } catch (err) {
-      setFailure(describeError(err));
-      setBusy(false);
-    }
-  }
-
-  return { busy, failure, run };
-}
 
 /** What every dialog of this screen is given. */
 interface DialogProps {

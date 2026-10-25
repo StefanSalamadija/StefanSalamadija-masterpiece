@@ -6,6 +6,7 @@ import {
   normalisePassport,
   onboardAt,
   rejoinDraft,
+  visibleCrew,
 } from './crew';
 import type { CrewMember } from './types';
 
@@ -125,5 +126,26 @@ describe('rejoinDraft', () => {
     for (const key of ['id', 'createdAt', 'updatedAt', 'updatedBy', 'deleted', 'scope', 'shipId']) {
       expect(key in r).toBe(false);
     }
+  });
+});
+
+describe('visibleCrew', () => {
+  const ab = crewMember({ surname: 'B', rank: 'ab', signOnDate: '2026-03-01' });
+  const master = crewMember({ surname: 'A', rank: 'master', signOnDate: '2026-05-01' });
+  const off = crewMember({ surname: 'Off', rank: 'ab', signOnDate: '2025-01-01', signOffDate: '2025-06-01' });
+  const gone = crewMember({ surname: 'Gone', deleted: true });
+
+  it('Onboard is the crew onboard at the date', () => {
+    expect(visibleCrew([off, ab, gone, master], 'onboard', '2026-10-25')).toEqual([master, ab]);
+    expect(visibleCrew([off, ab, gone, master], 'onboard', '2025-03-01')).toEqual([off]);
+  });
+  it('All is every record that is not deleted, in the same order, whatever the date', () => {
+    expect(visibleCrew([off, ab, gone, master], 'all', '2020-01-01')).toEqual([master, off, ab]);
+    expect(visibleCrew([off, ab, gone, master], 'all', '2030-01-01')).toEqual([master, off, ab]);
+  });
+  it('returns a new array and leaves the input order alone', () => {
+    const input = [ab, master];
+    expect(visibleCrew(input, 'all', '2026-10-25')).not.toBe(input);
+    expect(input).toEqual([ab, master]);
   });
 });
