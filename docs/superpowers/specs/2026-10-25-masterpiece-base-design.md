@@ -231,7 +231,7 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 - The header shows the ship's name, the ship's clock and the theme button.
 - **Logo (user-chosen): "M on the sea at sunrise" (logo v2).**
   - A navy "M" stands on the waves, with the horizon behind it.
-  - The upper part of the tile is a bright, sunlit sky (warm white to light blue), with a small sun between the two peaks of the M. Below the horizon is blue sea, and dark navy waves sit under the M's feet.
+  - The upper part of the tile is a bright sunrise sky (saturated sunrise yellow fading to light blue), with a small sun between the two peaks of the M. Below the horizon is blue sea, and dark navy waves sit under the M's feet.
   - The Night version uses a dark sky, a pale moon, a teal horizon line and a light "M".
   - It is used for the home-screen icon, the Android launch splash, the header brand and print footers. Print uses a one-colour line version.
 - **Welcome page (first start, approved as mocked up):**

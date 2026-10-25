@@ -1009,8 +1009,8 @@ expect(await verifyAssertion({ ...good, clientDataJSON: enc({ type: 'webauthn.cr
     - Theme button: `aria-label` is `Theme: Day`, `Theme: Night` or `Theme: High contrast`. It cycles day → night → contrast and sets `<html data-theme>` to `day`, `night` or `contrast`.
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
     - **Logo (user-chosen: logo v2, "M on the sea at sunrise")** in `LogoMark.tsx` (`{ size: number; mode: 'day' | 'night' }`). It is inline SVG with viewBox `0 0 100 100`, clipped to a rounded tile `rect width=100 height=100 rx=22`. Copy the geometry exactly from the mockup artboard "Logo v2" (https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x):
-      - **Sky:** `rect height=62`, linear gradient top→bottom `#FFF1C2` → `#D6EAFF` (0.55) → `#9CCBFF`, plus a radial glow (cx 0.5, cy 0.2, r 0.5, white → `#FFF8E1` transparent).
-      - **Sun:** `circle cx=50 cy=20 r=7.5 fill=#FFFDF2`.
+      - **Sky (sunrise, user decision):** `rect height=62`, linear gradient top→bottom `#FFD23F` → `#FFE9A8` (0.35) → `#D6EAFF` (0.7) → `#9CCBFF`, plus a radial glow (cx 0.5, cy 0.2, r 0.5, `#FFF7D1` → `#FFE27A` at 0.85 opacity → transparent).
+      - **Sun:** `circle cx=50 cy=20 r=7.5 fill=#FFF4C2`.
       - **Far sea:** `rect y=60 height=40 fill=#2E6DB4`.
       - **Horizon:** `path d="M0 60 H100"`, white at 0.85 opacity, width 0.8.
       - **M:** `path d="M24 77 L24 32 L50 57 L76 32 L76 77"`, no fill, stroke `#0B2545`, width 10, round joins and caps. Underneath it, a white halo of the same path at width 15, 0.9 opacity.
