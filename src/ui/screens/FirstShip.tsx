@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { createShip } from '../../db/ships';
-import { deviceOffsetMinutes, formatOffset, OFFSET_OPTIONS } from '../../domain/shipTime';
+import { deviceOffsetMinutes } from '../../domain/shipTime';
 import { LogoMark } from '../components/LogoMark';
+import { OffsetSelect } from '../components/OffsetSelect';
 import { logoMode } from '../theme';
 
 /** The welcome screen, shown full screen while there is no ship: create the first ship, or import a backup. */
@@ -62,14 +63,7 @@ export function FirstShip() {
               />
               {nameError && <p id="ship-name-error" class="field-error" role="alert">{nameError}</p>}
             </div>
-            <div class="field">
-              <label for="ship-offset">Ship's time (UTC offset)</label>
-              <select id="ship-offset" value={offset} onChange={(event) => setOffset(Number(event.currentTarget.value))}>
-                {OFFSET_OPTIONS.map((minutes) => (
-                  <option key={minutes} value={minutes}>{formatOffset(minutes)}</option>
-                ))}
-              </select>
-            </div>
+            <OffsetSelect value={offset} onChange={setOffset} />
             <button type="submit" class="btn btn-primary btn-large" disabled={busy}>Create ship</button>
           </form>
         ) : (

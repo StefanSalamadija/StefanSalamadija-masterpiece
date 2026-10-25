@@ -6,6 +6,8 @@ import { Nav, ShipNav } from '../ui/components/Nav';
 import { UpdateBanner } from '../ui/components/UpdateBanner';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
+import { Particulars } from '../ui/screens/Particulars';
+import { Profiles } from '../ui/screens/Profiles';
 import { AppStateProvider, useAppState } from './AppState';
 import { useRoute } from './router';
 import type { RoutePath } from './router';
@@ -13,6 +15,8 @@ import type { RoutePath } from './router';
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
+  '/ship/particulars': Particulars,
+  '/profiles': Profiles,
 };
 
 /** A placeholder for the import screen, which comes later. It is reachable before any ship exists. */

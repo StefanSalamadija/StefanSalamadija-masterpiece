@@ -398,6 +398,11 @@ select {
   color: var(--on-accent);
 }
 
+.btn-danger {
+  background: var(--red);
+  color: var(--on-red);
+}
+
 .btn-outline {
   border-color: var(--muted);
   background: transparent;
@@ -447,6 +452,15 @@ select {
   font-size: 13px;
   font-weight: 500;
   color: var(--red);
+}
+
+/* A warning is advice, not a blocker: the text stays in the normal colour with an amber edge, so it reads in every theme. */
+.field-warning {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 4px solid var(--amber);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 /* ---- Welcome screen ---- */
@@ -603,4 +617,197 @@ select {
   background: transparent;
   color: inherit;
   cursor: pointer;
+}
+
+/* ---- Screens: headings, cards, forms ---- */
+
+.screen > h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+.screen-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.screen-head h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.card {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+:root[data-theme='contrast'] .card {
+  border-width: 2px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ship-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ship-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ship-row-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ship-row-name {
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ship-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.particulars-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.form-section h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.save-status {
+  margin: 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.helper-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--target);
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* ---- Dialogs ---- */
+
+.dialog {
+  width: calc(100% - 32px);
+  max-width: 440px;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+
+:root[data-theme='contrast'] .dialog {
+  border: 3px solid var(--text);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 16px 16px;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dialog-body p {
+  margin: 0;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
