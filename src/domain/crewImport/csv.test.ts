@@ -10,6 +10,23 @@ describe('parseCsv', () => {
     expect(parseCsv('Surname;Rank\nPetrović;Master')).toEqual([['Surname', 'Rank'], ['Petrović', 'Master']]);
   });
 
+  it('looks past a title line when choosing the delimiter', () => {
+    expect(parseCsv('CREW LIST\nSurname;Rank;Nationality\nPetrović;Master;Serbian'))
+      .toEqual([['CREW LIST'], ['Surname', 'Rank', 'Nationality'], ['Petrović', 'Master', 'Serbian']]);
+    expect(parseCsv('\n\nMV OCEAN STAR, IMO 1\nSurname;Rank;Nationality')).toEqual([[''], [''], ['MV OCEAN STAR, IMO 1'], ['Surname', 'Rank', 'Nationality']]);
+  });
+
+  it('chooses the delimiter from the first 10 non-empty lines only', () => {
+    const titles = Array.from({ length: 10 }, (_, i) => `title, ${i}, x`);
+    const lateRow = Array.from({ length: 30 }, () => 'x').join(';');
+    expect(parseCsv([...titles, lateRow].join('\n'))[10]).toEqual([lateRow]);
+  });
+
+  it('uses , when commas and semicolons tie or there are neither', () => {
+    expect(parseCsv('a;b,c')).toEqual([['a;b', 'c']]);
+    expect(parseCsv('single\ncolumn')).toEqual([['single'], ['column']]);
+  });
+
   it('keeps commas inside values of a semicolon file', () => {
     expect(parseCsv('Name;Rank\n"Smith, John";Master')).toEqual([['Name', 'Rank'], ['Smith, John', 'Master']]);
   });
