@@ -42,6 +42,8 @@ At sign-off they can give the relief a ship-only handover file.
 
 ### 4.1 Screens
 
+- **First start (no ships yet):** *Create your first ship* (name and ship's time offset), or *Import a backup* for a new device or a relief's handover file.
+- **Errors:** a storage-full or unexpected error shows a clear message, with *Export backup* offered where relevant.
 - **Header (every screen):**
   - Active ship name.
   - Ship's time with UTC offset (for example `14:32 LT (UTC+03:00)`).
@@ -113,7 +115,12 @@ The fields are exposed through one lookup function, `resolveField(name, { asAt? 
 - A crew member counts as onboard at D when `signOnDate ≤ D` and (`signOffDate` is empty or `signOffDate ≥ D`).
 - The day of sign-on and the day of sign-off both count as onboard.
 
-**Import from Excel/CSV** (.xlsx, .xls, .csv)
+**Import from Excel/CSV** (.xlsx, .csv)
+- Old-format **.xls** files are not read directly. The app explains how to re-save them as .xlsx in Excel.
+- CSV files may use commas or semicolons (European Excel exports use semicolons).
+- If a crew list has a single full-name column, it is split into surname and given names: "SURNAME, Given" (comma), or leading words in capitals taken as the surname.
+- A *sign-on date for rows without one* is applied to rows that lack it (default: today, ship's time).
+
 1. Pick the file, then pick the sheet. The header row is detected automatically and can be changed.
 2. **Column mapping.** Masterpiece guesses from the header names (for example *Family name / Surname*, *Passport No*, *D.O.B.*), and the user confirms or corrects.
    The user also picks the date format (day-first by default: DD.MM.YYYY, DD/MM/YYYY, DD-MMM-YYYY; or YYYY-MM-DD). Excel date serials are handled automatically.
@@ -248,7 +255,8 @@ Printing always uses a black-on-white print layout, whatever the theme.
 ## 5. Technical design
 
 - **Stack:** TypeScript, Preact, Vite. PWA via `vite-plugin-pwa` (Workbox precache of all assets for full offline use). IndexedDB via Dexie. Plain CSS with variables and three theme sets, mobile-first, usable one-handed on a phone.
-- **Spreadsheet reading:** SheetJS Community Edition, installed from the official SheetJS CDN tarball (not the outdated npm-registry version), for .xlsx/.xls/.csv crew import.
+- **Spreadsheet reading:** `read-excel-file` for .xlsx, and a small built-in parser for .csv.
+  SheetJS was considered but rejected: its official download server is unreachable from the build environment, and the npm-registry copy is outdated and has known vulnerabilities.
 - **Code units:**
   - `db/`: schema, migrations, record helpers (timestamps, soft delete, scope).
   - `domain/`: pure functions, no I/O:
