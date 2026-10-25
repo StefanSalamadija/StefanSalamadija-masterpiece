@@ -40,10 +40,37 @@ describe('parseDateCell', () => {
     expect(parseDateCell(new Date(Date.UTC(1985, 0, 5, 23, 59)), 'year-first', 2026)).toBe('1985-01-05');
   });
 
-  it('accepts serial numbers from 1 to 2958465 only', () => {
-    expect(parseDateCell(1, 'day-first', 2026)).toBe('1899-12-31');
+  it('accepts serial numbers from 3653 (31 December 1909) to 2958465 only, so that a year typed as a number is no date', () => {
+    expect(parseDateCell(3653, 'day-first', 2026)).toBe('1909-12-31');
     expect(parseDateCell(2958465, 'day-first', 2026)).toBe('9999-12-31');
-    for (const v of [0, -5, 2958466, Number.NaN, Number.POSITIVE_INFINITY]) expect(parseDateCell(v, 'day-first', 2026)).toBe('invalid');
+    for (const v of [1985, 2026, 3652, 1, 0, -5, 2958466, Number.NaN, Number.POSITIVE_INFINITY]) expect(parseDateCell(v, 'day-first', 2026)).toBe('invalid');
+  });
+
+  it('accepts a trailing dot after day-first text', () => {
+    expect(parseDateCell('05.01.1985.', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('5.1.85.', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('05/01/1985.', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('05-JAN-1985.', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('05.01.1985.', 'year-first', 2026)).toBe('invalid');
+    expect(parseDateCell('31.02.1985.', 'day-first', 2026)).toBe('invalid');
+    expect(parseDateCell('05.01.1985..', 'day-first', 2026)).toBe('invalid');
+  });
+
+  it('ignores a time of day after a full date', () => {
+    expect(parseDateCell('2026-06-01 00:00', 'day-first', 2026)).toBe('2026-06-01');
+    expect(parseDateCell('2026-06-01T00:00:00', 'year-first', 2026)).toBe('2026-06-01');
+    expect(parseDateCell('2026-06-01T23:59:59.123Z', 'year-first', 2026)).toBe('2026-06-01');
+    expect(parseDateCell('2026/6/1  9:05', 'year-first', 2026)).toBe('2026-06-01');
+    expect(parseDateCell('05.01.1985 00:00', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('05.01.1985. 14:30:15', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('5-jan-85 14:30', 'day-first', 2026)).toBe('1985-01-05');
+    expect(parseDateCell('05.01.1985 00:00', 'year-first', 2026)).toBe('invalid');
+  });
+
+  it('does not accept a time that is no time, or a time with nothing to belong to', () => {
+    for (const text of ['2026-06-01 25:00', '2026-06-01 12:61', '2026-06-01 12', '2026-06-01 00:00 extra', '2026-06-01T', '00:00', '2026-02-30 00:00']) {
+      expect(parseDateCell(text, 'day-first', 2026), text).toBe('invalid');
+    }
   });
 
   it('calls impossible dates and unrecognised text invalid', () => {

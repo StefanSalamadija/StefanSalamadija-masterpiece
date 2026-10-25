@@ -1,6 +1,7 @@
 import { latestContractByPassport, normalisePassport } from '../crew';
 import type { CrewDraft, CrewField, CrewMember, DateFormat, FieldError } from '../types';
 import { validateCrewMember } from '../validation';
+import { matchHeader } from './header';
 import type { ColumnMapping } from './mapping';
 import type { Cell } from './readSpreadsheet';
 import { cellText, parseDateCell, parseRank, splitFullName } from './values';
@@ -31,16 +32,25 @@ export interface PreviewInput {
   defaultSignOnDate: string;
 }
 
-/** Every field of a draft, in the order changes are listed. */
-const FIELDS = [
-  'surname', 'givenNames', 'rank', 'rankOther', 'nationality', 'dateOfBirth', 'placeOfBirth', 'passportNo', 'passportExpiry',
-  'seamansBookNo', 'seamansBookExpiry', 'signOnDate', 'signOnPort', 'signOffDate', 'signOffPort',
-] as const satisfies readonly (keyof CrewDraft)[];
-type TextField = Exclude<(typeof FIELDS)[number], 'rank' | 'rankOther'>;
+/**
+ * Every field of a draft, in the order changes are listed. Typed as a record so that a field added to `CrewDraft` does not
+ * compile until it is listed here, and so is not left out of the merge and the changes.
+ */
+const DRAFT_FIELDS: Record<keyof CrewDraft, true> = {
+  surname: true, givenNames: true, rank: true, rankOther: true, nationality: true, dateOfBirth: true, placeOfBirth: true,
+  passportNo: true, passportExpiry: true, seamansBookNo: true, seamansBookExpiry: true, signOnDate: true, signOnPort: true,
+  signOffDate: true, signOffPort: true,
+};
+const FIELDS = Object.keys(DRAFT_FIELDS) as (keyof CrewDraft)[];
+type TextField = Exclude<keyof CrewDraft, 'rank' | 'rankOther'>;
 const TEXT_FIELDS = FIELDS.filter((f): f is TextField => f !== 'rank' && f !== 'rankOther');
+/** Numbers that are the same once spaces and case are ignored (R3). */
+const NUMBER_FIELDS: readonly (keyof CrewDraft)[] = ['passportNo', 'seamansBookNo'];
 
 const NAME_FIELDS: readonly CrewField[] = ['surname', 'givenNames', 'fullName'];
 const MIN_FILLED_COLUMNS = 2;
+/** As many recognised headers as `detectHeaderRow` asks for. */
+const MIN_REPEATED_HEADER_CELLS = 3;
 
 const isBlank = (s: string | undefined): boolean => s === undefined || s.trim() === '';
 
@@ -52,9 +62,10 @@ function cellFor(row: Cell[], mapping: ColumnMapping, field: CrewField): Cell {
 /**
  * A row with a passport number is a person. Without one it needs a name and one more value (just the name, when only
  * one column is mapped), so that a lone label in a name column, like "Total crew: 3" or a department heading, is not
- * taken for a person. Blank rows are neither.
+ * taken for a person. Blank rows are neither, and neither is a header row repeated after a page break.
  */
 function isCrewRow(row: Cell[], mapping: ColumnMapping, columns: number[]): boolean {
+  if (row.filter(cell => matchHeader(cell) !== undefined).length >= MIN_REPEATED_HEADER_CELLS) return false;
   const has = (field: CrewField): boolean => cellText(cellFor(row, mapping, field)) !== '';
   if (has('passportNo')) return true;
   const filled = columns.filter(column => cellText(row[column] ?? null) !== '').length;
@@ -98,8 +109,9 @@ function draftFromRow(row: Cell[], mapping: ColumnMapping, dateFormat: DateForma
 }
 
 /**
- * The draft as it would be saved over `match`: an empty value never overwrites what the record already has, and a
- * passport or book number that only differs in spaces or case keeps the record's formatting.
+ * A row of the file as it would be saved over `match`: an empty cell never overwrites what the record already has, and
+ * a passport or book number that only differs in spaces or case keeps the record's formatting. Only for rows read from
+ * the file: a draft edited by the user is taken as it is.
  */
 function mergeWithExisting(draft: CrewDraft, match: CrewMember): CrewDraft {
   const merged: CrewDraft = { ...draft };
@@ -123,47 +135,68 @@ function changesFrom(match: CrewMember, draft: CrewDraft): PreviewChange[] {
     if (field === 'rankOther' && draft.rank !== 'other') continue; // only the rank itself changed
     const from = match[field] ?? '';
     const to = draft[field] ?? '';
-    if (from !== to) changes.push({ field, from, to });
+    const same = NUMBER_FIELDS.includes(field) ? normalisePassport(from) === normalisePassport(to) : from === to;
+    if (!same) changes.push({ field, from, to });
   }
   return changes;
 }
 
 type Evaluation = Pick<PreviewRow, 'status' | 'draft' | 'existingId' | 'changes' | 'errors'>;
 
-/**
- * The shared rules of a preview row: a draft whose passport number is that of an existing crew member updates their
- * latest contract; any other is a new contract. `defaultSignOnDate` fills in a new contract's missing sign-on date.
- */
-function evaluate(draft: CrewDraft, existing: CrewMember[], today: string, defaultSignOnDate?: string): Evaluation {
-  const match = latestContractByPassport(existing, draft.passportNo);
-  const resolved = match ? mergeWithExisting(draft, match)
-    : defaultSignOnDate !== undefined && isBlank(draft.signOnDate) ? { ...draft, signOnDate: defaultSignOnDate }
-    : draft;
-  const errors = validateCrewMember(resolved, today);
+/** Status, errors and changes of a draft, taken as it is, against the existing record it updates (if any). */
+function evaluate(draft: CrewDraft, match: CrewMember | undefined, today: string): Evaluation {
+  const errors = validateCrewMember(draft, today);
   const status = errors.some(e => e.severity === 'error') ? 'error' : match ? 'update' : 'new';
   return {
     status,
-    draft: resolved,
+    draft,
     ...(match && { existingId: match.id }),
-    changes: match ? changesFrom(match, resolved) : [],
+    changes: match ? changesFrom(match, draft) : [],
     errors,
   };
 }
 
-/** One row per person in the sheet below the header, ready to be shown, edited and confirmed. */
+const DUPLICATE_PASSPORT: FieldError = { field: 'passportNo', message: 'Duplicate passport number in this file.', severity: 'error' };
+
+/**
+ * One row per person in the sheet below the header, ready to be shown, edited and confirmed.
+ * A row whose passport number is that of an existing crew member updates their latest contract (empty cells keep
+ * what the record has); any other is a new contract, with `defaultSignOnDate` if it has no sign-on date.
+ * A passport number that an earlier row of the file already has makes the later row an error.
+ */
 export function buildPreview(input: PreviewInput): PreviewRow[] {
   const { rows, headerRow, mapping, dateFormat, existing, currentYear, today, defaultSignOnDate } = input;
   const columns = [...new Set(Object.values(mapping).filter((column): column is number => column !== undefined))];
+  const seenPassports = new Set<string>();
   const preview: PreviewRow[] = [];
   for (let i = headerRow + 1; i < rows.length; i++) {
     if (!isCrewRow(rows[i], mapping, columns)) continue;
-    const draft = draftFromRow(rows[i], mapping, dateFormat, currentYear);
-    preview.push({ rowNumber: i + 1, skip: false, ...evaluate(draft, existing, today, defaultSignOnDate) });
+    const fromFile = draftFromRow(rows[i], mapping, dateFormat, currentYear);
+    const match = latestContractByPassport(existing, fromFile.passportNo);
+    const draft = match ? mergeWithExisting(fromFile, match)
+      : isBlank(fromFile.signOnDate) ? { ...fromFile, signOnDate: defaultSignOnDate }
+      : fromFile;
+    const row: PreviewRow = { rowNumber: i + 1, skip: false, ...evaluate(draft, match, today) };
+
+    const passport = normalisePassport(draft.passportNo);
+    if (passport !== '') {
+      if (seenPassports.has(passport)) {
+        row.status = 'error';
+        row.errors = [...row.errors, DUPLICATE_PASSPORT];
+      }
+      seenPassports.add(passport);
+    }
+    preview.push(row);
   }
   return preview;
 }
 
-/** The row again after its draft was edited: status, errors and changes follow the same rules as `buildPreview`. */
+/**
+ * The row again after its draft was edited: status, errors and changes follow the same rules as `buildPreview`, except
+ * that the draft is the user's and is kept exactly as it is, and that a duplicate passport number is not noticed
+ * (this function sees one row only).
+ */
 export function revalidateRow(row: PreviewRow, existing: CrewMember[], today: string): PreviewRow {
-  return { rowNumber: row.rowNumber, skip: row.skip, ...evaluate(row.draft, existing, today) };
+  const match = latestContractByPassport(existing, row.draft.passportNo);
+  return { rowNumber: row.rowNumber, skip: row.skip, ...evaluate(row.draft, match, today) };
 }

@@ -13,14 +13,18 @@ export function cellText(v: Cell): string {
 
 const MS_PER_DAY = 86_400_000;
 const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
-const MIN_SERIAL = 1;
+// Below 3653 (1909-12-31) a number is more likely a year or a count typed into the cell than an Excel date: 1985 would be 1905-03-19.
+const MIN_SERIAL = 3653;
 const MAX_SERIAL = 2_958_465; // 9999-12-31
 const TWO_DIGIT_YEAR_WINDOW = 15;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-const YEAR_FIRST = /^(\d{4})([-/.])(\d{1,2})\2(\d{1,2})$/;
-const DAY_FIRST = /^(\d{1,2})([-/.])(\d{1,2})\2(\d{2}|\d{4})$/;
-const DAY_FIRST_MONTH_NAME = /^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/;
+// A time of day after the date is ignored: "2026-06-01 00:00", "2026-06-01T00:00:00.000Z", "05.01.1985 14:30".
+const TIME = String.raw`(?:(?:T|\s+)(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?`;
+const YEAR_FIRST = new RegExp(String.raw`^(\d{4})([-/.])(\d{1,2})\2(\d{1,2})${TIME}$`);
+// Day-first text may end with a dot, as in "05.01.1985." (Croatian usage).
+const DAY_FIRST = new RegExp(String.raw`^(\d{1,2})([-/.])(\d{1,2})\2(\d{2}|\d{4})\.?${TIME}$`);
+const DAY_FIRST_MONTH_NAME = new RegExp(String.raw`^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})\.?${TIME}$`);
 
 function isoDate(year: number, month: number, day: number): string | 'invalid' {
   const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -41,6 +45,7 @@ function fullYear(digits: string, currentYear: number): number {
 /**
  * A spreadsheet cell as a `YYYY-MM-DD` date, `null` when the cell is empty, or `'invalid'` when it is not a real date.
  * Text that starts with the year is read in both modes; text that ends with it only in day-first mode.
+ * Numbers are Excel serials, from 3653 up.
  */
 export function parseDateCell(v: Cell, fmt: DateFormat, currentYear: number): string | null | 'invalid' {
   if (v === null) return null;

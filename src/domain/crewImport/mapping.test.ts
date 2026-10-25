@@ -20,6 +20,10 @@ describe('guessMapping', () => {
     expect(guessMapping([null, 7, '', 'Remarks', new Date(Date.UTC(1985, 0, 5)), 'Rank'])).toEqual({ rank: 5 });
     expect(guessMapping([])).toEqual({});
   });
+
+  it('treats a missing header (the row of an empty sheet) as an empty one', () => {
+    expect(guessMapping(undefined)).toEqual({});
+  });
 });
 
 describe('toSavedMapping', () => {
@@ -57,6 +61,18 @@ describe('applySavedMapping', () => {
   it('maps a saved field only once, to its first column', () => {
     const saved: CrewImportMapping = { byHeader: { prezime: 'surname' }, dateFormat: 'day-first' };
     expect(applySavedMapping(['Prezime', 'Prezime'], saved)).toEqual({ surname: 0 });
+  });
+
+  it('treats a missing header as an empty one', () => {
+    const saved: CrewImportMapping = { byHeader: { prezime: 'surname' }, dateFormat: 'day-first' };
+    expect(applySavedMapping(undefined, saved)).toEqual({});
+    expect(applySavedMapping(undefined, undefined)).toEqual({});
+  });
+
+  it('treats a saved mapping without byHeader as having no entries', () => {
+    const saved = { dateFormat: 'day-first' } as unknown as CrewImportMapping;
+    expect(applySavedMapping(['Surname', 'Rank'], saved)).toEqual({ surname: 0, rank: 1 });
+    expect(applySavedMapping(['Surname'], { byHeader: null, dateFormat: 'day-first' } as unknown as CrewImportMapping)).toEqual({ surname: 0 });
   });
 
   it('ignores saved entries that are not own properties or not crew fields', () => {
