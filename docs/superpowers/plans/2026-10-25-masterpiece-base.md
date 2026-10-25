@@ -1509,7 +1509,307 @@ test('PIN lock, lockout, unlock, relock, forgot', async ({ page }) => {
 
 ---
 
-### Task 22: GitHub Pages deploy, README and full verification
+### Task 22: Contracts and relief planning
+
+**Files:**
+- Create: `src/domain/contracts.ts`, `src/ui/screens/Reliefs.tsx`
+- Modify: `src/domain/types.ts`, `src/domain/validation.ts`, `src/domain/fieldDictionary.ts`, `src/domain/alerts.ts`, `src/ui/screens/CrewEdit.tsx`, `src/ui/screens/Particulars.tsx`, `src/app/router.ts`, `src/ui/components/Nav.tsx`, `src/ui/screens/Home.tsx`
+- Test: `src/domain/contracts.test.ts`, plus additions to `src/domain/validation.test.ts`, `src/domain/fieldDictionary.test.ts`, `src/domain/alerts.test.ts`; `e2e/reliefs.spec.ts`
+
+**Interfaces:**
+- Consumes: Task 2 (`addMonths`, `addDays`, `Band`), Task 4 (`onboardAt`, `fullName`), Task 15 `BandBadge`, Task 20 `collectAlerts`.
+- Produces in `types.ts`:
+  - `CrewMember` gains `contractMonths?: number; reliefPlannedDate?: string; reliefPlannedPort?: string`.
+  - `ShipProfile` gains `maxMonthsOnboard?: number`.
+- Produces in `contracts.ts`:
+  - `DEFAULT_MAX_MONTHS_ONBOARD = 11`.
+  - `contractEndDate(m): string | undefined`: `addMonths(signOnDate, contractMonths)` when `contractMonths > 0`.
+  - `daysOnboard(m, asAt: string): number`:
+    - 0 if `asAt < signOnDate`;
+    - otherwise the end date is the earlier of `asAt` and `signOffDate`, and the result is (end − sign-on) in days + 1.
+  - `contractBand(m, ref): Band`: `'none'` without an end date; red if end < ref; amber if end ≤ ref + 30 days; otherwise ok.
+  - `onboardLimitDate(m, maxMonths): string` = `addMonths(signOnDate, maxMonths)`.
+  - `onboardLimitBand(m, ref, maxMonths = 11): Band`: red if ref ≥ limit; amber if ref ≥ limit − 30 days; otherwise ok.
+- Validation (`validateCrewMember`):
+  - `contractMonths`, if set, must be an integer 1–24. Message: `Enter whole months between 1 and 24.`
+  - `reliefPlannedDate`, if set, must be a valid date.
+- Field dictionary: `crew.byRank.<rank>.contractEndDate` and `crew.byRank.<rank>.daysOnboard` (as at the reference date).
+- `collectAlerts` input gains `maxMonthsOnboard: number`. New alert kinds:
+  - `'contract'`: amber `Contract ends <date>`, red `Contract ended <date> — relief overdue`.
+  - `'onboardLimit'`: amber `Reaches <n>-month onboard limit <date>`, red `Over <n>-month onboard limit since <date>`.
+  - Both have `href` `#/ship/reliefs` and cover onboard crew only.
+- **UI:**
+  - CrewEdit adds `Contract length (months)`, `Planned relief date` and `Planned relief port`.
+  - Particulars adds section heading `Crew policy` with field `Maximum months onboard` (blank means 11). Error: `Enter a number from 1 to 11.`
+  - New route `#/ship/reliefs`, with ship sub-nav link `Reliefs`. It lists onboard crew (as at ship's today), sorted by contract end ascending, with no-contract crew last.
+  - Each row shows rank, full name, `Onboard <n> days`, then `Contract ends <date>` or `No contract length`, then `Relief <date> <port>` when planned.
+  - Badges: contract `Relief due soon` / `Relief overdue`; limit `Near onboard limit` / `Onboard limit reached` (rendered with `data-band`).
+  - Home shows the new alerts.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+const m = crew({ signOnDate: '2026-06-01', contractMonths: 6 });
+expect(contractEndDate(m)).toBe('2026-12-01');
+expect(contractEndDate({ ...m, contractMonths: undefined })).toBeUndefined();
+expect(daysOnboard(m, '2026-06-01')).toBe(1);
+expect(daysOnboard(m, '2026-10-25')).toBe(147);
+expect(daysOnboard({ ...m, signOffDate: '2026-07-01' }, '2026-10-25')).toBe(31);
+expect(daysOnboard(m, '2026-05-01')).toBe(0);
+expect(contractBand(m, '2026-11-01')).toBe('amber');   // end = ref + 30
+expect(contractBand(m, '2026-10-31')).toBe('ok');
+expect(contractBand(m, '2026-12-01')).toBe('amber');   // ends today
+expect(contractBand(m, '2026-12-02')).toBe('red');
+const j = crew({ signOnDate: '2026-01-01' });          // limit 2026-12-01 at 11 months
+expect(onboardLimitBand(j, '2026-12-01', 11)).toBe('red');
+expect(onboardLimitBand(j, '2026-11-01', 11)).toBe('amber');
+expect(onboardLimitBand(j, '2026-10-31', 11)).toBe('ok');
+expect(onboardLimitBand(j, '2026-10-01', 9)).toBe('red');  // limit 2026-10-01
+expect(validateCrewMember({ ...draft, contractMonths: 25 }, '2026-10-25')[0]).toMatchObject({ field: 'contractMonths', message: 'Enter whole months between 1 and 24.' });
+expect(resolveField('crew.byRank.master.contractEndDate', ctxWithContract)).toBe('2026-12-01');
+expect(resolveField('crew.byRank.master.daysOnboard', ctxWithContract, { asAt: '2026-10-25' })).toBe(147);
+const al = collectAlerts({ today: '2026-11-15', maxMonthsOnboard: 11, certificates: [], crew: [m] });
+expect(al).toContainEqual(expect.objectContaining({ kind: 'contract', band: 'amber', detail: 'Contract ends 2026-12-01', href: '#/ship/reliefs' }));
+```
+
+```ts
+// e2e/reliefs.spec.ts — clock 2026-10-25T09:00:00Z
+test('reliefs view shows overdue relief and onboard limit', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  // add crew PETROVIĆ Ivan, Master, sign-on 2025-11-20, Contract length (months) 9, Planned relief date 2026-11-05, port Santos
+  await page.goto('./#/ship/reliefs');
+  const row = page.getByRole('listitem').filter({ hasText: 'Ivan PETROVIĆ' });
+  await expect(row).toContainText('Contract ends 2026-08-20');
+  await expect(row.getByText('Relief overdue')).toBeVisible();
+  await expect(row.getByText('Onboard limit reached')).toBeVisible();  // 2025-11-20 + 11 months = 2026-10-20
+  await expect(row).toContainText('Relief 2026-11-05 Santos');
+  await page.goto('./#/ship/particulars'); await page.getByLabel('Maximum months onboard').fill('12');
+  await expect(page.getByRole('alert')).toHaveText('Enter a number from 1 to 11.');
+  await expectNoHorizontalScroll(page);
+});
+```
+
+Spell out the commented step as real Playwright calls, using the Task 15 labels plus the new ones.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/domain && npx playwright test e2e/reliefs.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the domain module, the type and validation additions, the dictionary and alert additions, and the UI.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test e2e/reliefs.spec.ts e2e/crew.spec.ts e2e/home.spec.ts && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: contracts, days onboard and relief planning"`
+
+---
+
+### Task 23: Crew certificate register
+
+**Files:**
+- Create: `src/domain/crewDocs.ts`, `src/ui/screens/CrewDocumentEdit.tsx`, `src/ui/screens/Expiring.tsx`
+- Modify:
+  - Domain: `src/domain/types.ts`, `src/domain/catalogues.ts`, `src/domain/fieldDictionary.ts`, `src/domain/alerts.ts`
+  - Database and backup: `src/db/schema.ts`, `src/db/records.ts`, `src/backup/envelope.ts`
+  - Screens: `src/ui/screens/CrewEdit.tsx`, `src/ui/screens/Crew.tsx`
+  - Shell: `src/app/router.ts`, `src/ui/components/Nav.tsx`
+- Test: `src/domain/crewDocs.test.ts`, `src/db/migrationV2.test.ts`, plus additions to `src/backup/envelope.test.ts` and `src/domain/fieldDictionary.test.ts`; `e2e/crewDocs.spec.ts`
+
+**Interfaces:**
+- Consumes: Task 2 (`expiryBand`, `crewDocBand`, `worstBand`), Task 4 (`onboardAt`, `fullName`, `rejoinDraft`), Task 9 (`createRecord`, `softDelete`, `listForShip`), Task 10 (`snapshotInUpgrade`), Task 15 (`BandBadge`, the Re-join and Delete flows), Task 18 (active voyage).
+- Produces in `types.ts`:
+  - `type CrewDocType = 'coc' | 'endorsement' | 'gmdss' | 'medical' | 'yellowFever' | 'bst' | 'aff' | 'pscrb' | 'frb' | 'mfa' | 'medicalCare' | 'securityAwareness' | 'dsd' | 'sso' | 'ecdis' | 'brm' | 'erm' | 'highVoltage' | 'usVisa' | 'schengenVisa' | 'other'`.
+  - `interface CrewDocument extends BaseRecord { shipId: string; crewId: string; type: CrewDocType; typeOther?: string; grade: string; number: string; issuedBy: string; issueDate: string; expiryDate?: string; remarks: string }`.
+  - `TableName` adds `'crewDocuments'`, which is appended to `TABLE_NAMES` (the generic merge, backup and snapshot code picks it up).
+- Produces in `catalogues.ts`: `CREW_DOC_TYPES: readonly { key: CrewDocType; label: string; group: string; graded: boolean }[]` in spec §4.14 order. Labels:
+  - Competency: `Certificate of Competency (CoC)`, `Flag endorsement`, `GMDSS certificate`
+  - Health: `Medical fitness certificate`, `Yellow fever certificate`
+  - STCW courses: `Basic safety training`, `Advanced fire fighting`, `Survival craft and rescue boats`, `Fast rescue boats`, `Medical first aid`, `Medical care`, `Security awareness`, `Designated security duties`, `Ship security officer`, `ECDIS`, `Bridge resource management`, `Engine-room resource management`, `High voltage`
+  - Visas: `US C1/D visa`, `Schengen visa`
+  - `Other`
+  - `graded` is true for coc, endorsement and gmdss.
+- Produces in `crewDocs.ts`:
+  - `docLabel(d): string`.
+  - `docBand(d, ref): Band`: `expiryBand(d.expiryDate, ref, { days: 90 })`.
+  - `crewMemberBand(m: CrewMember, docs: CrewDocument[], ref): Band`: the worst of `crewDocBand(m, ref)` and the `docBand` of each non-deleted doc with `crewId === m.id`.
+  - `carryOverDocuments(docs, fromCrewId, signOnDate): Omit<CrewDocument, keyof BaseRecord | 'crewId'>[]`: non-deleted docs of `fromCrewId` with no expiry or `expiryDate ≥ signOnDate`.
+  - `interface ExpiringItem { crewId: string; name: string; rank: string; what: string; expiryDate: string; band: Band }`.
+  - `expiringBefore(input: { crew: CrewMember[]; docs: CrewDocument[]; today: string; until: string }): ExpiringItem[]`:
+    - Covers crew onboard at `today`: passport (`what: 'Passport'`), seaman's book (`"Seaman's book"`) and each doc (`docLabel`).
+    - Includes items with `expiryDate ≤ until`, sorted by expiry date ascending, then name.
+- **Database:** `MasterpieceDB` adds `version(2).stores({ crewDocuments: 'id, shipId, crewId' }).upgrade(tx => snapshotInUpgrade(tx))`. Every version-1 table stays the same.
+- **Backup compatibility:**
+  - `openBackup` requires the five original tables. Tables added later (`crewDocuments`) default to `[]` when absent.
+  - The envelope version stays 1.
+- **Cascades:**
+  - Crew delete (Task 15) also soft-deletes the member's documents.
+  - Re-join (Task 15) creates `carryOverDocuments` copies with the new `crewId`.
+  - `deleteShip` covers `crewDocuments` by `shipId`.
+- **Field dictionary:** `crew.byRank.<rank>.doc.<type>.<field>`, where field is number, grade, issuedBy, issueDate or expiryDate. It reads that crew member's latest non-deleted doc of that type, by `issueDate`, then `createdAt`.
+- **Alerts:** onboard crew's docs. Title is the full name. Detail is `<label> expires <date>` (amber) or `<label> expired <date>` (red). `href` is `#/ship/crew/<crewId>`.
+- **UI:**
+  - CrewEdit (existing member) gains section heading `Documents`: rows show label, number, expiry and BandBadge (`kind: 'crew'`), plus button `Add document`.
+  - The document edit route is `#/ship/crew/:id/documents/new` or `…/documents/:docId`. Labels:
+    - `Document` (select, grouped);
+    - `Document name` (Other only);
+    - `Grade / capacity` (graded types only);
+    - `Number`, `Issued by`, `Issue date`, `Expiry date`, `Remarks`;
+    - buttons `Save` and `Delete`.
+    - Validation: expiry before issue gives `Expiry date can't be before the issue date.`
+  - The crew list badge uses `crewMemberBand`.
+  - New route `#/ship/expiring`, with sub-nav link `Expiring`:
+    - heading `Expiring before next port`;
+    - with an active voyage that has an ETA: text `Next port <port>, ETA <date>`, and `until` = the ETA date;
+    - otherwise: text `No next port ETA set — showing the next 90 days.`, and `until` = today + 90;
+    - rows: rank, name, what, expiry and badge.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+// crewDocs.test.ts — ref '2026-10-25'
+const med = doc({ crewId: 'c1', type: 'medical', expiryDate: '2027-01-01' });
+const bst = doc({ crewId: 'c1', type: 'bst' });                       // no expiry
+const visa = doc({ crewId: 'c1', type: 'usVisa', expiryDate: '2026-09-01' });
+const gone = doc({ crewId: 'c1', type: 'ecdis', deleted: true });
+expect(carryOverDocuments([med, bst, visa, gone], 'c1', '2026-10-20').map(d => d.type)).toEqual(['medical', 'bst']);
+expect(docBand(doc({ expiryDate: '2027-01-23' }), '2026-10-25')).toBe('amber'); // +90 inclusive
+expect(docBand(doc({ expiryDate: '2027-01-24' }), '2026-10-25')).toBe('ok');
+expect(crewMemberBand(crew({ id: 'c1', passportExpiry: '2030-01-01', seamansBookExpiry: '2030-01-01' }), [med], '2026-10-25')).toBe('amber');
+expect(crewMemberBand(crew({ id: 'c1', passportExpiry: '2030-01-01', seamansBookExpiry: '2030-01-01' }), [visa], '2026-10-25')).toBe('red');
+const items = expiringBefore({ today: '2026-10-25', until: '2027-01-10',
+  crew: [crew({ id: 'c1', givenNames: 'Ivan', surname: 'PETROVIĆ', passportExpiry: '2026-12-01', seamansBookExpiry: '2030-01-01', signOnDate: '2026-06-01' })],
+  docs: [med, bst, doc({ crewId: 'c1', type: 'coc', expiryDate: '2026-11-15' })] });
+expect(items.map(i => [i.what, i.expiryDate])).toEqual([['Certificate of Competency (CoC)', '2026-11-15'], ['Passport', '2026-12-01'], ['Medical fitness certificate', '2027-01-01']]);
+// envelope.test.ts — a version-1 payload without crewDocuments still opens
+const old = await sealBackup(H, { tables: { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] } } as never, 'pw-12345678', { iterations: 1000 });
+expect((await openBackup(old, 'pw-12345678')).payload.tables.crewDocuments).toEqual([]);
+// migrationV2.test.ts — open a v1-only DB, write a ship, close; open MasterpieceDB (v2) on the same name
+expect((await listSnapshots(v2))[0]).toMatchObject({ reason: 'before-update' });
+expect((await listSnapshots(v2))[0].counts.ships).toBe(1);
+await createRecord<CrewDocument>(v2, 'crewDocuments', { shipId, crewId: 'c1', type: 'medical', grade: '', number: 'M-1', issuedBy: '', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '' });
+expect(await listForShip(v2, 'crewDocuments', shipId)).toHaveLength(1);
+// fieldDictionary.test.ts
+expect(resolveField('crew.byRank.master.doc.coc.number', ctxWithDocs)).toBe('CoC-123');
+```
+
+`migrationV2.test.ts` builds the v1 database with a local test-only Dexie subclass that declares only the version-1 stores.
+
+```ts
+// e2e/crewDocs.spec.ts — clock 2026-10-25T09:00:00Z
+test('documents: warning, expiring before next port, carry-over on re-join', async ({ page }) => {
+  // set up a ship, add crew PETROVIĆ Ivan (Master, sign-on 2026-06-01, passport and SB expiry 2030-01-01)
+  // on his edit screen: Add document → Document 'Medical fitness certificate', Number 'M-1', Expiry date 2026-12-24 → Save
+  // crew list row shows 'Expires soon'
+  // Voyage: Next port 'Rotterdam', ETA (local) 2027-01-05T08:00 → Save
+  // #/ship/expiring shows 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
+  // Sign off 2026-10-26 Santos; set As at 2026-10-26; Re-join sign-on 2026-11-01 Rotterdam → the new contract's Documents section lists 'Medical fitness certificate'
+  // expectNoHorizontalScroll on the Expiring screen
+});
+```
+
+Spell out the commented steps as Playwright calls with the labels above.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src && npx playwright test e2e/crewDocs.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the types, catalogue, domain module, database v2, envelope compatibility, cascades, dictionary, alerts and UI.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test && npm run typecheck`. Expected: PASS. The full e2e suite is needed because the database version changed.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: crew certificate register with expiry warnings"`
+
+---
+
+### Task 24: Crew list print and Excel export
+
+**Files:**
+- Create: `src/domain/crewList.ts`, `src/ui/screens/CrewListPrint.tsx`
+- Modify: `src/domain/types.ts`, `src/domain/dates.ts`, `src/backup/share.ts`, `src/backup/fileName.ts`, `src/ui/screens/Crew.tsx`, `src/app/router.ts`, `src/ui/print.css`
+- Test: `src/domain/crewList.test.ts`, plus an addition to `src/domain/dates.test.ts`; `e2e/crewListPrint.spec.ts`
+
+**Interfaces:**
+- Consumes:
+  - Task 4: `onboardAt`, `fullName`.
+  - Task 2: `rankLabel`.
+  - Task 22: `contractEndDate`.
+  - Task 23: the CrewDocument with type `coc`, latest by `issueDate`.
+  - Task 11: `shareOrDownload`, `backupFileName`'s slug rule.
+  - Task 5: `readSpreadsheet`, which is used in tests.
+- Produces:
+  - `ShipProfile` gains `crewListColumns?: CrewListColumn[]`.
+  - `formatDisplayDate(iso: string): string` in `dates.ts`: `'1985-01-05'` → `'05-JAN-1985'`, and `''` → `''`.
+  - `slugify(s: string): string`, exported from `fileName.ts` and reused by `backupFileName`.
+  - `shareOrDownload(fileName: string, data: string | Blob)`, widened from `text: string`.
+  - `type CrewListColumn = 'no' | 'surname' | 'givenNames' | 'rank' | 'nationality' | 'dateOfBirth' | 'placeOfBirth' | 'passportNo' | 'passportExpiry' | 'seamansBookNo' | 'seamansBookExpiry' | 'signOnDate' | 'signOnPort' | 'cocNumber' | 'contractEnd'`.
+  - `CREW_LIST_COLUMNS: readonly { key: CrewListColumn; label: string; byDefault: boolean }[]`, in the type's order, with labels `No.`, `Surname`, `Given names`, `Rank`, `Nationality`, `Date of birth`, `Place of birth`, `Passport no.`, `Passport expiry`, `Seaman's book no.`, `Seaman's book expiry`, `Sign-on date`, `Sign-on port`, `CoC no.`, `Contract end`. `byDefault` is true for the first 9 and for signOnDate and signOnPort.
+  - `buildCrewList(input: { crew: CrewMember[]; docs: CrewDocument[]; columns: CrewListColumn[]; asAt: string; filter: 'onboard' | 'all' }): { headers: string[]; rows: string[][] }`:
+    - Rows come in `onboardAt` order (for `all`, the same sort applied to every non-deleted record).
+    - Columns follow `CREW_LIST_COLUMNS` order whatever order `columns` lists them in.
+    - `No.` is 1…n; dates use `formatDisplayDate`; rank uses `rankLabel`.
+  - `crewListWorkbook(input: { ship: ShipProfile; port: string; date: string; table: { headers: string[]; rows: string[][] } }): ArrayBuffer`. One sheet named `Crew list`, with these rows:
+    1. `['CREW LIST']`
+    2. `['Vessel', name, 'IMO', imo]`
+    3. `['Call sign', callSign, 'Flag', flag]`
+    4. `['Port', port, 'Date', formatDisplayDate(date)]`
+    5. `[]`
+    6. headers, then the table rows
+  - `crewListFileName(shipName: string, date: string): string` = `` `crew-list-${slugify(shipName)}-${date}.xlsx` ``.
+- **UI:**
+  - The crew list gets buttons `Print crew list` and `Export to Excel`. Both open `#/ship/crew/print` carrying the current As at and filter.
+  - The print screen has an options panel (`class="no-print"`):
+    - `Port` (default: active voyage next port) and `Date` (default: As at);
+    - one checkbox per column, using the column label. Changes save to `ship.crewListColumns`;
+    - buttons `Print` (`window.print()`) and `Export to Excel` (`shareOrDownload`).
+  - The sheet (`data-testid="crew-list-sheet"`) contains:
+    - heading `CREW LIST`;
+    - lines `Vessel <name>   IMO <imo>   Call sign <cs>   Flag <flag>` and `Port <port>   Date <DD-MMM-YYYY>`;
+    - the table;
+    - `Master: <master full name or blank>` with a signature line;
+    - a box labelled `Ship's stamp`;
+    - footer `Printed with Masterpiece`.
+  - A4 landscape applies on this screen only, through a named `@page`. Print media hides `.no-print`, the header and the nav.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+expect(formatDisplayDate('1985-01-05')).toBe('05-JAN-1985');
+expect(formatDisplayDate('')).toBe('');
+const def = CREW_LIST_COLUMNS.filter(c => c.byDefault).map(c => c.key);
+const t = buildCrewList({ crew: [ab, master, offSigned], docs: [cocDoc], columns: def, asAt: '2026-10-25', filter: 'onboard' });
+expect(t.headers).toEqual(['No.', 'Surname', 'Given names', 'Rank', 'Nationality', 'Date of birth', 'Place of birth', 'Passport no.', 'Passport expiry', 'Sign-on date', 'Sign-on port']);
+expect(t.rows.map(r => r[3])).toEqual(['Master', 'AB']);             // rank order, signed-off excluded
+expect(t.rows[0]).toEqual(['1', 'PETROVIĆ', 'Ivan', 'Master', 'Serbian', '05-JAN-1985', 'Kotor', '012345678', '01-MAR-2030', '01-JUN-2026', 'Rotterdam']);
+expect(buildCrewList({ crew: [ab, master, offSigned], docs: [cocDoc], columns: ['cocNumber', 'surname'], asAt: '2026-10-25', filter: 'all' }).headers).toEqual(['Surname', 'CoC no.']);
+expect(buildCrewList({ crew: [master], docs: [cocDoc], columns: ['surname', 'cocNumber'], asAt: '2026-10-25', filter: 'all' }).rows[0]).toEqual(['PETROVIĆ', 'CoC-123']);
+const wb = crewListWorkbook({ ship, port: 'Rotterdam', date: '2026-10-25', table: t });
+const [sheet] = await readSpreadsheet('x.xlsx', wb);
+expect(sheet.name).toBe('Crew list');
+expect(sheet.rows[0][0]).toBe('CREW LIST');
+expect(sheet.rows[3]).toEqual(['Port', 'Rotterdam', 'Date', '25-OCT-2026']);
+expect(sheet.rows[5]).toEqual(t.headers);
+expect(crewListFileName('M/V Ocean Star', '2026-10-25')).toBe('crew-list-m-v-ocean-star-2026-10-25.xlsx');
+```
+
+```ts
+// e2e/crewListPrint.spec.ts — clock 2026-10-25T09:00:00Z
+test('print crew list and export to Excel', async ({ page }) => {
+  // ship MV OCEAN STAR (IMO 9074729 via Particulars), crew PETROVIĆ Ivan Master + one AB; Voyage next port Rotterdam
+  await page.goto('./#/ship/crew'); await page.getByRole('button', { name: 'Print crew list' }).click();
+  const sheet = page.getByTestId('crew-list-sheet');
+  await expect(sheet.getByRole('heading', { name: 'CREW LIST' })).toBeVisible();
+  await expect(sheet).toContainText('MV OCEAN STAR'); await expect(sheet).toContainText('Port Rotterdam');
+  await expect(sheet.getByRole('row')).toHaveCount(3);                 // header + 2 crew
+  await page.getByLabel('Place of birth').uncheck();
+  await expect(sheet.getByRole('columnheader', { name: 'Place of birth' })).toHaveCount(0);
+  await page.reload(); await expect(page.getByLabel('Place of birth')).not.toBeChecked();
+  const dl = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export to Excel' }).click();
+  expect((await dl).suggestedFilename()).toBe('crew-list-mv-ocean-star-2026-10-25.xlsx');
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.getByRole('button', { name: 'Print' })).toBeHidden();
+  await expect(sheet).toBeVisible();
+});
+```
+
+Spell out the commented setup with the earlier tasks' labels.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/domain && npx playwright test e2e/crewListPrint.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the domain module, the widened share function, the screen and the print CSS.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test e2e/crewListPrint.spec.ts e2e/backup.spec.ts && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: printable crew list and Excel export"`
+
+---
+
+### Task 25: GitHub Pages deploy, README and full verification
 
 **Files:**
 - Create: `.github/workflows/deploy.yml`, `README.md`

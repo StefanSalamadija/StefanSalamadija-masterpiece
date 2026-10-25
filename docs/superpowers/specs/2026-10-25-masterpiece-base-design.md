@@ -59,7 +59,10 @@ At sign-off they can give the relief a ship-only handover file.
   - **Crew list** (§4.4):
     - Fields: surname, given names, rank, nationality, date of birth, place of birth, passport no. and expiry, seaman's book no. and expiry, sign-on date and port, sign-off date and port.
     - **"As at" date** selector, defaulting to today (ship's time).
-    - Actions: *Sign off*, *Re-join*, *Import from Excel*.
+    - Actions: *Sign off*, *Re-join*, *Import from Excel*, *Print crew list*, *Export to Excel* (§4.15).
+    - Each crew member has a **Documents** list (§4.14) and **contract** fields (§4.16).
+  - **Reliefs** (§4.16): onboard crew sorted by contract end, with days onboard and planned reliefs.
+  - **Expiring** (§4.14): crew documents that lapse before the next port.
   - **Certificates** (§4.6): the register, with expiry and survey warnings.
   - **Current voyage:** voyage no., last port, next port, ETA (local time + UTC offset), cargo, charterers, agents at next port.
     One voyage per ship is active. Starting a new voyage keeps the old one as history.
@@ -82,10 +85,11 @@ Unit preferences are **deferred** to Pieces 3/5, where units are first used.
 Every data item has a stable dotted name that later pieces use to pre-fill forms and reports:
 
 - **Vessel:** `vessel.name`, `vessel.imo`, `vessel.callSign`, `vessel.mmsi`, `vessel.flag`, `vessel.portOfRegistry`, `vessel.gt`, `vessel.nt`, `vessel.dwt`, `vessel.loa`, `vessel.beam`, `vessel.yearBuilt`, `vessel.owners`, `vessel.managers`, `vessel.pandi`, `vessel.classSociety`
-- **Voyage:** `voyage.no`, `voyage.lastPort`, `voyage.nextPort`, `voyage.eta`, `voyage.cargo`, `voyage.charterers`, `voyage.agents`
+- **Voyage:** `voyage.no`, `voyage.lastPort`, `voyage.nextPort`, `voyage.eta` (local time at the destination), `voyage.etaTimeZone` (for example `UTC+01:00`), `voyage.cargo`, `voyage.charterers`, `voyage.agents`
 - **Crew by rank:** `crew.byRank.<rank>.<field>`, for example `crew.byRank.master.fullName` (first crew member with that rank onboard at the reference date).
   - Rank is chosen from a standard list (Master, Chief Officer, 2nd/3rd Officer, Deck Cadet, Bosun, AB, OS, Chief/2nd/3rd/4th Engineer, ETO, Engine Cadet, Fitter, Oiler, Wiper, Chief Cook, Messman, plus *Other* as free text).
   - The key is the camelCase name, for example `chiefOfficer`.
+  - Extra crew fields: `contractEndDate` and `daysOnboard` (§4.16), and `doc.<type>.<field>` for crew documents (§4.14), for example `crew.byRank.master.doc.coc.number`.
 - **Crew lists:** `crew.onboard` (the list onboard at the reference date, for crew-list style forms), `crew.onboardCount`
 - **Certificates:** `cert.<key>.number`, `cert.<key>.issuedBy`, `cert.<key>.issueDate`, `cert.<key>.expiryDate`, `cert.<key>.nextSurveyDue`. The key comes from the standard list (§4.6), for example `cert.loadLine.expiryDate`.
 - **Time:** `today` and `now` in **ship's time**, `nowUtc`, `ship.timeZone` (for example `UTC+03:00`)
@@ -140,6 +144,8 @@ The fields are exposed through one lookup function, `resolveField(name, { asAt? 
 - `Voyage`: `{ shipId, active: boolean, …§4.1 fields }`
 - `Certificate`: `{ shipId, key, name, number, issuedBy, issueDate, expiryDate?, nextSurveyDue?, remarks }`
 - `ClockChange`: `{ shipId, effectiveAt, toOffsetMinutes, note? }`
+- `CrewDocument` (§4.14): `{ shipId, crewId, type, typeOther?, grade, number, issuedBy, issueDate, expiryDate?, remarks }`
+- Added later to existing records: `CrewMember.contractMonths?`, `reliefPlannedDate?`, `reliefPlannedPort?` (§4.16); `ShipProfile.maxMonthsOnboard?` (§4.16) and `crewListColumns?` (§4.15).
 
 **Personal scope:** no tables in Piece 1. Piece 5 adds personal finance here. The backup and handover mechanism already respects scope.
 
@@ -252,6 +258,62 @@ Printing always uses a black-on-white print layout, whatever the theme.
 - The user sees *"New version available — Update"*. The app never reloads by itself in the middle of a task.
 - Data schema changes run as versioned migrations, each preceded by a `before-update` snapshot.
 
+### 4.14 Crew documents (certificate register per seafarer)
+
+**Document types**, plus *Other* as free text:
+
+| Group | Documents |
+|---|---|
+| Competency | Certificate of Competency (CoC), Flag endorsement, GMDSS certificate |
+| Health | Medical fitness certificate, Yellow fever certificate |
+| STCW courses | Basic safety training, Advanced fire fighting, Survival craft and rescue boats, Fast rescue boats, Medical first aid, Medical care, Security awareness, Designated security duties, Ship security officer, ECDIS, Bridge resource management, Engine-room resource management, High voltage |
+| Visas | US C1/D visa, Schengen visa |
+
+- **Fields:** type, grade/capacity (for CoC, endorsement and GMDSS), number, issued by, issue date, expiry date (empty means no expiry), remarks.
+- **Warnings:** amber when expiry is within **90 days** of the reference date, red when past.
+  The crew list badge shows the worst of passport, seaman's book and documents.
+- **Expiring view:**
+  - Shows passports, seaman's books and documents of crew onboard today that expire on or before the active voyage's ETA date, sorted by expiry.
+  - With no ETA set, it shows the next 90 days and says so.
+- **Re-join:** the new contract record receives copies of the person's documents that have no expiry or expire on or after the new sign-on date.
+- **Delete:** deleting a crew member also soft-deletes their documents.
+- **Storage:** a new `crewDocuments` table (database version 2, with a `before-update` snapshot in the migration).
+- **Older backups:** a backup without that table imports as having no documents.
+
+### 4.15 Crew list output (print and Excel)
+
+- **Buttons:** *Print crew list* and *Export to Excel* on the crew list. Both use the current *As at* date and the *Onboard*/*All* filter.
+- **Options:**
+  - *Port* (default: the active voyage's next port) and *Date* (default: As at).
+  - Tickable columns, remembered per ship.
+- **Columns:**
+  - Default: No., surname, given names, rank, nationality, date of birth, place of birth, passport no., passport expiry, sign-on date, sign-on port.
+  - Optional: seaman's book no. and expiry, CoC no., contract end.
+- **Printout:**
+  - A4 landscape.
+  - Title `CREW LIST`; vessel name, IMO, call sign and flag; port and date.
+  - A numbered table in rank order.
+  - A Master signature line with the Master's name, a ship's stamp box, and a small "Printed with Masterpiece" footer.
+- **Dates** on printouts and exports are shown as `05-JAN-1985`, which can't be misread.
+- **Excel file:** the same header and table, named `crew-list-<ship>-<yyyy-mm-dd>.xlsx`, shared or downloaded like backups.
+
+### 4.16 Contracts and relief planning
+
+- **Crew fields:**
+  - Contract length in whole months (1–24, optional).
+  - Planned relief date and planned relief port (optional).
+- **Calculated values:**
+  - Contract end = sign-on + contract length.
+  - Days onboard = days from sign-on to the reference date (or the sign-off date if earlier), counting both ends.
+- **Contract warning:** amber when the contract ends within **30 days**, red when it has ended (relief overdue).
+- **Onboard limit:**
+  - A per-ship setting *Maximum months onboard*: 1–11, default **11**, staying under the MLC 12-month limit.
+  - Amber from 30 days before sign-on + limit; red once reached.
+  - Applies to crew onboard at the reference date.
+- **Reliefs view:**
+  - Onboard crew sorted by contract end (no contract length last), with days onboard, contract end, planned relief and badges.
+  - Alerts also appear on Home.
+
 ## 5. Technical design
 
 - **Stack:** TypeScript, Preact, Vite. PWA via `vite-plugin-pwa` (Workbox precache of all assets for full offline use). IndexedDB via Dexie. Plain CSS with variables and three theme sets, mobile-first, usable one-handed on a phone.
@@ -295,6 +357,16 @@ Printing always uses a black-on-white print layout, whatever the theme.
 - Switch themes; check that the print layout is black on white.
 - PIN lock on reopen.
 - App loads and works with the network disabled after the first visit.
+
+**Unit and e2e tests for §4.14–4.16:**
+- Contract end, days onboard and band boundaries.
+- Document carry-over on re-join.
+- Expiring-before-next-port list.
+- Database v1 → v2 migration snapshot.
+- Old backups without crew documents.
+- Crew list columns and date format.
+- Excel export read back through the importer.
+- Printing shows only the sheet.
 
 **Manual:** install and run on an Android phone (Chrome) and a laptop (Chrome/Edge).
 
