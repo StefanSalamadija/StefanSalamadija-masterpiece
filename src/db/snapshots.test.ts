@@ -73,10 +73,34 @@ describe('takeSnapshot', () => {
 
   it('breaks createdAt ties by id, so the same snapshots survive every time', async () => {
     const db = freshDb();
-    const taken: string[] = [];
-    for (let i = 0; i < 7; i++) taken.push((await takeSnapshot(db, 'manual')).id); // the clock never moves
-    const expected = [...taken].sort().reverse().slice(0, 5);
-    expect((await listSnapshots(db)).map((s) => s.id)).toEqual(expected);
+    const earlier: string[] = [];
+    for (let i = 0; i < 5; i++) earlier.push((await takeSnapshot(db, 'manual')).id); // the clock never moves
+    const lowest = '00000000-0000-4000-8000-000000000000';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(lowest);
+    const newest = await takeSnapshot(db, 'manual');
+    expect(newest.id).toBe(lowest);
+    // the new one is kept even though it ties and loses on id; of the others the lowest id goes
+    expect((await listSnapshots(db)).map((s) => s.id)).toEqual([...earlier.sort().reverse().slice(0, 4), lowest]);
+  });
+
+  it('keeps the snapshot it just took when the clock is behind the stored ones', async () => {
+    const db = freshDb();
+    for (const hour of [5, 6, 7, 8, 9]) { at(hour); await takeSnapshot(db, 'manual', `h${hour}`); }
+    at(1);
+    const snap = await takeSnapshot(db, 'manual', 'h1');
+    expect(await db.snapshots.get(snap.id)).toEqual(snap);
+    expect((await listSnapshots(db)).map((s) => s.note)).toEqual(['h9', 'h8', 'h7', 'h6', 'h1']);
+  });
+
+  it('deletes the oldest copies before writing the new one, so storage never holds 6', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 5; i++) { at(i); await takeSnapshot(db, 'manual', `n${i}`); }
+    const put = vi.spyOn(db.snapshots, 'put');
+    const bulkDelete = vi.spyOn(db.snapshots, 'bulkDelete');
+    at(5);
+    await takeSnapshot(db, 'manual', 'n5');
+    expect(bulkDelete).toHaveBeenCalledTimes(1);
+    expect(bulkDelete.mock.invocationCallOrder[0]).toBeLessThan(put.mock.invocationCallOrder[0]);
   });
 
   it('stores nothing when pruning fails', async () => {
@@ -118,6 +142,14 @@ describe('listSnapshots', () => {
       { id: first.id, createdAt: first.createdAt, reason: 'manual', note: 'first', counts: { ships: 1, crew: 2, voyages: 0, certificates: 0, clockChanges: 1 } },
     ]);
     for (const item of list) expect(item).not.toHaveProperty('data');
+  });
+
+  it('reads the snapshots with a cursor, one at a time, not all at once', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 3; i++) { at(i); await takeSnapshot(db, 'manual', `n${i}`); }
+    const getAll = [vi.spyOn(IDBObjectStore.prototype, 'getAll'), vi.spyOn(IDBIndex.prototype, 'getAll')];
+    expect(await listSnapshots(db)).toHaveLength(3);
+    for (const spy of getAll) expect(spy).not.toHaveBeenCalled();
   });
 
   it('counts a table an older snapshot did not have as empty', async () => {
@@ -186,6 +218,22 @@ describe('restoreSnapshot', () => {
     const after = await listSnapshots(db);
     expect(after).toHaveLength(5);
     expect(after.map((s) => s.note)).toEqual(['Before restore', 'n4', 'n3', 'n2', 'n1']);
+  });
+
+  it('keeps its "Before restore" snapshot when the clock is behind the stored ones', async () => {
+    const { db, ship } = await shipWithCrew();
+    for (const hour of [5, 6, 7, 8, 9]) {
+      at(hour);
+      await createRecord(db, 'crew', { shipId: ship.id, ...draft, surname: `Crew${hour}` });
+      await takeSnapshot(db, 'manual', `h${hour}`);
+    }
+    const beforeRestore = await allTables(db);
+    const target = (await listSnapshots(db)).find((s) => s.note === 'h6')!;
+    at(1);
+    await restoreSnapshot(db, target.id);
+    const list = await listSnapshots(db);
+    expect(list.map((s) => s.note)).toEqual(['h9', 'h8', 'h7', 'h6', 'Before restore']);
+    expect((await db.snapshots.get(list.at(-1)!.id))?.data).toEqual(beforeRestore);
   });
 
   it('rejects an unknown id and changes nothing', async () => {
@@ -335,6 +383,19 @@ describe('snapshotInUpgrade', () => {
     const snaps = await listSnapshots(v2);
     expect(snaps.map((s) => s.reason)).toEqual(['before-update', 'manual', 'manual', 'manual', 'manual']);
     expect(snaps.map((s) => s.note)).toEqual([undefined, 'n4', 'n3', 'n2', 'n1']);
+    v2.close();
+  });
+
+  it('keeps its own snapshot when the clock is behind the stored ones', async () => {
+    const name = 'mig-' + crypto.randomUUID();
+    const v1 = openDb(name);
+    for (const hour of [5, 6, 7, 8, 9]) { at(hour); await takeSnapshot(v1, 'manual', `h${hour}`); }
+    v1.close();
+    at(1);
+    const v2 = upgradedDb(name, (tx) => snapshotInUpgrade(tx));
+    const snaps = await listSnapshots(v2);
+    expect(snaps.map((s) => s.reason)).toEqual(['manual', 'manual', 'manual', 'manual', 'before-update']);
+    expect(snaps.map((s) => s.note)).toEqual(['h9', 'h8', 'h7', 'h6', undefined]);
     v2.close();
   });
 

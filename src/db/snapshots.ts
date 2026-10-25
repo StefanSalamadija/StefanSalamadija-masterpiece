@@ -2,13 +2,12 @@ import type { Table, Transaction } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type { Snapshot, SnapshotReason, TableName, Tables } from '../domain/types';
 import { allTables, replaceAllTables } from './records';
-import type { MasterpieceDB } from './schema';
-import { syncTables } from './schema';
+import { syncTables, type MasterpieceDB } from './schema';
 import { getSettings, updateSettings } from './settings';
 import { listShips } from './ships';
 import { guardWrite } from './storage';
 
-/** How many snapshots are kept: the newest by `createdAt`, ties going to the larger id. */
+/** How many snapshots are kept: the one just written plus the newest others by `createdAt`, ties going to the larger id. */
 const KEEP = 5;
 
 /** A snapshot without its data, plus how many records (deleted ones included) it holds per table. */
@@ -19,22 +18,27 @@ function makeSnapshot(reason: SnapshotReason, note: string | undefined, data: Ta
 }
 
 /**
- * Deletes every snapshot but the newest `KEEP`. The `createdAt` index lists the oldest first and breaks ties by
- * primary key, so the same snapshots go every time. Reads keys only, never the data.
+ * Makes room for one more snapshot, so that with it there are at most `KEEP`: deletes the oldest of those stored. Call
+ * it before writing the new one. The new snapshot is then never among the deleted, even when the device clock is behind
+ * the stored ones, and storage never holds more than `KEEP` copies, the new one included. The `createdAt` index lists
+ * the oldest first and breaks ties by primary key, so the same snapshots go every time. Reads keys only, never the data.
  */
-async function pruneSnapshots(snapshots: Table<Snapshot, string>): Promise<void> {
+async function makeRoomForSnapshot(snapshots: Table<Snapshot, string>): Promise<void> {
   const oldestFirst = await snapshots.orderBy('createdAt').primaryKeys();
-  const excess = oldestFirst.length - KEEP;
+  const excess = oldestFirst.length - (KEEP - 1);
   if (excess > 0) await snapshots.bulkDelete(oldestFirst.slice(0, excess));
 }
 
-/** Copies every syncable table, tombstones included, and keeps the newest 5 snapshots; taking and pruning are one transaction. */
+/**
+ * Copies every syncable table, tombstones included. Of the snapshots already stored the newest 4 are kept, so the one
+ * returned is always stored; taking and pruning are one transaction.
+ */
 export function takeSnapshot(db: MasterpieceDB, reason: SnapshotReason, note?: string): Promise<Snapshot> {
   return guardWrite(() =>
     db.transaction('rw', [...syncTables(db), db.snapshots], async () => {
       const snapshot = makeSnapshot(reason, note, await allTables(db));
+      await makeRoomForSnapshot(db.snapshots);
       await db.snapshots.put(snapshot);
-      await pruneSnapshots(db.snapshots);
       return snapshot;
     }),
   );
@@ -45,10 +49,13 @@ function countRecords(data: Tables): Record<TableName, number> {
   return Object.fromEntries(TABLE_NAMES.map((name) => [name, data[name]?.length ?? 0])) as Record<TableName, number>;
 }
 
-/** The snapshots, newest first, without their data. */
+/** The snapshots, newest first, without their data. A cursor reads them, so only one is in memory at a time. */
 export async function listSnapshots(db: MasterpieceDB): Promise<SnapshotSummary[]> {
-  const snapshots = await db.snapshots.orderBy('createdAt').reverse().toArray();
-  return snapshots.map(({ data, ...meta }) => ({ ...meta, counts: countRecords(data) }));
+  const summaries: SnapshotSummary[] = [];
+  await db.snapshots.orderBy('createdAt').reverse().each(({ data, ...meta }) => {
+    summaries.push({ ...meta, counts: countRecords(data) });
+  });
+  return summaries;
 }
 
 /** Points the active ship at a live ship: the one it already names, else the first live ship, else none. */
@@ -89,6 +96,6 @@ export async function snapshotInUpgrade(tx: Transaction, reason: SnapshotReason 
     data[name] = tx.idbtrans.objectStoreNames.contains(name) ? await tx.table(name).toArray() : [];
   }
   const snapshots = tx.table<Snapshot, string>('snapshots');
+  await makeRoomForSnapshot(snapshots);
   await snapshots.put(makeSnapshot(reason, undefined, data));
-  await pruneSnapshots(snapshots);
 }
