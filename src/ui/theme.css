@@ -837,6 +837,12 @@ select {
   overflow-wrap: anywhere;
 }
 
+.crew-signed-off {
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
 .empty {
   margin: 0 0 16px;
   color: var(--muted);

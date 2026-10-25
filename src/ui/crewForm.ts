@@ -1,4 +1,4 @@
-import { rejoinDraft } from '../domain/crew';
+import { fullName, overlappingContract, rejoinDraft } from '../domain/crew';
 import { validateCrewMember } from '../domain/validation';
 import type { CrewDraft, CrewMember, FieldError, RankKey } from '../domain/types';
 
@@ -76,15 +76,37 @@ export function crewPatchOf(fields: CrewFields, saved: CrewMember): Partial<Crew
   return fields.rank !== 'other' && saved.rankOther !== undefined ? { ...fields, rankOther: undefined } : fields;
 }
 
+/** The problem of a contract that runs into another contract of the same person, naming that contract and its dates. */
+export function overlapProblem(
+  candidate: Parameters<typeof overlappingContract>[0], crew: CrewMember[], field: string,
+): FieldError | undefined {
+  const other = overlappingContract(candidate, crew);
+  if (!other) return undefined;
+  const span = other.signOffDate ? `from ${other.signOnDate} to ${other.signOffDate}` : `from ${other.signOnDate} (still onboard)`;
+  return problem(field, `This overlaps ${fullName(other)}'s contract ${span}.`);
+}
+
+/** What the form needs to know about the contract it edits and the ship's other contracts. */
+export interface CrewFormContext {
+  /** The saved contract being edited; absent for a new one. */
+  id?: string;
+  /** Its sign-off, if any: the form does not show it, but a sign-on after it is a problem. */
+  signOffDate?: string;
+  /** The ship's live contracts, to keep one person's contracts apart. */
+  crew?: CrewMember[];
+}
+
 /**
- * Everything wrong with the form, in the order of `validateCrewMember`, and the rank last. `signOffDate` is the
- * sign-off of the contract being edited, if any: the form does not show it, but a sign-on after it is a problem.
+ * Everything wrong with the form, in the order of `validateCrewMember`, the missing rank next and a contract that
+ * runs into another one of the same person last (shown at the sign-on date).
  */
-export function crewFormProblems(form: CrewForm, today: string, signOffDate?: string): FieldError[] {
+export function crewFormProblems(form: CrewForm, today: string, { id, signOffDate, crew = [] }: CrewFormContext = {}): FieldError[] {
   // With no rank chosen validation is given any rank, so that it checks the other fields; the missing rank is added below.
-  const draft: CrewDraft = { ...fieldsWith(form, form.rank || 'ab'), ...(signOffDate && { signOffDate }) };
-  const problems = validateCrewMember(draft, today);
+  const fields = fieldsWith(form, form.rank || 'ab');
+  const problems = validateCrewMember({ ...fields, ...(signOffDate && { signOffDate }) }, today);
   if (form.rank === '') problems.push(problem('rank', RANK_REQUIRED));
+  const clash = overlapProblem({ ...fields, id, signOffDate }, crew, 'signOnDate');
+  if (clash) problems.push(clash);
   return problems;
 }
 
@@ -107,18 +129,26 @@ export function problemsByControl(problems: FieldError[], form: CrewForm): Map<C
   return byControl;
 }
 
-/** What is wrong with signing `m` off on `signOffDate`: the date is needed and cannot be before the sign-on. */
-export function signOffProblem(m: CrewMember, signOffDate: string, today: string): FieldError | undefined {
+/**
+ * What is wrong with signing `m` off on `signOffDate`: the date is needed, cannot be before the sign-on, and cannot
+ * reach a later contract of the same person (among `crew`, the ship's live contracts).
+ */
+export function signOffProblem(m: CrewMember, signOffDate: string, today: string, crew: CrewMember[] = []): FieldError | undefined {
   if (signOffDate === '') return problem('signOffDate', SIGN_OFF_DATE_REQUIRED);
-  return validateCrewMember({ ...m, signOffDate }, today).find((found) => found.field === 'signOffDate');
+  const own = validateCrewMember({ ...m, signOffDate }, today).find((found) => found.field === 'signOffDate');
+  return own ?? overlapProblem({ ...m, signOffDate }, crew, 'signOffDate');
 }
 
-/** What is wrong with re-joining on `signOnDate`: a real date, after the sign-off of the contract it follows. */
-export function rejoinProblem(m: CrewMember, signOnDate: string, today: string): FieldError | undefined {
-  const own = validateCrewMember(rejoinDraft(m, signOnDate, ''), today).find((found) => found.field === 'signOnDate');
+/**
+ * What is wrong with re-joining on `signOnDate`: a real date, after the sign-off of the contract it follows, and not
+ * running into another contract of the person (the new one has no end).
+ */
+export function rejoinProblem(m: CrewMember, signOnDate: string, today: string, crew: CrewMember[] = []): FieldError | undefined {
+  const draft = rejoinDraft(m, signOnDate, '');
+  const own = validateCrewMember(draft, today).find((found) => found.field === 'signOnDate');
   if (own) return own;
   if (m.signOffDate && signOnDate <= m.signOffDate) {
     return problem('signOnDate', `Sign-on must be after the sign-off date (${m.signOffDate}).`);
   }
-  return undefined;
+  return overlapProblem(draft, crew, 'signOnDate');
 }

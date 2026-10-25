@@ -2,7 +2,7 @@ import { useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { navigate, useRoute } from '../../app/router';
-import { createRecord, updateRecord } from '../../db/records';
+import { createRecord, listForShip, updateRecord } from '../../db/records';
 import { RANKS } from '../../domain/catalogues';
 import type { CrewMember, FieldError } from '../../domain/types';
 import { Field } from '../components/Field';
@@ -42,7 +42,7 @@ function RankSelect({ value, error, selectRef, onChange }: {
  * the record elsewhere does not overwrite it. A problem shows once its field has been changed, and all of them after a
  * Save that found any; Save itself is always on, and moves the focus to the first field with a problem.
  */
-function CrewForm({ shipId, member }: { shipId: string; member?: CrewMember }) {
+function CrewForm({ shipId, member, crew }: { shipId: string; member?: CrewMember; crew: CrewMember[] }) {
   const { db, shipToday } = useAppState();
   const [form, setForm] = useState(() => (member ? crewFormOf(member) : blankCrewForm()));
   const [changed, setChanged] = useState<ReadonlySet<CrewControl>>(new Set());
@@ -50,7 +50,7 @@ function CrewForm({ shipId, member }: { shipId: string; member?: CrewMember }) {
   const [busy, setBusy] = useState(false);
   const controls = useRef<Partial<Record<CrewControl, HTMLElement | null>>>({});
 
-  const problems = problemsByControl(crewFormProblems(form, shipToday, member?.signOffDate), form);
+  const problems = problemsByControl(crewFormProblems(form, shipToday, { id: member?.id, signOffDate: member?.signOffDate, crew }), form);
   const shown = (control: CrewControl): FieldError | undefined => {
     const found = problems.get(control);
     return found && (found.severity === 'warning' || attempted || changed.has(control)) ? found : undefined;
@@ -135,18 +135,21 @@ export function CrewEdit() {
   const { id } = useRoute().params;
   // `null` is a member that does not exist; `undefined` is still loading.
   const saved = useLive(async () => (id ? (await db.crew.get(id)) ?? null : null), [db, id]);
-  if (!activeShip) return null;
+  // The ship's other contracts, to keep one person's contracts from overlapping.
+  const shipId = activeShip?.id;
+  const crew = useLive(async () => (shipId ? listForShip<CrewMember>(db, 'crew', shipId) : []), [db, shipId]);
+  if (!activeShip || !crew) return null;
 
   let content;
   if (!id) {
     // Keyed by ship, so switching ships starts a fresh draft instead of carrying one across.
-    content = <CrewForm key={`new-${activeShip.id}`} shipId={activeShip.id} />;
+    content = <CrewForm key={`new-${activeShip.id}`} shipId={activeShip.id} crew={crew} />;
   } else if (saved === undefined) {
     content = null;
   } else if (saved === null || saved.deleted || saved.shipId !== activeShip.id) {
     content = <NotFound />;
   } else {
-    content = <CrewForm key={saved.id} shipId={activeShip.id} member={saved} />;
+    content = <CrewForm key={saved.id} shipId={activeShip.id} member={saved} crew={crew} />;
   }
 
   return (

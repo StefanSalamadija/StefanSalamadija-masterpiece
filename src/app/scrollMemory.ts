@@ -29,14 +29,21 @@ export const scrollMemory = createScrollMemory();
  * Notes where a list was scrolled to at the moment the user leaves it. Call it once, before the app is rendered:
  * the router swaps the screen as soon as it sees the `hashchange`, and a shorter screen makes the browser move the
  * page, so this has to be the first listener of the event, to read the place while the old screen is still there.
- * Returns a function that stops noting.
+ * It also takes the restoring of scroll positions over from the browser, which on Back and Forward would move the page
+ * to the screen it is going to before the `hashchange`, so that the place read would be that one's and not the list's.
+ * Returns a function that stops noting and gives the restoring back.
  */
 export function rememberPlaceOnLeaving(memory: ScrollMemory): () => void {
   const onLeave = (event: HashChangeEvent): void => {
     memory.remember(matchRoute(new URL(event.oldURL).hash).path, window.scrollY);
   };
+  const browserRestoration = history.scrollRestoration;
+  history.scrollRestoration = 'manual';
   window.addEventListener('hashchange', onLeave, true);
-  return () => window.removeEventListener('hashchange', onLeave, true);
+  return () => {
+    window.removeEventListener('hashchange', onLeave, true);
+    history.scrollRestoration = browserRestoration;
+  };
 }
 
 /**

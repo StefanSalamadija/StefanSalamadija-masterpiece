@@ -1,4 +1,5 @@
 import { RANKS } from './catalogues';
+import { isValidIsoDate } from './dates';
 import type { CrewDraft, CrewMember } from './types';
 
 /**
@@ -74,4 +75,60 @@ export function rejoinDraft(m: CrewMember, signOnDate: string, signOnPort: strin
     signOnDate,
     signOnPort,
   };
+}
+
+/** Upper case with the spaces tidied, so `Petrović  Ivan` and `PETROVIĆ ivan` match. */
+function normaliseName(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/**
+ * Who a contract belongs to: the passport number (spaces and case ignored) when there is one, else the surname, given
+ * names and date of birth, but only when all three are filled in. `undefined` when neither can be had: such a
+ * contract is not linked to any other.
+ */
+export function personKey(m: Pick<CrewMember, 'passportNo' | 'surname' | 'givenNames' | 'dateOfBirth'>): string | undefined {
+  const passport = normalisePassport(m.passportNo);
+  if (passport) return `passport:${passport}`;
+  const surname = normaliseName(m.surname);
+  const givenNames = normaliseName(m.givenNames);
+  const dateOfBirth = m.dateOfBirth.trim();
+  return surname && givenNames && dateOfBirth ? `name:${surname}|${givenNames}|${dateOfBirth}` : undefined;
+}
+
+type ContractSpan = Pick<CrewMember, 'passportNo' | 'surname' | 'givenNames' | 'dateOfBirth' | 'signOnDate' | 'signOffDate'>;
+
+/** True when two contracts share a day. Both end days count, and a contract without a sign-off has no end. */
+function overlaps(a: Pick<CrewMember, 'signOnDate' | 'signOffDate'>, b: Pick<CrewMember, 'signOnDate' | 'signOffDate'>): boolean {
+  return (!b.signOffDate || a.signOnDate <= b.signOffDate) && (!a.signOffDate || b.signOnDate <= a.signOffDate);
+}
+
+/**
+ * The contract of the same person that `candidate` runs into, if any: the one that started first among them. One
+ * person's contracts on a ship must never overlap. `candidate.id` (when it is a saved contract) and deleted contracts
+ * are left out. Nothing is found while the sign-on date is empty or not a date, since there is no span to check.
+ */
+export function overlappingContract(candidate: ContractSpan & { id?: string }, crew: CrewMember[]): CrewMember | undefined {
+  const key = personKey(candidate);
+  if (!key || !isValidIsoDate(candidate.signOnDate)) return undefined;
+  let first: CrewMember | undefined;
+  for (const m of crew) {
+    if (m.deleted || m.id === candidate.id || personKey(m) !== key || !overlaps(candidate, m)) continue;
+    if (!first || m.signOnDate < first.signOnDate) first = m;
+  }
+  return first;
+}
+
+/**
+ * Whether the contract `m` can be followed by a new one: it is signed off, it is the person's latest (by sign-on), and
+ * none of the person's contracts is open. A contract that cannot be linked to anyone stands alone.
+ */
+export function canRejoin(m: CrewMember, crew: CrewMember[]): boolean {
+  if (!m.signOffDate) return false;
+  const key = personKey(m);
+  if (!key) return true;
+  // A contract of the same person that is still open, or that starts later.
+  const sameLater = (other: CrewMember): boolean =>
+    !other.deleted && other.id !== m.id && personKey(other) === key && (!other.signOffDate || other.signOnDate > m.signOnDate);
+  return !crew.some(sameLater);
 }

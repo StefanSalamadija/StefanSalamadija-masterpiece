@@ -164,6 +164,27 @@ describe('records', () => {
     expect(await db.crew.get(c.id)).toEqual(u);
   });
 
+  it('removes a field that the patch sets to undefined, instead of storing it as undefined', async () => {
+    const db = freshDb();
+    const c = await createRecord<CrewMember>(db, 'crew', { shipId: 'ship-a', ...draft, rank: 'other', rankOther: 'Pumpman' });
+    const u = await updateRecord<CrewMember>(db, 'crew', c.id, { rank: 'ab', rankOther: undefined });
+    expect(u).not.toHaveProperty('rankOther');
+    const stored = (await db.crew.get(c.id))!;
+    expect(stored).not.toHaveProperty('rankOther');
+    expect(stored).toEqual(u);
+    expect(stored).toMatchObject({ rank: 'ab', shipId: 'ship-a', surname: 'Petrović', deleted: false });
+  });
+
+  it('still keeps the fixed fields when the same patch tries to unset them', async () => {
+    const db = freshDb();
+    const c = await createRecord<CrewMember>(db, 'crew', { shipId: 'ship-a', ...draft });
+    const u = await updateRecord<CrewMember>(db, 'crew', c.id, {
+      id: undefined, createdAt: undefined, scope: undefined, shipId: undefined, deleted: undefined, nationality: 'Serbian',
+    } as unknown as Partial<CrewMember>);
+    expect(u).toMatchObject({ id: c.id, createdAt: c.createdAt, scope: 'ship', shipId: 'ship-a', deleted: false, nationality: 'Serbian' });
+    expect(await db.crew.get(c.id)).toEqual(u);
+  });
+
   it('never gives a ship a ship id', async () => {
     const db = freshDb();
     const ship = await createShip(db, 'MV OCEAN STAR', 180);

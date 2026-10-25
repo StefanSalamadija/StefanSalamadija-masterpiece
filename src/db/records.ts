@@ -42,9 +42,15 @@ async function rewrite(
   );
 }
 
+/** A copy of the record without the keys whose value is `undefined`: a patch removes an optional field by setting it so. */
+function withoutUndefined(record: SyncRecord): SyncRecord {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as unknown as SyncRecord;
+}
+
 /**
  * Applies `patch` to a live record and stamps it as updated now by this device. Keys in `FIXED_FIELDS` are ignored,
- * so a stale copy cannot move a record to another ship, change its side or undo a deletion. A deleted record is refused.
+ * so a stale copy cannot move a record to another ship, change its side or undo a deletion. A field the patch sets to
+ * `undefined` is removed from the record (it is never stored as `undefined`). A deleted record is refused.
  */
 export async function updateRecord<T extends SyncRecord>(
   db: MasterpieceDB, table: TableName, id: string, patch: Partial<T>,
@@ -52,7 +58,7 @@ export async function updateRecord<T extends SyncRecord>(
   const changes = Object.fromEntries(Object.entries(patch).filter(([key]) => !FIXED_FIELDS.has(key)));
   const updated = await rewrite(db, table, id, (current, stamp) => {
     if (current.deleted) throw new Error(`Record is deleted: ${table}:${id}`);
-    return { ...current, ...changes, ...stamp };
+    return withoutUndefined({ ...current, ...changes, ...stamp });
   });
   return updated as T;
 }

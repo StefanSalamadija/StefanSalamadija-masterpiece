@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { CrewMember } from '../domain/types';
 import {
-  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, problemsByControl,
-  rejoinProblem, signOffProblem,
+  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, overlapProblem,
+  problemsByControl, rejoinProblem, signOffProblem,
 } from './crewForm';
 import type { CrewForm } from './crewForm';
 
@@ -90,8 +90,54 @@ describe('crewFormProblems', () => {
     ]);
   });
   it('checks a sign-off date that the form does not show against the new sign-on', () => {
-    expect(crewFormProblems(form({ signOnDate: '2026-11-01' }), TODAY, '2026-10-10').map((p) => p.field)).toEqual(['signOffDate']);
-    expect(crewFormProblems(form({ signOnDate: '2026-10-10' }), TODAY, '2026-10-10')).toEqual([]);
+    expect(crewFormProblems(form({ signOnDate: '2026-11-01' }), TODAY, { signOffDate: '2026-10-10' }).map((p) => p.field)).toEqual(['signOffDate']);
+    expect(crewFormProblems(form({ signOnDate: '2026-10-10' }), TODAY, { signOffDate: '2026-10-10' })).toEqual([]);
+  });
+
+  describe('against the other contracts of the ship', () => {
+    const earlier = member({ id: 'earlier', givenNames: 'Ivan', signOnDate: '2026-01-01', signOffDate: '2026-05-31' });
+
+    it('refuses a sign-on that runs into a contract of the same person, at the sign-on date', () => {
+      const problems = crewFormProblems(form({ signOnDate: '2026-05-31' }), TODAY, { crew: [earlier] });
+      expect(problems).toEqual([{
+        field: 'signOnDate', severity: 'error', message: "This overlaps Ivan PETROVIĆ's contract from 2026-01-01 to 2026-05-31.",
+      }]);
+    });
+    it('accepts a sign-on the day after the other contract ended', () => {
+      expect(crewFormProblems(form({ signOnDate: '2026-06-01' }), TODAY, { crew: [earlier] })).toEqual([]);
+    });
+    it('does not count the contract being edited, and keeps its own sign-off in the span', () => {
+      const saved = member({ id: 'saved', signOnDate: '2026-06-01', signOffDate: '2026-10-10' });
+      expect(crewFormProblems(crewFormOf(saved), TODAY, { id: 'saved', signOffDate: '2026-10-10', crew: [earlier, saved] })).toEqual([]);
+      const later = member({ id: 'later', signOnDate: '2026-10-05' });
+      expect(crewFormProblems(crewFormOf(saved), TODAY, { id: 'saved', signOffDate: '2026-10-10', crew: [saved, later] })
+        .map((p) => p.message)).toEqual(["This overlaps Ivan PETROVIĆ's contract from 2026-10-05 (still onboard)."]);
+    });
+    it('knows a new person by the passport number typed in the form', () => {
+      const someone = member({ id: 'someone', passportNo: 'AB 123', surname: 'KOVAČ', givenNames: 'Marko', dateOfBirth: '1970-02-02', signOnDate: '2026-03-01' });
+      const f = form({ surname: 'Different', givenNames: 'Name', dateOfBirth: '1999-09-09', passportNo: 'ab123', signOnDate: '2026-04-01' });
+      expect(crewFormProblems(f, TODAY, { crew: [someone] }).map((p) => p.message))
+        .toEqual(["This overlaps Marko KOVAČ's contract from 2026-03-01 (still onboard)."]);
+    });
+    it('is left out while the sign-on date is missing, which has its own message', () => {
+      expect(crewFormProblems(form({ signOnDate: '' }), TODAY, { crew: [earlier] }).map((p) => p.message)).toEqual(['Sign-on date is required.']);
+    });
+  });
+});
+
+describe('overlapProblem', () => {
+  const open = member({ id: 'open', signOnDate: '2026-10-15' });
+  const candidate = { ...member({ signOnDate: '2026-06-01' }), signOffDate: '2026-10-15' };
+
+  it('names the contract it runs into, with its dates', () => {
+    expect(overlapProblem(candidate, [open], 'signOffDate')).toEqual({
+      field: 'signOffDate', severity: 'error', message: "This overlaps Ivan PETROVIĆ's contract from 2026-10-15 (still onboard).",
+    });
+    const closed = member({ id: 'closed', givenNames: 'Ivo', surname: 'PETROVIĆ', signOnDate: '2026-10-01', signOffDate: '2026-12-01' });
+    expect(overlapProblem(candidate, [closed], 'signOnDate')?.message).toBe("This overlaps Ivo PETROVIĆ's contract from 2026-10-01 to 2026-12-01.");
+  });
+  it('is nothing when the dates keep clear', () => {
+    expect(overlapProblem({ ...candidate, signOffDate: '2026-10-14' }, [open], 'signOffDate')).toBeUndefined();
   });
 });
 
@@ -106,7 +152,7 @@ describe('problemsByControl', () => {
   });
   it('puts a sign-off problem at the sign-on date, the only date it can be fixed with', () => {
     const f = form({ signOnDate: '2026-11-01' });
-    const byControl = problemsByControl(crewFormProblems(f, TODAY, '2026-10-10'), f);
+    const byControl = problemsByControl(crewFormProblems(f, TODAY, { signOffDate: '2026-10-10' }), f);
     expect(byControl.get('signOnDate')?.message).toBe("Sign-off can't be before sign-on.");
   });
   it('lets an error win over a warning, and the first of the same kind stay', () => {
@@ -144,6 +190,17 @@ describe('signOffProblem', () => {
   it('does not mind problems that are not about the sign-off', () => {
     expect(signOffProblem(member({ surname: '', dateOfBirth: '2099-01-01' }), '2026-10-10', TODAY)).toBeUndefined();
   });
+  it('refuses a date on or after the sign-on of a later contract of the same person', () => {
+    const later = member({ id: 'later', signOnDate: '2026-10-15' });
+    const message = "This overlaps Ivan PETROVIĆ's contract from 2026-10-15 (still onboard).";
+    expect(signOffProblem(m, '2026-10-14', TODAY, [m, later])).toBeUndefined();
+    expect(signOffProblem(m, '2026-10-15', TODAY, [m, later])).toMatchObject({ field: 'signOffDate', message });
+    expect(signOffProblem(m, '2026-12-01', TODAY, [m, later])?.message).toBe(message);
+  });
+  it('puts the date problems before the overlap', () => {
+    const later = member({ id: 'later', signOnDate: '2026-03-01' });
+    expect(signOffProblem(m, '2026-05-01', TODAY, [m, later])?.message).toBe("Sign-off can't be before sign-on.");
+  });
 });
 
 describe('rejoinProblem', () => {
@@ -162,5 +219,16 @@ describe('rejoinProblem', () => {
   });
   it('has no sign-off date to hold the new sign-on to when the contract is not signed off', () => {
     expect(rejoinProblem(member(), '2020-01-01', TODAY)).toBeUndefined();
+  });
+  it('refuses a new contract, open to the end, that meets a later contract of the same person', () => {
+    const later = member({ id: 'later', signOnDate: '2026-12-01', signOffDate: '2026-12-31' });
+    expect(rejoinProblem(m, '2026-10-20', TODAY, [m, later])).toMatchObject({
+      field: 'signOnDate', message: "This overlaps Ivan PETROVIĆ's contract from 2026-12-01 to 2026-12-31.",
+    });
+    expect(rejoinProblem(m, '2027-01-01', TODAY, [m, later])).toBeUndefined();
+  });
+  it('keeps the sign-off rule first', () => {
+    const later = member({ id: 'later', signOnDate: '2026-10-01' });
+    expect(rejoinProblem(m, '2026-10-10', TODAY, [m, later])?.message).toBe('Sign-on must be after the sign-off date (2026-10-10).');
   });
 });

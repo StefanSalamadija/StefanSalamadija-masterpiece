@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
@@ -11,6 +11,8 @@ interface NewMember {
   surname: string;
   givenNames?: string;
   rank?: string;
+  dateOfBirth?: string;
+  passportNo?: string;
   passportExpiry?: string;
   bookExpiry?: string;
   signOn?: string;
@@ -22,7 +24,8 @@ async function addMember(page: Page, m: NewMember): Promise<void> {
   await page.getByLabel('Surname').fill(m.surname);
   await page.getByLabel('Given names').fill(m.givenNames ?? 'Ivan');
   await page.getByLabel('Rank').selectOption({ label: m.rank ?? 'Master' });
-  await page.getByLabel('Date of birth').fill('1985-01-05');
+  await page.getByLabel('Date of birth').fill(m.dateOfBirth ?? '1985-01-05');
+  if (m.passportNo) await page.getByLabel('Passport no.').fill(m.passportNo);
   await page.getByLabel('Passport expiry').fill(m.passportExpiry ?? '2030-01-01');
   await page.getByLabel("Seaman's book expiry").fill(m.bookExpiry ?? '2030-01-01');
   await page.getByLabel('Sign-on date').fill(m.signOn ?? '2026-06-01');
@@ -30,13 +33,23 @@ async function addMember(page: Page, m: NewMember): Promise<void> {
   await expect(page).toHaveURL(/#\/ship\/crew$/);
 }
 
-/** Signs a member off through the dialog and waits for it to close. */
-async function signOff(page: Page, name: string, date: string, port = ''): Promise<void> {
-  await crewRow(page, name).getByRole('button', { name: 'Sign off' }).click();
+/** Signs a member (a name, or one row) off through the dialog and waits for it to close. */
+async function signOff(page: Page, who: string | Locator, date: string, port = ''): Promise<void> {
+  await (typeof who === 'string' ? crewRow(page, who) : who).getByRole('button', { name: 'Sign off' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Sign-off date').fill(date);
   await dialog.getByLabel('Sign-off port').fill(port);
   await dialog.getByRole('button', { name: 'Sign off' }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
+/** Re-joins a signed-off contract through the dialog and waits for it to close. */
+async function rejoin(page: Page, row: Locator, signOn: string, port = ''): Promise<void> {
+  await row.getByRole('button', { name: 'Re-join' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Sign-on date').fill(signOn);
+  await dialog.getByLabel('Sign-on port').fill(port);
+  await dialog.getByRole('button', { name: 'Re-join' }).click();
   await expect(dialog).toHaveCount(0);
 }
 
@@ -243,6 +256,16 @@ test('crew edit: Other asks for the rank, and a blank date of birth is allowed',
   await expect(crewRow(page, 'PETROVIĆ')).toContainText('Pumpman');
   const [stored] = await storedCrew(page);
   expect(stored).toMatchObject({ rank: 'other', rankOther: 'Pumpman', dateOfBirth: '', shipId: expect.any(String) });
+
+  // A rank that is not Other does not keep the text: the field is gone, not stored as undefined.
+  await crewRow(page, 'PETROVIĆ').getByRole('button', { name: 'Edit' }).click();
+  await page.getByLabel('Rank', { exact: true }).selectOption({ label: 'AB' });
+  await expect(page.getByLabel('Rank (other)')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(crewRow(page, 'PETROVIĆ')).toContainText('AB');
+  const [changed] = await storedCrew(page);
+  expect(changed).toMatchObject({ rank: 'ab' });
+  expect('rankOther' in changed).toBe(false);
 });
 
 test('crew edit: opens a member, saves the changes and keeps the sign-off', async ({ page }) => {
@@ -391,7 +414,7 @@ test('crew re-join: the new sign-on must be after the sign-off, and the old cont
   await dialog.getByRole('button', { name: 'Re-join' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(row).toHaveCount(2);
-  await expect(row.getByRole('button', { name: 'Re-join' })).toHaveCount(1); // only the signed-off contract
+  await expect(row.getByRole('button', { name: 'Re-join' })).toHaveCount(0); // the person is onboard again
 
   const stored = await storedCrew(page);
   expect(stored).toHaveLength(2);
@@ -490,4 +513,224 @@ test('profiles: the delete dialog counts the crew of the ship', async ({ page })
   await page.getByRole('list', { name: 'Ships' }).getByRole('listitem').filter({ hasText: 'MV OCEAN STAR' })
     .getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates and 0 voyages');
+});
+
+/** A signed off 2026-06-01 to 2026-10-10, then re-joined as B on 2026-10-15 (open). Leaves the All view on. */
+async function twoContracts(page: Page): Promise<{ first: Locator; second: Locator }> {
+  await addMember(page, { surname: 'PETROVIĆ', passportNo: 'P 123456' });
+  await signOff(page, 'PETROVIĆ', '2026-10-10', 'Santos');
+  await page.getByRole('button', { name: 'All' }).click();
+  await rejoin(page, crewRow(page, 'PETROVIĆ'), '2026-10-15', 'Rotterdam');
+  const rows = crewRow(page, 'PETROVIĆ');
+  await expect(rows).toHaveCount(2);
+  return { first: rows.nth(0), second: rows.nth(1) };
+}
+
+test('crew re-join: only the latest contract of a person offers it, and not while one is open', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const { first, second } = await twoContracts(page);
+  await expect(first).toContainText('2026-06-01');
+  await expect(second).toContainText('2026-10-15');
+  await expect(page.getByRole('button', { name: 'Re-join' })).toHaveCount(0); // B is open, A is not the latest
+
+  await signOff(page, second, '2026-11-01'); // B, the open contract
+  await expect(second.getByRole('button', { name: 'Re-join' })).toHaveCount(1);
+  await expect(first.getByRole('button', { name: 'Re-join' })).toHaveCount(0);
+  expect(await storedCrew(page)).toHaveLength(2);
+});
+
+test('crew sign off: a date that runs into a later contract of the same person is refused', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const { first } = await twoContracts(page);
+  await first.getByRole('button', { name: 'Sign off' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Sign-off date')).toHaveValue('2026-10-10');
+  const message = "This overlaps Ivan PETROVIĆ's contract from 2026-10-15 (still onboard).";
+  for (const date of ['2026-10-15', '2026-12-01']) { // the day it starts, and well after
+    await dialog.getByLabel('Sign-off date').fill(date);
+    await dialog.getByRole('button', { name: 'Sign off' }).click();
+    await expect(dialog.getByRole('alert')).toHaveText(message);
+    await expect(dialog.getByLabel('Sign-off date')).toBeFocused();
+  }
+  expect((await storedCrew(page)).map((m) => m.signOffDate).sort()).toEqual(['2026-10-10', undefined]);
+
+  await dialog.getByLabel('Sign-off date').fill('2026-10-14'); // the day before is fine
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Sign off' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect((await storedCrew(page)).map((m) => m.signOffDate).sort()).toEqual(['2026-10-14', undefined]);
+});
+
+test('crew re-join: a contract signed off again can be followed by another, from the day after', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  // A: 2026-06-01 to 2026-10-10, B: 2026-10-15 to 2026-10-20. Only B can be re-joined now.
+  const { second } = await twoContracts(page);
+  await signOff(page, second, '2026-10-20');
+  await second.getByRole('button', { name: 'Re-join' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Sign-on date').fill('2026-10-20');
+  await dialog.getByRole('button', { name: 'Re-join' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Sign-on must be after the sign-off date (2026-10-20).');
+  await dialog.getByLabel('Sign-on date').fill('2026-10-21');
+  await dialog.getByRole('button', { name: 'Re-join' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await storedCrew(page)).toHaveLength(3);
+});
+
+test('crew edit: moving a sign-on to or before the earlier sign-off is refused', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const { second } = await twoContracts(page);
+  await second.getByRole('button', { name: 'Edit' }).click();
+  const message = "This overlaps Ivan PETROVIĆ's contract from 2026-06-01 to 2026-10-10.";
+  for (const date of ['2026-10-10', '2026-08-01']) { // the sign-off day itself, and inside the first contract
+    await page.getByLabel('Sign-on date').fill(date);
+    await expect(page.getByRole('alert')).toHaveText(message);
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByLabel('Sign-on date')).toBeFocused();
+    await expect(page).toHaveURL(/#\/ship\/crew\/[^/]+$/);
+  }
+  expect((await storedCrew(page)).map((m) => m.signOnDate).sort()).toEqual(['2026-06-01', '2026-10-15']);
+
+  await page.getByLabel('Sign-on date').fill('2026-10-11'); // the day after is fine
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  expect((await storedCrew(page)).map((m) => m.signOnDate).sort()).toEqual(['2026-06-01', '2026-10-11']);
+});
+
+test('crew edit: the same passport as a person who is onboard cannot be added for the same dates', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'PETROVIĆ', passportNo: 'P 123456', signOn: '2026-06-01' });
+  await page.goto('./#/ship/crew/new');
+  await page.getByLabel('Surname').fill('SOMEONE'); await page.getByLabel('Given names').fill('Else');
+  await page.getByLabel('Rank').selectOption({ label: 'AB' });
+  await page.getByLabel('Date of birth').fill('1999-09-09');
+  await page.getByLabel('Passport no.').fill('p123456');
+  await page.getByLabel('Sign-on date').fill('2026-08-01');
+  await expect(page.getByRole('alert')).toHaveText("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 (still onboard).");
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByLabel('Sign-on date')).toBeFocused();
+  await expect(page).toHaveURL(/#\/ship\/crew\/new$/);
+  expect(await storedCrew(page)).toHaveLength(1);
+
+  // Once that contract is signed off, a new one that starts after it is a different matter.
+  await page.goto('./#/ship/crew');
+  await signOff(page, 'PETROVIĆ', '2026-07-31');
+  await page.goto('./#/ship/crew/new');
+  await page.getByLabel('Surname').fill('PETROVIĆ'); await page.getByLabel('Given names').fill('Ivan');
+  await page.getByLabel('Rank').selectOption({ label: 'AB' });
+  await page.getByLabel('Passport no.').fill('P123456');
+  await page.getByLabel('Sign-on date').fill('2026-07-31');
+  await expect(page.getByRole('alert')).toHaveText("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 to 2026-07-31.");
+  await page.getByLabel('Sign-on date').fill('2026-08-01');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  expect(await storedCrew(page)).toHaveLength(2);
+});
+
+test('crew edit: without a passport number a person is known by name and date of birth', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'PETROVIĆ', signOn: '2026-06-01' });
+  await page.goto('./#/ship/crew/new');
+  await page.getByLabel('Surname').fill('petrović'); await page.getByLabel('Given names').fill('IVAN');
+  await page.getByLabel('Rank').selectOption({ label: 'AB' });
+  await page.getByLabel('Date of birth').fill('1985-01-05');
+  await page.getByLabel('Sign-on date').fill('2026-08-01');
+  await expect(page.getByRole('alert')).toHaveText("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 (still onboard).");
+
+  await page.getByLabel('Date of birth').fill('1985-01-06'); // someone else with the same name
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  expect(await storedCrew(page)).toHaveLength(2);
+});
+
+test('crew list: in All, a contract signed off before the date shows that, not a badge', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'PETROVIĆ', passportExpiry: '2026-10-01' });
+  await addMember(page, { surname: 'KOVAČ', givenNames: 'Marko', rank: 'AB', passportExpiry: '2026-10-01' });
+  await signOff(page, 'PETROVIĆ', '2026-10-10');
+  await page.getByRole('button', { name: 'All' }).click();
+  const off = crewRow(page, 'PETROVIĆ');
+  const open = crewRow(page, 'KOVAČ');
+  await expect(off.getByText('Signed off 2026-10-10')).toHaveCount(1); // the one place that says it
+  await expect(off.locator('.crew-signed-off')).toHaveText('Signed off 2026-10-10');
+  await expect(off.locator('[data-band]')).toHaveCount(0);
+  await expect(open.getByText('Expired')).toBeVisible(); // an open contract keeps its badge
+  await expect(open.getByText('Signed off')).toHaveCount(0);
+
+  await page.getByLabel('As at').fill('2026-10-10'); // the sign-off day: still onboard, so the badge
+  await expect(off.locator('.crew-signed-off')).toHaveCount(0);
+  await expect(off.getByText('Expired')).toBeVisible();
+  await page.getByLabel('As at').fill('2026-10-05');
+  await expect(off.locator('.crew-signed-off')).toHaveCount(0);
+  await expect(off.getByText('Expired')).toBeVisible();
+  await page.getByLabel('As at').fill('2026-10-11');
+  await expect(off.locator('.crew-signed-off')).toHaveText('Signed off 2026-10-10');
+  await expect(off.locator('[data-band]')).toHaveCount(0);
+});
+
+test('crew list: a dialog for a contract changed in another tab closes, and stays closed', async ({ page, context }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'PETROVIĆ' });
+  await crewRow(page, 'PETROVIĆ').getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+
+  const other = await context.newPage();
+  await other.goto('./#/ship/crew');
+  await signOff(other, 'PETROVIĆ', '2026-07-01'); // changes the contract: the question asked is out of date
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Add crew member' })).toBeFocused();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await storedCrew(page))[0]).toMatchObject({ signOffDate: '2026-07-01', deleted: false });
+});
+
+test('crew list: Back and Forward through Edit keep the place in a long list', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await seedCrew(page, 40);
+  await page.goto('./#/ship/crew');
+  await page.reload();
+  const rows = crewList(page).getByRole('listitem');
+  await expect(rows).toHaveCount(40);
+  const scrollY = () => page.evaluate(() => window.scrollY);
+
+  await page.evaluate(() => window.scrollTo(0, 1500));
+  await expect.poll(scrollY).toBeCloseTo(1500, -1);
+  await rows.nth(14).getByRole('button', { name: 'Edit' }).dispatchEvent('click');
+  await expect(page.getByRole('heading', { name: 'Edit crew member' })).toBeVisible();
+
+  await page.goBack();
+  await expect(rows).toHaveCount(40);
+  await expect.poll(scrollY).toBeCloseTo(1500, -1);
+
+  await page.goForward();
+  await expect(page.getByRole('heading', { name: 'Edit crew member' })).toBeVisible();
+  await expect.poll(scrollY).toBe(0);
+
+  await page.goBack();
+  await expect(rows).toHaveCount(40);
+  await expect.poll(scrollY).toBeCloseTo(1500, -1);
+});
+
+test('crew list: Back to the screen before it, then the Crew link, restores the place', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await seedCrew(page, 40);
+  const chip = (name: string) => page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name });
+  const scrollY = () => page.evaluate(() => window.scrollY);
+  await page.goto('./#/ship/particulars');
+  await chip('Crew').click();
+  const rows = crewList(page).getByRole('listitem');
+  await expect(rows).toHaveCount(40);
+
+  await page.evaluate(() => window.scrollTo(0, 1500));
+  await expect.poll(scrollY).toBeCloseTo(1500, -1);
+  await page.goBack();
+  await expect(page.getByLabel('Ship name')).toBeVisible();
+  await expect.poll(scrollY).toBe(0);
+
+  await chip('Crew').click();
+  await expect(rows).toHaveCount(40);
+  await expect.poll(scrollY).toBeCloseTo(1500, -1);
 });

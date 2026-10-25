@@ -44,6 +44,7 @@ describe('rememberPlaceOnLeaving', () => {
   function fakeWindow() {
     const fake = { scrollY: 640, addEventListener: vi.fn(), removeEventListener: vi.fn() };
     vi.stubGlobal('window', fake);
+    vi.stubGlobal('history', { scrollRestoration: 'auto' });
     return fake;
   }
   const leaving = (fake: ReturnType<typeof fakeWindow>) => fake.addEventListener.mock.calls[0][1] as (e: { oldURL: string }) => void;
@@ -67,5 +68,13 @@ describe('rememberPlaceOnLeaving', () => {
     expect(memory.positionFor('/ship/crew')).toBe(640);
     leaving(fake)({ oldURL: 'http://localhost:4173/?x=1#/ship/certificates' });
     expect(memory.positionFor('/ship/certificates')).toBe(90);
+  });
+  it('takes over the restoring of the scroll position from the browser, and gives it back when it stops', () => {
+    // On Back and Forward the browser would otherwise move the page to the screen it is going to before `hashchange`.
+    fakeWindow();
+    const stop = rememberPlaceOnLeaving(createScrollMemory());
+    expect(history.scrollRestoration).toBe('manual');
+    stop();
+    expect(history.scrollRestoration).toBe('auto');
   });
 });
