@@ -865,9 +865,25 @@ select {
 
 /* ---- Crew import ---- */
 
-/* A message the screen before left to say, such as "Imported 3 crew.". */
-.notice {
-  margin: 0 0 16px;
+/*
+ * A status message: "Imported 3 crew.", "Reading file…". The element stays on the page and only its text changes, so that a
+ * screen reader announces it; while it is empty it takes no room.
+ */
+.live {
+  margin: 0;
+}
+
+.live:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.live:not(:empty) {
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-left: 4px solid var(--accent);
@@ -876,9 +892,19 @@ select {
   font-weight: 600;
 }
 
-:root[data-theme='contrast'] .notice {
+:root[data-theme='contrast'] .live:not(:empty) {
   border-width: 2px;
   border-left-width: 6px;
+}
+
+.screen > .live:not(:empty) {
+  margin-bottom: 16px;
+}
+
+.import-file {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .import-form {

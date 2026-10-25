@@ -3,7 +3,7 @@ import type { PreviewRow } from '../domain/crewImport/preview';
 import type { CrewDraft } from '../domain/types';
 import { blankCrewForm } from './crewForm';
 import {
-  applyEdits, changeText, columnLabel, draftWithForm, errorParts, firstSheetWithData, fullNameIgnored, headerRowMessage,
+  applyEdits, changeText, columnLabel, draftWithForm, errorParts, firstSheetWithData, fullNameIgnored, hasEdits, headerRowMessage,
   importCount, parseHeaderRow, previewSummary, shownColumns, sheetSettings, statusText, withColumnField,
 } from './crewImportView';
 
@@ -49,7 +49,7 @@ describe('sheetSettings', () => {
 
   it('finds the header row below the title rows and maps its columns by what they are called', () => {
     expect(sheetSettings(rows, undefined)).toEqual({
-      headerText: '4', mapping: { surname: 1, givenNames: 2, rank: 3, dateOfBirth: 4, passportNo: 5 },
+      headerRow: 3, headerText: '4', mapping: { surname: 1, givenNames: 2, rank: 3, dateOfBirth: 4, passportNo: 5 },
     });
   });
 
@@ -59,7 +59,7 @@ describe('sheetSettings', () => {
   });
 
   it('starts an empty sheet at row 1 with nothing mapped', () => {
-    expect(sheetSettings([], undefined)).toEqual({ headerText: '1', mapping: {} });
+    expect(sheetSettings([], undefined)).toEqual({ headerRow: 0, headerText: '1', mapping: {} });
   });
 });
 
@@ -202,6 +202,19 @@ describe('importCount', () => {
     const rows = [row(), update(), update({ changes: [CHANGE] }), error(), row({ skip: true }), update({ changes: [CHANGE], skip: true })];
     expect(importCount(rows)).toBe(2);
     expect(importCount([])).toBe(0);
+  });
+});
+
+describe('hasEdits', () => {
+  it('is true once a row is skipped or has a draft of its own', () => {
+    expect(hasEdits({ 3: { skip: true } })).toBe(true);
+    expect(hasEdits({ 3: { draft: DRAFT } })).toBe(true);
+    expect(hasEdits({ 3: { skip: false, draft: DRAFT } })).toBe(true);
+  });
+
+  it('is false for nothing, and for a skip that was undone', () => {
+    expect(hasEdits({})).toBe(false);
+    expect(hasEdits({ 3: { skip: false } })).toBe(false);
   });
 });
 

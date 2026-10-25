@@ -8,7 +8,7 @@ import { listSnapshots } from '../db/snapshots';
 import { StorageFullError } from '../db/storage';
 import { conflictKey } from '../domain/merge';
 import { TABLE_NAMES } from '../domain/types';
-import type { Certificate, ClockChange, CrewDraft, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
+import type { Certificate, ClockChange, CrewDraft, CrewImportMapping, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
 import { DamagedFileError, NotABackupError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
 import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
@@ -263,6 +263,20 @@ describe('prepareImport and applyImport between two devices', () => {
     const snapshots = await listSnapshots(b);
     expect(snapshots[0].reason).toBe('before-import');
     expect(snapshots[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0 });
+  });
+
+  it("carries a ship's crew import mapping, with the columns it ignores, through a backup", async () => {
+    const a = await deviceA();
+    const crewImportMapping: CrewImportMapping = {
+      byHeader: { prezime: 'surname', rank: 'rank' }, dateFormat: 'year-first', ignored: ['dateofbirth', 'passportno'],
+    };
+    await updateRecord<ShipProfile>(a.db, 'ships', a.ship.id, { crewImportMapping });
+    const b = freshDb();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect((await b.ships.get(a.ship.id))?.crewImportMapping).toEqual(crewImportMapping);
+    expect((await prepareImport(b, text, PW)).plan.items).toEqual([]); // the same file again: nothing differs
   });
 
   it('shows zero changes, and creates no duplicates, when the same file is imported twice', async () => {

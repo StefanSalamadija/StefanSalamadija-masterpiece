@@ -141,20 +141,93 @@ function overlaps(a: Pick<CrewMember, 'signOnDate' | 'signOffDate'>, b: Pick<Cre
   return (!b.signOffDate || a.signOnDate <= b.signOffDate) && (!a.signOffDate || b.signOnDate <= a.signOffDate);
 }
 
+/** The live contracts of a crew, found by what they are known by. It is made once, so that many lookups do not each go through every contract. */
+interface PeopleIndex {
+  live: CrewMember[];
+  byPassport: Map<string, number[]>;
+  byName: Map<string, number[]>;
+}
+
+function pushTo(index: Map<string, number[]>, key: string | undefined, at: number): void {
+  if (key === undefined) return;
+  const found = index.get(key);
+  if (found) found.push(at);
+  else index.set(key, [at]);
+}
+
+function indexPeople(crew: CrewMember[]): PeopleIndex {
+  const live = crew.filter((m) => !m.deleted);
+  const index: PeopleIndex = { live, byPassport: new Map(), byName: new Map() };
+  live.forEach((m, at) => {
+    const { passport, name } = identityOf(m);
+    pushTo(index.byPassport, passport, at);
+    pushTo(index.byName, name, at);
+  });
+  return index;
+}
+
+/** The positions in `index.live` of the contracts linked to `who`, each once: those linked by the passport number first, then those that only the name links. */
+function linkedTo(index: PeopleIndex, who: Identity): number[] {
+  const byPassport = (who.passport !== undefined && index.byPassport.get(who.passport)) || [];
+  const byName = (who.name !== undefined && index.byName.get(who.name)) || [];
+  if (byName.length === 0) return byPassport;
+  if (byPassport.length === 0) return byName;
+  const known = new Set(byPassport); // a contract with both the passport and the name is in both lists
+  return [...byPassport, ...byName.filter((at) => !known.has(at))];
+}
+
+/** The problem text for a contract that `overlapFinder` found: its person's name and its dates. */
+export function overlapMessage(other: Pick<CrewMember, 'surname' | 'givenNames' | 'signOnDate' | 'signOffDate'>): string {
+  const span = other.signOffDate ? `from ${other.signOnDate} to ${other.signOffDate}` : `from ${other.signOnDate} (still onboard)`;
+  return `This overlaps ${fullName(other)}'s contract ${span}.`;
+}
+
+/**
+ * `overlappingContract` for many candidates against one crew: the contracts are indexed once by passport number and by
+ * name with date of birth, so each lookup only looks at the contracts that could be the same person's.
+ */
+export function overlapFinder(crew: CrewMember[]): (candidate: ContractSpan & { id?: string }) => CrewMember | undefined {
+  const index = indexPeople(crew);
+  return (candidate) => {
+    const who = identityOf(candidate);
+    if (!isKnown(who) || !isValidIsoDate(candidate.signOnDate)) return undefined;
+    let first: number | undefined;
+    for (const at of linkedTo(index, who)) {
+      const m = index.live[at];
+      if (m.id === candidate.id || !overlaps(candidate, m)) continue;
+      if (first === undefined) first = at;
+      else {
+        const known = index.live[first].signOnDate;
+        if (m.signOnDate < known || (m.signOnDate === known && at < first)) first = at;
+      }
+    }
+    return first === undefined ? undefined : index.live[first];
+  };
+}
+
 /**
  * The contract of the same person that `candidate` runs into, if any: the one that started first among them. One
  * person's contracts on a ship must never overlap. `candidate.id` (when it is a saved contract) and deleted contracts
  * are left out. Nothing is found while the sign-on date is empty or not a date, since there is no span to check.
  */
 export function overlappingContract(candidate: ContractSpan & { id?: string }, crew: CrewMember[]): CrewMember | undefined {
-  const who = identityOf(candidate);
-  if (!isKnown(who) || !isValidIsoDate(candidate.signOnDate)) return undefined;
-  let first: CrewMember | undefined;
-  for (const m of crew) {
-    if (m.deleted || m.id === candidate.id || !overlaps(candidate, m) || !linked(who, identityOf(m))) continue;
-    if (!first || m.signOnDate < first.signOnDate) first = m;
-  }
-  return first;
+  return overlapFinder(crew)(candidate);
+}
+
+/**
+ * For many contracts against one crew: the live contract of the same person (linked as `samePerson` does) that starts
+ * after the given one, and the latest of them if there are several. Nothing for a contract that is the person's latest.
+ */
+export function laterContractFinder(crew: CrewMember[]): (m: PersonFields & Pick<CrewMember, 'signOnDate'>) => CrewMember | undefined {
+  const index = indexPeople(crew);
+  return (m) => {
+    let latest: CrewMember | undefined;
+    for (const at of linkedTo(index, identityOf(m))) {
+      const other = index.live[at];
+      if (other.signOnDate > m.signOnDate && (!latest || other.signOnDate > latest.signOnDate)) latest = other;
+    }
+    return latest;
+  };
 }
 
 /**

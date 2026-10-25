@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   fullName,
   isOnboardAt,
+  laterContractFinder,
   latestContractByPassport,
   normalisePassport,
   onboardAt,
+  overlapFinder,
+  overlapMessage,
   overlappingContract,
   rejoinableIds,
   rejoinDraft,
@@ -291,6 +294,90 @@ describe('overlappingContract', () => {
   it('has nothing to check while the sign-on is empty or not a date', () => {
     expect(overlappingContract(span(''), [first])).toBeUndefined();
     expect(overlappingContract(span('2026-02-30'), [first])).toBeUndefined();
+  });
+});
+
+describe('overlapMessage', () => {
+  const ivan = crewMember({ surname: 'PETROVIĆ', givenNames: 'Ivan', signOnDate: '2026-06-01' });
+
+  it('names the contract and its dates', () => {
+    expect(overlapMessage({ ...ivan, signOffDate: '2026-10-10' })).toBe("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 to 2026-10-10.");
+  });
+  it('says still onboard for a contract that has no sign-off', () => {
+    expect(overlapMessage(ivan)).toBe("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 (still onboard).");
+    expect(overlapMessage({ ...ivan, signOffDate: '' })).toBe("This overlaps Ivan PETROVIĆ's contract from 2026-06-01 (still onboard).");
+  });
+});
+
+describe('overlapFinder', () => {
+  const span = (signOnDate: string, signOffDate?: string, over: Partial<CrewMember> = {}) => ({
+    passportNo: 'P1', surname: 'Petrović', givenNames: 'Ivan', dateOfBirth: '1980-03-14', signOnDate, signOffDate, ...over,
+  });
+  const first = crewMember({ passportNo: 'P1', signOnDate: '2026-06-01', signOffDate: '2026-10-10' });
+  const kovac = crewMember({ passportNo: 'P2', surname: 'Kovač', givenNames: 'Luka', dateOfBirth: '1980-03-14', signOnDate: '2026-06-01' });
+
+  it('answers many candidates from one list, as overlappingContract does for each', () => {
+    const find = overlapFinder([first, kovac]);
+    expect(find(span('2026-08-01'))).toBe(first);
+    expect(find(span('2026-10-11'))).toBeUndefined();
+    expect(find(span('2026-08-01', undefined, { passportNo: 'P2', surname: 'Kovač', givenNames: 'Luka' }))).toBe(kovac);
+    expect(find(span('2026-08-01', undefined, { passportNo: 'P9', surname: 'Horvat', givenNames: 'Ana' }))).toBeUndefined(); // same birth date alone is nobody
+  });
+  it('finds a person through the name when the passport differs, and through the passport when the name differs', () => {
+    const find = overlapFinder([first]);
+    expect(find(span('2026-08-01', undefined, { passportNo: 'P7' }))).toBe(first);
+    expect(find(span('2026-08-01', undefined, { surname: 'Other', dateOfBirth: '1999-01-01' }))).toBe(first);
+    expect(find(span('2026-08-01', undefined, { passportNo: 'P7', dateOfBirth: '1999-01-01' }))).toBeUndefined();
+  });
+  it('gives the contract that started first, and of those that started together the first of the list', () => {
+    const early = crewMember({ passportNo: 'P1', signOnDate: '2026-03-01' });
+    const twin = crewMember({ passportNo: 'P1', signOnDate: '2026-03-01' });
+    expect(overlapFinder([first, early, twin])(span('2026-01-01'))).toBe(early);
+    expect(overlapFinder([twin, early])(span('2026-01-01'))).toBe(twin);
+  });
+  it('counts a contract once when it matches by passport and by name', () => {
+    expect(overlapFinder([first])(span('2026-08-01'))).toBe(first);
+  });
+  it('leaves out deleted contracts, and the candidate itself', () => {
+    const gone = crewMember({ passportNo: 'P1', signOnDate: '2026-06-01', deleted: true });
+    expect(overlapFinder([gone])(span('2026-07-01'))).toBeUndefined();
+    expect(overlapFinder([first])({ ...span('2026-07-01'), id: first.id })).toBeUndefined();
+  });
+  it('does not go through every contract for every candidate: 6,000 people born on one day are looked up in well under a second', () => {
+    const crew = Array.from({ length: 6000 }, (_, i) => crewMember({ passportNo: `P${i}`, surname: `Surname${i}`, givenNames: `Name${i}`, dateOfBirth: '1980-03-14' }));
+    const started = performance.now();
+    const find = overlapFinder(crew);
+    for (const m of crew) expect(find({ ...m, id: m.id })).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe('laterContractFinder', () => {
+  const old = crewMember({ passportNo: 'P1', signOnDate: '2025-01-01', signOffDate: '2025-06-30' });
+  const current = crewMember({ passportNo: 'P2', signOnDate: '2026-06-01' }); // the passport was renewed in between
+
+  it('is the latest live contract of the same person that starts after the contract, found through the name', () => {
+    expect(laterContractFinder([old, current])(old)).toBe(current);
+    const between = crewMember({ passportNo: 'P3', signOnDate: '2025-09-01', signOffDate: '2025-12-31' });
+    expect(laterContractFinder([old, between, current])(old)).toBe(current);
+    expect(laterContractFinder([old, between, current])(between)).toBe(current);
+  });
+  it('is found through the passport too', () => {
+    const again = crewMember({ passportNo: 'P1', surname: 'Other', dateOfBirth: '1970-01-01', signOnDate: '2026-02-01' });
+    expect(laterContractFinder([old, again])(old)).toBe(again);
+  });
+  it('is nothing for the latest contract, for a contract that starts the same day, or for someone else', () => {
+    const find = laterContractFinder([old, current]);
+    expect(find(current)).toBeUndefined();
+    expect(laterContractFinder([old, { ...current, signOnDate: '2025-01-01' }])(old)).toBeUndefined();
+    expect(laterContractFinder([old, crewMember({ passportNo: 'P9', surname: 'Kovač', signOnDate: '2026-06-01' })])(old)).toBeUndefined();
+  });
+  it('leaves out deleted contracts', () => {
+    expect(laterContractFinder([old, { ...current, deleted: true }])(old)).toBeUndefined();
+  });
+  it('is nothing for a contract that cannot be linked to anyone', () => {
+    const anonymous = crewMember({ passportNo: '', dateOfBirth: '', signOnDate: '2025-01-01' });
+    expect(laterContractFinder([anonymous, crewMember({ passportNo: '', dateOfBirth: '', signOnDate: '2026-01-01' })])(anonymous)).toBeUndefined();
   });
 });
 

@@ -6,7 +6,9 @@ export interface Particulars { name: string; imo: string; callSign: string; mmsi
 export type CrewField = 'surname' | 'givenNames' | 'fullName' | 'rank' | 'nationality' | 'dateOfBirth' | 'placeOfBirth'
   | 'passportNo' | 'passportExpiry' | 'seamansBookNo' | 'seamansBookExpiry' | 'signOnDate' | 'signOnPort' | 'signOffDate' | 'signOffPort';
 export type DateFormat = 'day-first' | 'year-first';
-export interface CrewImportMapping { byHeader: Record<string, CrewField>; dateFormat: DateFormat }
+/** How a crew list is read, saved with the ship; headers are normalised (see `normaliseHeader`). `ignored` lists the headers the
+ *  user left out although they would be mapped by their name, so that they stay out on the next import. */
+export interface CrewImportMapping { byHeader: Record<string, CrewField>; dateFormat: DateFormat; ignored?: string[] }
 export interface ShipProfile extends BaseRecord { particulars: Particulars; crewImportMapping?: CrewImportMapping }
 export type RankKey = 'master' | 'chiefOfficer' | 'secondOfficer' | 'thirdOfficer' | 'deckCadet' | 'bosun' | 'ab' | 'os'
   | 'chiefEngineer' | 'secondEngineer' | 'thirdEngineer' | 'fourthEngineer' | 'eto' | 'engineCadet' | 'fitter' | 'oiler'

@@ -56,6 +56,11 @@ const MS_PER_DAY = 86_400_000;
 const EXCEL_EPOCH_1900_UTC = Date.UTC(1899, 11, 30);
 const EXCEL_EPOCH_1904_UTC = Date.UTC(1904, 0, 1);
 
+/** Throws `TooLargeFileError` for more than 5,000 rows or 200 columns of data, whatever the kind of file. */
+function checkSize(rowCount: number, columnCount: number): void {
+  if (rowCount > MAX_SHEET_ROWS || columnCount > MAX_SHEET_COLUMNS) throw new TooLargeFileError();
+}
+
 function startsWith(bytes: Uint8Array, signature: number[]): boolean {
   return signature.every((byte, i) => bytes[i] === byte);
 }
@@ -127,7 +132,7 @@ export function sheetToGrid(sheet: XLSX.WorkSheet, date1904 = false): Cell[][] {
   const declared = XLSX.utils.decode_range(ref).e;
   const rowCount = Math.min(lastRow, declared.r) + 1;
   const columnCount = Math.min(lastColumn, declared.c) + 1;
-  if (rowCount > MAX_SHEET_ROWS || columnCount > MAX_SHEET_COLUMNS) throw new TooLargeFileError();
+  checkSize(rowCount, columnCount);
 
   const epochUtc = date1904 ? EXCEL_EPOCH_1904_UTC : EXCEL_EPOCH_1900_UTC;
   const rows: Cell[][] = [];
@@ -169,10 +174,12 @@ function readWorkbook(data: ArrayBuffer, extension: 'xlsx' | 'xls'): SheetGrid[]
 function readCsv(name: string, data: ArrayBuffer): SheetGrid[] {
   const text = decodeStrict('utf-8', new Uint8Array(data));
   if (text === undefined) throw new EncodingError(CSV_ENCODING_MESSAGE);
-  return [{ name, rows: parseCsv(text) }];
+  const rows = parseCsv(text);
+  checkSize(rows.length, rows.reduce((widest, row) => Math.max(widest, row.length), 0)); // not `Math.max(...)`: a huge file would overflow the stack
+  return [{ name, rows }];
 }
 
-/** Reads an Excel (.xlsx, .xls) or CSV file into one plain grid of cells per sheet. */
+/** Reads an Excel (.xlsx, .xls) or CSV file into one plain grid of cells per sheet. A sheet of more than 5,000 rows or 200 columns is refused. */
 export async function readSpreadsheet(fileName: string, data: ArrayBuffer): Promise<SheetGrid[]> {
   const dot = fileName.lastIndexOf('.');
   const extension = dot === -1 ? '' : fileName.slice(dot + 1).toLowerCase();

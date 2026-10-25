@@ -175,6 +175,23 @@ describe('readSpreadsheet', () => {
   });
 });
 
+describe('the size of a CSV file', () => {
+  const rowsOf = (count: number): string => Array.from({ length: count }, (_, i) => `Name${i},P${i}`).join('\n');
+
+  it('is limited to 5,000 rows and 200 columns, as a workbook is', async () => {
+    expect((await readSpreadsheet('crew.csv', encode(rowsOf(5000))))[0].rows).toHaveLength(5000);
+    await expect(readSpreadsheet('crew.csv', encode(rowsOf(5001)))).rejects.toBeInstanceOf(TooLargeFileError);
+    await expect(readSpreadsheet('crew.csv', encode(rowsOf(5001)))).rejects.toThrow(TOO_LARGE_MESSAGE);
+    const wide = (columns: number): ArrayBuffer => encode(Array.from({ length: columns }, (_, i) => `C${i}`).join(','));
+    expect((await readSpreadsheet('crew.csv', wide(200)))[0].rows[0]).toHaveLength(200);
+    await expect(readSpreadsheet('crew.csv', wide(201))).rejects.toBeInstanceOf(TooLargeFileError);
+  });
+
+  it('does not count the empty rows at the end', async () => {
+    expect((await readSpreadsheet('crew.csv', encode(`${rowsOf(5000)}\n\n,\n`)))[0].rows).toHaveLength(5000);
+  });
+});
+
 describe('1904 date system', () => {
   it('reads date-formatted serials of a 1904-system workbook as the same calendar date', async () => {
     for (const bookType of ['xlsx', 'biff8'] as const) {

@@ -38,7 +38,75 @@ describe('toSavedMapping', () => {
   });
 });
 
+describe('toSavedMapping, columns that were ignored', () => {
+  const header = ['No.', 'Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No'];
+
+  it('remembers a column that the header would be mapped from but was left out, by its normalised header', () => {
+    const mapping = { surname: 1, givenNames: 2, rank: 3, passportNo: 5 }; // the date of birth column was set to "— ignore —"
+    expect(toSavedMapping(header, mapping, 'day-first')).toEqual({
+      byHeader: { surname: 'surname', givennames: 'givenNames', rank: 'rank', passportno: 'passportNo' },
+      dateFormat: 'day-first',
+      ignored: ['dateofbirth'],
+    });
+  });
+
+  it('lists them in the order of the columns, whatever the header text looks like', () => {
+    expect(toSavedMapping(['Passport No.', 'Date of Birth', "Seaman's Book No."], { dateOfBirth: 1 }, 'day-first').ignored)
+      .toEqual(['passportno', 'seamansbookno']);
+  });
+
+  it('does not list a column that was never recognised, one that is mapped, or one without header text', () => {
+    expect(toSavedMapping(header, { surname: 1, givenNames: 2, rank: 3, dateOfBirth: 4, passportNo: 5 }, 'day-first')).not.toHaveProperty('ignored');
+    expect(toSavedMapping(['Remarks', null, '', 'Rank'], { rank: 3 }, 'day-first')).not.toHaveProperty('ignored');
+  });
+
+  it('does not list a column whose header is also the header of a column that is mapped', () => {
+    expect(toSavedMapping(['Rank', 'Rank'], { rank: 1 }, 'day-first')).not.toHaveProperty('ignored');
+  });
+
+  it('counts a column whose field moved to another column as ignored', () => {
+    expect(toSavedMapping(['Surname', 'Prezime'], { surname: 1 }, 'day-first'))
+      .toEqual({ byHeader: { prezime: 'surname' }, dateFormat: 'day-first', ignored: ['surname'] });
+  });
+
+  it('lists a header once', () => {
+    expect(toSavedMapping(['Rank', 'Passport No', 'Passport no.'], { rank: 0 }, 'day-first').ignored).toEqual(['passportno']);
+  });
+});
+
 describe('applySavedMapping', () => {
+  it('leaves a column unmapped when the saved mapping says it was ignored, instead of guessing it again', () => {
+    const header = ['No.', 'Surname', 'Rank', 'Date of birth'];
+    const saved = toSavedMapping(header, { surname: 1, rank: 2 }, 'day-first');
+    expect(saved.ignored).toEqual(['dateofbirth']);
+    expect(applySavedMapping(header, saved)).toEqual({ surname: 1, rank: 2 });
+    expect(applySavedMapping(['Date of birth', 'Rank', 'Surname'], saved)).toEqual({ rank: 1, surname: 2 }); // the columns moved
+    expect(applySavedMapping(header, { ...saved, ignored: undefined })).toEqual({ surname: 1, rank: 2, dateOfBirth: 3 });
+  });
+
+  it('lets a saved entry for the same header win over the ignored list', () => {
+    const saved: CrewImportMapping = { byHeader: { rank: 'rank' }, dateFormat: 'day-first', ignored: ['rank'] };
+    expect(applySavedMapping(['Rank'], saved)).toEqual({ rank: 0 });
+  });
+
+  it('ignores an ignored list that is not a list of texts', () => {
+    const header = ['Surname', 'Rank'];
+    for (const ignored of [null, 'rank', { rank: true }, [1, null, {}]]) {
+      const saved = { byHeader: {}, dateFormat: 'day-first', ignored } as unknown as CrewImportMapping;
+      expect(applySavedMapping(header, saved)).toEqual({ surname: 0, rank: 1 });
+    }
+  });
+
+  it('keeps ignoring a column that is ignored twice in a row, and takes a column back when it is mapped again', () => {
+    const header = ['Surname', 'Rank', 'Date of birth'];
+    const first = toSavedMapping(header, { surname: 0, rank: 1 }, 'day-first');
+    const second = toSavedMapping(header, applySavedMapping(header, first), 'day-first');
+    expect(second).toEqual(first);
+    const taken = toSavedMapping(header, { surname: 0, rank: 1, dateOfBirth: 2 }, 'day-first');
+    expect(taken).not.toHaveProperty('ignored');
+    expect(applySavedMapping(header, taken)).toEqual({ surname: 0, rank: 1, dateOfBirth: 2 });
+  });
+
   it('finds the saved fields again when the columns have moved', () => {
     const saved = toSavedMapping(['Prezime', 'Rank'], { surname: 0, rank: 1 }, 'day-first');
     expect(applySavedMapping(['Rank', 'Prezime'], saved)).toEqual({ rank: 0, surname: 1 });

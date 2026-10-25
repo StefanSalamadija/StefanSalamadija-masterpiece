@@ -44,6 +44,17 @@ async function addMember(page: Page, m: { surname: string; givenNames: string; d
   await expect(page).toHaveURL(/#\/ship\/crew$/);
 }
 
+/** Signs a member off on the crew list, through the dialog. */
+async function signOff(page: Page, who: string, date: string, port = ''): Promise<void> {
+  await page.goto('./#/ship/crew');
+  await page.getByRole('list', { name: 'Crew' }).getByRole('listitem').filter({ hasText: who }).getByRole('button', { name: 'Sign off' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Sign-off date').fill(date);
+  await dialog.getByLabel('Sign-off port').fill(port);
+  await dialog.getByRole('button', { name: 'Sign off' }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 test('import crew from Excel, fix error, re-import shows no changes', async ({ page }, info) => {
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
@@ -125,7 +136,7 @@ test('fixing a row shows only its form; Cancel keeps the wizard as it was, and D
   await page.getByLabel('Date of birth').fill('2099-01-01');
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByLabel('Crew list file')).toBeVisible();
-  expect(await page.getByLabel('Crew list file').evaluate((input: HTMLInputElement) => input.files?.[0]?.name)).toBe('crew.xlsx'); // still names the file
+  await expect(page.getByText('crew.xlsx', { exact: true })).toBeVisible(); // the file is named in the page, not only by the input
   await expect(page.getByLabel('Header row')).toHaveValue('4');
   await expect(previewRow(page, "O'BRIEN")).toContainText('Error');
   await expect(previewRow(page, 'ŠAŠIĆ').getByLabel('Skip')).toBeChecked(); // the skip survived
@@ -301,7 +312,8 @@ test('the import takes a before-import snapshot and saves the mapping, which the
   expect(snapshots).toHaveLength(1);
   expect(snapshots[0]).toMatchObject({ reason: 'before-import', note: 'crew-list.xlsx' });
   expect(snapshots[0].data.crew.map((m: { surname: string }) => m.surname)).toEqual(['HORVAT']); // as it was before the import
-  expect(await stored(page, 'crew')).toHaveLength(3);
+  const crewAfterImport = await stored(page, 'crew');
+  expect(crewAfterImport).toHaveLength(3);
 
   const [ship] = await stored(page, 'ships');
   expect(ship.crewImportMapping).toEqual({
@@ -315,6 +327,10 @@ test('the import takes a before-import snapshot and saves the mapping, which the
   await expect(page.getByLabel('No.', { exact: true })).toHaveValue('seamansBookNo');
   await expect(page.getByLabel('Date format')).toHaveValue('year-first');
   await expect(page.getByRole('listitem').filter({ hasText: 'No changes' })).toHaveCount(2);
+  // A file with nothing new offers nothing to import, and nothing was written: the crew is as it was and no snapshot was added.
+  await expect(page.getByRole('button', { name: 'Import 0 crew' })).toBeDisabled();
+  expect(await stored(page, 'crew')).toEqual(crewAfterImport);
+  expect(await stored(page, 'snapshots')).toHaveLength(1);
 });
 
 test('the flash after an import is shown once', async ({ page }, info) => {
@@ -352,6 +368,165 @@ test('the spreadsheet reader is loaded when a file is chosen, and importing work
   await expect(page.getByRole('list', { name: 'Crew' }).getByRole('listitem')).toHaveCount(2);
 });
 
+test('choosing a file again reads it again, so a file saved over (or repaired) is not ignored', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx');
+  const header: CrewSheetRow = ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No'];
+  await fs.writeFile(file, 'not a workbook');
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(page.getByRole('alert')).toContainText('password-protected');
+
+  await makeCrewXlsx(file, 'xlsx', [header, ['ŠAŠIĆ', 'Marko', 'C/O', '12.12.1990', 'P77']]);   // saved again, as the message says
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(previewList(page).getByRole('listitem')).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText('crew.xlsx', { exact: true })).toBeVisible();
+  // The input has let go of the file, which is what lets the browser report the same file when it is chosen again.
+  expect(await page.getByLabel('Crew list file').evaluate((input: HTMLInputElement) => input.files?.length)).toBe(0);
+
+  await makeCrewXlsx(file, 'xlsx', [header, ['ŠAŠIĆ', 'Marko', 'C/O', '12.12.1990', 'P77'], ['KOVAČ', 'Luka', 'OS', '01.02.1991', 'P78']]);
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(previewList(page).getByRole('listitem')).toHaveCount(2);
+  await expect(previewRow(page, 'Luka KOVAČ')).toContainText('New');
+});
+
+test('Back while a row is being fixed returns to the preview, as it was', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();
+  // Opening and closing the form is not a change of route: the router (and the scroll memory) hear of none.
+  await page.evaluate(() => {
+    (window as unknown as { hashChanges: number }).hashChanges = 0;
+    window.addEventListener('hashchange', () => { (window as unknown as { hashChanges: number }).hashChanges += 1; });
+  });
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toBeVisible();
+  await page.getByLabel('Date of birth').fill('1990-02-28');   // typed, but not applied
+
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/ship\/crew\/import$/);
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Import crew from Excel' })).toBeVisible();
+  await expect(page.getByLabel('Header row')).toHaveValue('4');
+  await expect(previewRow(page, 'ŠAŠIĆ').getByLabel('Skip')).toBeChecked();
+  await expect(previewRow(page, "O'BRIEN")).toContainText('Error');   // what was typed was dropped, like Cancel
+  await expect(previewRow(page, "O'BRIEN")).toBeFocused();
+
+  // The form can be opened again, and Done and Cancel leave it the same way.
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew\/import$/);
+  await expect(previewRow(page, "O'BRIEN")).toContainText('New');
+  await expect(page.getByRole('button', { name: 'Import 2 crew' })).toBeEnabled();   // PETROVIĆ and O'BRIEN; ŠAŠIĆ is skipped
+  expect(await page.evaluate(() => (window as unknown as { hashChanges: number }).hashChanges)).toBe(0);
+});
+
+test('fixes and skips stay when only the way the cells are read changes, and go, with a notice, when the columns change', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  const cleared = page.getByRole('status').filter({ hasText: 'Your fixes and skips were cleared because the columns changed.' });
+  await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByRole('button', { name: 'Done' }).click();
+  await expect(previewRow(page, "O'BRIEN")).toContainText('New');
+
+  await page.getByLabel('Sign-on date for rows without one').fill('2026-11-01');
+  await page.getByLabel('Date format').selectOption({ label: 'Year first (YYYY-MM-DD)' });   // the dotted dates are no dates any more
+  await expect(previewRow(page, 'PETROVIĆ')).toContainText('Error');
+  await expect(previewRow(page, 'ŠAŠIĆ').getByLabel('Skip')).toBeChecked();
+  await expect(previewRow(page, "O'BRIEN")).toContainText('New');                              // its fix is kept
+  await expect(cleared).toHaveCount(0);
+  await page.getByLabel('Date format').selectOption({ label: 'Day first (DD.MM.YYYY)' });
+  await expect(previewRow(page, 'PETROVIĆ')).toContainText('New');
+
+  await page.getByLabel('Given names', { exact: true }).selectOption({ label: '— ignore —' });
+  await expect(cleared).toBeVisible();
+  await expect(previewRow(page, 'ŠAŠIĆ').getByLabel('Skip')).not.toBeChecked();
+  await expect(previewRow(page, 'Jean-Luc')).toHaveCount(0);   // the given names are gone, and with them the fix of the row
+  await expect(previewList(page).getByRole('listitem').filter({ hasText: "O'BRIEN" })).toContainText('Error');
+  await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();   // the next thing the user does takes the notice away
+  await expect(cleared).toHaveCount(0);
+  await expect(page.getByRole('status')).toBeEmpty();
+});
+
+test('a column the user ignored although its header is known stays ignored on the next import', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(page.getByLabel('Date of birth', { exact: true })).toHaveValue('dateOfBirth');
+  await page.getByLabel('Date of birth', { exact: true }).selectOption({ label: '— ignore —' });
+  await expect(page.getByRole('button', { name: 'Import 3 crew' })).toBeEnabled();    // the bad date was in the ignored column
+  await page.getByRole('button', { name: 'Import 3 crew' }).click();
+  await expect(page.getByText('Imported 3 crew.')).toBeVisible();
+  expect((await stored(page, 'ships'))[0].crewImportMapping.ignored).toEqual(['dateofbirth']);
+  expect((await stored(page, 'crew')).map((m) => m.dateOfBirth)).toEqual(['', '', '']);
+
+  await page.goto('./#/ship/crew/import'); await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(page.getByLabel('Date of birth', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Surname', { exact: true })).toHaveValue('surname');
+  await expect(page.getByRole('listitem').filter({ hasText: 'No changes' })).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Import 0 crew' })).toBeDisabled();
+});
+
+test('an update row says which contract it updates and what it changes, and writes only that', async ({ page }, info) => {
+  const rows: CrewSheetRow[] = [
+    ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No', 'Passport expiry'],
+    ['HORVAT', 'Ana', 'C/O', '07.07.1977', 'H1', '01.01.2031'],
+  ];
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file, 'xlsx', rows);
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'H1', signOn: '2026-01-01' });
+  await signOff(page, 'Ana HORVAT', '2026-10-10', 'Santos');
+  const [before] = await stored(page, 'crew');
+  expect(before).toMatchObject({ signOffDate: '2026-10-10', signOffPort: 'Santos', rank: 'master', passportExpiry: '' });
+
+  await page.goto('./#/ship/crew/import'); await page.getByLabel('Crew list file').setInputFiles(file);
+  const row = previewRow(page, 'Ana HORVAT');
+  await expect(row).toContainText('Update');
+  await expect(row).toContainText('Updates the contract from 2026-01-01');
+  await expect(row).toContainText('Rank: Master → Chief Officer');
+  await expect(row).toContainText('Passport expiry: — → 2031-01-01');
+  await expect(row.getByRole('button', { name: 'Fix' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Import 1 crew' }).click();
+  await expect(page.getByText('Imported 1 crew.')).toBeVisible();
+
+  const crew = await stored(page, 'crew');
+  expect(crew).toHaveLength(1);
+  expect(crew[0]).toEqual({ ...before, rank: 'chiefOfficer', passportExpiry: '2031-01-01', updatedAt: crew[0].updatedAt });
+  expect(crew[0].updatedAt).not.toBe(before.updatedAt);
+});
+
+test('a passport of an earlier contract is an error, and the earlier contract is not changed', async ({ page }, info) => {
+  const rows: CrewSheetRow[] = [
+    ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No'],
+    ['HORVAT', 'Ana', 'C/O', '07.07.1977', 'P1'],      // the passport of the contract of 2025
+    ['KOVAČ', 'Luka', 'OS', '01.02.1991', 'P78'],
+  ];
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file, 'xlsx', rows);
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', signOn: '2025-01-01' });
+  await signOff(page, 'Ana HORVAT', '2025-06-30');
+  await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', signOn: '2026-06-01' });   // renewed passport
+  const before = await stored(page, 'crew');
+  expect(before).toHaveLength(2);
+
+  await page.goto('./#/ship/crew/import'); await page.getByLabel('Crew list file').setInputFiles(file);
+  const row = previewRow(page, 'Ana HORVAT');
+  await expect(row).toContainText('Error');
+  await expect(row).toContainText("This passport belongs to an earlier contract. Ana HORVAT's latest contract (from 2026-06-01) has passport P2.");
+  await expect(row.getByRole('button', { name: 'Fix' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Import 1 crew' })).toBeEnabled();    // only KOVAČ
+
+  await row.getByLabel('Skip').check();
+  await page.getByRole('button', { name: 'Import 1 crew' }).click();
+  await expect(page.getByText('Imported 1 crew.')).toBeVisible();
+  const after = await stored(page, 'crew');
+  expect(after).toHaveLength(3);
+  for (const m of before) expect(after.find((a) => a.id === m.id)).toEqual(m);   // neither HORVAT contract was touched
+});
+
 test.describe('while the file is read', () => {
   test.use({ serviceWorkers: 'block' }); // so that page.route sees the request for the spreadsheet reader
 
@@ -365,6 +540,6 @@ test.describe('while the file is read', () => {
     await expect(page.getByRole('status')).toHaveText('Reading file…');
     release();
     await expect(previewList(page)).toBeVisible();
-    await expect(page.getByRole('status')).toHaveCount(0);
+    await expect(page.getByRole('status')).toBeEmpty(); // the region stays on the page, and only its text goes
   });
 });

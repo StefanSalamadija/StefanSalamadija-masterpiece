@@ -33,6 +33,7 @@ function preview(existing: CrewMember[], ...data: Cell[][]): PreviewRow[] {
 const recheck = (rows: PreviewRow[], existing: CrewMember[] = []): PreviewRow[] => recheckRows(rows, existing, TODAY);
 const withSkip = (row: PreviewRow, skip = true): PreviewRow => ({ ...row, skip });
 const statuses = (rows: PreviewRow[]): string[] => rows.map(row => row.status);
+interface FieldErrorLike { field: string; message: string; severity: string }
 
 describe('recheckRows', () => {
   it('leaves a preview with nothing wrong across rows as it was built, and does not change its input', () => {
@@ -80,6 +81,59 @@ describe('recheckRows', () => {
     it('ignores empty passport numbers', () => {
       const rows = preview([], ['A', 'Ana', 'AB', '', '', ''], ['B', 'Ben', 'AB', '', '', '']);
       expect(statuses(recheck(rows))).toEqual(['new', 'new']);
+    });
+  });
+
+  describe('a passport of an earlier contract', () => {
+    const old = crewMember({ surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', signOnDate: '2025-01-01', signOffDate: '2025-06-30' });
+    const current = crewMember({ surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', signOnDate: '2026-06-01' }); // the passport was renewed
+    const crew = [old, current];
+    const ana = (passport: string): Cell[] => ['HORVAT', 'Ana', 'C/O', '07.07.1977', passport, ''];
+    const earlier = (later: CrewMember): FieldErrorLike => ({
+      field: 'passportNo', severity: 'error',
+      message: `This passport belongs to an earlier contract. Ana HORVAT's latest contract (from ${later.signOnDate}) has passport ${later.passportNo}.`,
+    });
+
+    it('makes an update that would change the earlier contract an error, naming the latest contract of the person', () => {
+      const [row] = recheck(preview(crew, ana('P1')), crew);
+      expect(row).toMatchObject({ status: 'error', existingId: old.id });
+      expect(row.errors).toEqual([earlier(current)]);
+    });
+
+    it('leaves an update of the latest contract alone', () => {
+      const [row] = recheck(preview(crew, ana('P2')), crew);
+      expect(row).toMatchObject({ status: 'update', existingId: current.id, errors: [] });
+    });
+
+    it('names the latest of several later contracts, and a passport it does not have', () => {
+      const middle = crewMember({ surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P3', signOnDate: '2025-09-01', signOffDate: '2025-12-31' });
+      const [row] = recheck(preview([old, middle, current], ana('P1')), [old, middle, current]);
+      expect(row.errors).toEqual([earlier(current)]);
+      const noPassport = { ...current, passportNo: '' };
+      const [blank] = recheck(preview([old, noPassport], ana('P1')), [old, noPassport]);
+      expect(blank.errors[0].message).toBe("This passport belongs to an earlier contract. Ana HORVAT's latest contract (from 2026-06-01) has no passport number.");
+    });
+
+    it('is cleared when the passport is fixed to the latest contract\'s, which the row then updates', () => {
+      const [row] = recheck(preview(crew, ana('P1')), crew);
+      // The row carried the dates of the earlier contract, so the user moves those to the latest one's as well.
+      const { signOffDate: _ended, ...kept } = row.draft;
+      const fixed = recheck([{ ...row, draft: { ...kept, passportNo: 'P2', signOnDate: '2026-06-01' } }], crew);
+      expect(fixed[0]).toMatchObject({ status: 'update', existingId: current.id, errors: [] });
+    });
+
+    it('does not apply to a skipped row, or to a row that changes nothing, which writes nothing', () => {
+      const [row] = preview(crew, ana('P1'));
+      expect(recheck([withSkip(row)], crew)[0]).toMatchObject({ status: 'update', errors: [] });
+      const [same] = preview(crew, ['HORVAT', 'Ana', 'Master', '07.07.1977', 'P1', '']);
+      expect(same).toMatchObject({ status: 'update', changes: [] });
+      expect(recheck([same], crew)[0]).toMatchObject({ status: 'update', errors: [] });
+    });
+
+    it('does not apply to someone who only has the same passport number as nobody else, or whose later contract is deleted', () => {
+      expect(recheck(preview([old], ana('P1')), [old])[0].status).toBe('update');
+      const deleted = { ...current, deleted: true };
+      expect(recheck(preview([old, deleted], ana('P1')), [old, deleted])[0].status).toBe('update');
     });
   });
 
@@ -173,5 +227,17 @@ describe('recheckRows', () => {
       const gone = crewMember({ deleted: true });
       expect(statuses(recheck(preview([], ivan), [gone]))).toEqual(['new']);
     });
+  });
+
+  it('stays fast for a long list: 6,000 rows born on one day, rechecked in well under a second each time', () => {
+    const rows = Array.from({ length: 6000 }, (_, i): Cell[] => [`SURNAME${i}`, `Name${i}`, 'AB', '14.03.1980', `P${i}`, '']);
+    const existing = Array.from({ length: 100 }, (_, i) => crewMember({ surname: `OLD${i}`, givenNames: `Crew${i}`, passportNo: `E${i}`, dateOfBirth: '1980-03-14' }));
+    const built = preview(existing, ...rows);
+    const started = performance.now();
+    const checked = recheck(built, existing);
+    const again = recheck(checked.map((row, i) => (i === 0 ? withSkip(row) : row)), existing);
+    expect((performance.now() - started) / 2).toBeLessThan(1000);
+    expect(checked.filter(row => row.status === 'new')).toHaveLength(6000);
+    expect(again[0].skip).toBe(true);
   });
 });

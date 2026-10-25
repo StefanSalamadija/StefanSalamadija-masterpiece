@@ -17,19 +17,21 @@ import type { CrewField, CrewMember, DateFormat, ShipProfile } from '../../domai
 import { Field } from '../components/Field';
 import { FixRow, PreviewItem } from '../components/ImportRows';
 import {
-  applyEdits, columnLabel, firstSheetWithData, fullNameIgnored, headerRowMessage, importCount, MAPPING_FIELDS, parseHeaderRow,
-  previewSummary, shownColumns, sheetSettings, withColumnField,
+  applyEdits, columnLabel, firstSheetWithData, fullNameIgnored, hasEdits, headerRowMessage, importCount, MAPPING_FIELDS,
+  parseHeaderRow, previewSummary, shownColumns, sheetSettings, withColumnField,
 } from '../crewImportView';
 import type { RowEdit, RowEdits } from '../crewImportView';
 import { useLive } from '../useLive';
 
 const FILE_TYPES = '.xlsx,.xls,.csv';
 
-/** What the wizard knows once a file is read. Changing any of it starts the preview again. */
+/** What the wizard knows once a file is read. The preview is made from it, so changing any of it makes the preview again. */
 interface Loaded {
   fileName: string;
   sheets: SheetGrid[];
   sheetIndex: number;
+  /** The index of the row the columns are read from. It follows `headerText` once that is a valid row number. */
+  headerRow: number;
   /** The header row as typed, 1-based. */
   headerText: string;
   mapping: ColumnMapping;
@@ -44,8 +46,8 @@ type ReadResult = { sheets: SheetGrid[] } | { problem: string };
  * screen needs it. The service worker keeps it for offline use. A file that cannot be read gives the reason to show.
  */
 async function readFile(file: File): Promise<ReadResult> {
-  const reader = await import('../../domain/crewImport/readSpreadsheet').catch(() => {
-    throw new Error("The spreadsheet reader couldn't be loaded. Reload the app and try again.");
+  const reader = await import('../../domain/crewImport/readSpreadsheet').catch((cause: unknown) => {
+    throw new Error("The spreadsheet reader couldn't be loaded. Reload the app and try again.", { cause });
   });
   try {
     return { sheets: await reader.readSpreadsheet(file.name, await file.arrayBuffer()) };
@@ -54,6 +56,9 @@ async function readFile(file: File): Promise<ReadResult> {
     throw err;
   }
 }
+
+/** Said when fixes and skips are dropped because the rows they were made on are not the same any more. */
+const CLEARED_MESSAGE = 'Your fixes and skips were cleared because the columns changed.';
 
 function SelectField({ label, value, onChange, children }: {
   label: string;
@@ -75,6 +80,8 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const existing = useLive(() => listForShip<CrewMember>(db, 'crew', ship.id), [db, ship.id]);
   const [loaded, setLoaded] = useState<Loaded>();
   const [edits, setEdits] = useState<RowEdits>({});
+  /** Fixes and skips were dropped, and the user has not made new ones since. */
+  const [cleared, setCleared] = useState(false);
   const [fixing, setFixing] = useState<number>();
   const [reading, setReading] = useState(false);
   const [problem, setProblem] = useState<string>();
@@ -82,27 +89,29 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const [importing, setImporting] = useState<number>();
   const latestRead = useRef(0);
   const lastFixed = useRef<number | undefined>(undefined);
+  const leavingFix = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const fileId = useId();
 
   const grid = loaded?.sheets[loaded.sheetIndex];
   const rowCount = grid?.rows.length ?? 0;
   const headerNumber = loaded && parseHeaderRow(loaded.headerText, rowCount);
-  const headerRow = headerNumber === undefined ? undefined : headerNumber - 1;
   const today = shipToday;
 
   // What the file says, and then with what the user did to it, so that every fix and every skip is checked against the other rows.
   const built = useMemo(() => {
-    if (!loaded || !grid || headerRow === undefined || !existing) return [];
+    if (!loaded || !grid || !existing) return [];
     return buildPreview({
-      rows: grid.rows, headerRow, mapping: loaded.mapping, dateFormat: loaded.dateFormat, existing,
+      rows: grid.rows, headerRow: loaded.headerRow, mapping: loaded.mapping, dateFormat: loaded.dateFormat, existing,
       currentYear: Number(today.slice(0, 4)), today, defaultSignOnDate: loaded.defaultSignOn,
     });
-  }, [grid, headerRow, loaded?.mapping, loaded?.dateFormat, loaded?.defaultSignOn, existing, today]);
+  }, [grid, loaded?.headerRow, loaded?.mapping, loaded?.dateFormat, loaded?.defaultSignOn, existing, today]);
   const rows = useMemo(
     () => (existing ? recheckRows(applyEdits(built, edits), existing, today) : []),
     [built, edits, existing, today],
   );
-  const columns = useMemo(() => (grid && headerRow !== undefined ? shownColumns(grid.rows, headerRow) : []), [grid, headerRow]);
+  const columns = useMemo(() => (grid && loaded ? shownColumns(grid.rows, loaded.headerRow) : []), [grid, loaded?.headerRow]);
+  const contractsById = useMemo(() => new Map((existing ?? []).map((m) => [m.id, m])), [existing]);
 
   // Back from the fix form, the focus returns to the row that was fixed.
   useEffect(() => {
@@ -111,18 +120,39 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
     lastFixed.current = undefined;
   }, [fixing]);
 
+  // The fix form has a history entry of its own (same address), so that Back closes the form and does not leave the wizard.
+  useEffect(() => {
+    if (fixing === undefined) return;
+    const close = (): void => {
+      lastFixed.current = fixing;
+      leavingFix.current = false;
+      setFixing(undefined);
+    };
+    window.addEventListener('popstate', close);
+    return () => window.removeEventListener('popstate', close);
+  }, [fixing]);
+
   if (!existing) return null;
 
-  /** Changes what the preview is made from; whatever was fixed or skipped is dropped with it. */
-  function change(patch: Partial<Loaded>): void {
+  /** Changes how the cells are read. Fixes and skips are kept: they are made on rows of the sheet, which are the same rows. */
+  function reread(patch: Partial<Loaded>): void {
     setLoaded((current) => current && { ...current, ...patch });
-    setEdits({});
+  }
+
+  /** Changes which rows there are, or what their columns are. Fixes and skips made so far do not fit any more, and are dropped. */
+  function restart(patch: Partial<Loaded>): void {
+    reread(patch);
+    if (hasEdits(edits)) {
+      setEdits({});
+      setCleared(true);
+    }
   }
 
   async function choose(file: File | undefined): Promise<void> {
     const mine = ++latestRead.current;
     setLoaded(undefined);
     setEdits({});
+    setCleared(hasEdits(edits));
     setFixing(undefined);
     setProblem(undefined);
     setReading(file !== undefined);
@@ -143,24 +173,44 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
       if (mine === latestRead.current) reportError(err);
     } finally {
       if (mine === latestRead.current) setReading(false);
+      // The browser only reports a file that is chosen again (say, saved over and picked a second time) when it was forgotten.
+      if (fileInput.current) fileInput.current.value = '';
     }
   }
 
   function typeHeaderRow(text: string): void {
     const number = parseHeaderRow(text, rowCount);
-    change(number === undefined || !grid ? { headerText: text } : { headerText: text, mapping: applySavedMapping(grid.rows[number - 1], ship.crewImportMapping) });
+    if (number === undefined || !grid || !loaded || number - 1 === loaded.headerRow) {
+      reread({ headerText: text }); // not a row yet, or the row it was: nothing to rebuild
+      return;
+    }
+    restart({ headerText: text, headerRow: number - 1, mapping: applySavedMapping(grid.rows[number - 1], ship.crewImportMapping) });
   }
 
   function edit(rowNumber: number, what: RowEdit): void {
     setEdits((current) => ({ ...current, [rowNumber]: { ...current[rowNumber], ...what } }));
+    setCleared(false);
+  }
+
+  function openFix(rowNumber: number): void {
+    window.history.pushState(null, '', window.location.href);
+    leavingFix.current = false;
+    setFixing(rowNumber);
+  }
+
+  /** Closes the fix form by going back to the entry that was there before it, which `popstate` then takes as the way out. */
+  function closeFix(): void {
+    if (leavingFix.current) return; // a second click must not go back twice
+    leavingFix.current = true;
+    window.history.back();
   }
 
   async function runImport(): Promise<void> {
-    if (importing !== undefined || !loaded || !grid || headerRow === undefined || !existing) return;
+    if (importing !== undefined || !loaded || !grid || !existing) return;
     const plan = importPlan(rows, existing);
     setImporting(plan.creates.length + plan.updates.length);
     try {
-      const mapping = toSavedMapping(grid.rows[headerRow], loaded.mapping, loaded.dateFormat);
+      const mapping = toSavedMapping(grid.rows[loaded.headerRow], loaded.mapping, loaded.dateFormat);
       const count = await importCrew(db, ship, plan, mapping, loaded.fileName);
       setFlash(`Imported ${count} crew.`);
       navigate('/ship/crew');
@@ -173,11 +223,11 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const fixRow = fixing === undefined ? undefined : rows.find((row) => row.rowNumber === fixing);
 
   const fieldOfColumn = new Map((Object.entries(loaded?.mapping ?? {}) as [string, number][]).map(([field, column]) => [column, field]));
-  const header = grid && headerRow !== undefined ? grid.rows[headerRow] : undefined;
+  const header = grid && loaded && headerNumber !== undefined ? grid.rows[loaded.headerRow] : undefined;
   const count = importCount(rows);
   const summary = previewSummary(rows);
 
-  // While a row is fixed only its form is shown. The file input stays (hidden), so that it still names the file that is loaded.
+  // While a row is fixed only its form is shown; the wizard is hidden, not gone, so that it is as it was when the form closes.
   return (
     <>
       <section class="screen" hidden={fixRow !== undefined}>
@@ -186,11 +236,11 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
           <div class="field">
             <label for={fileId}>Crew list file</label>
             <input
-              id={fileId} type="file" accept={FILE_TYPES} aria-invalid={problem ? 'true' : undefined}
+              id={fileId} ref={fileInput} type="file" accept={FILE_TYPES} aria-invalid={problem ? 'true' : undefined}
               onChange={(event) => void choose(event.currentTarget.files?.[0])}
             />
+            {loaded && <p class="import-file">{loaded.fileName}</p>}
             <p class="helper-text">An Excel (.xlsx, .xls) or CSV file. It is read on this device and goes nowhere else.</p>
-            {reading && <p class="helper-text" role="status">Reading file…</p>}
             {problem && <p class="field-error" role="alert">{problem}</p>}
           </div>
 
@@ -200,7 +250,7 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
                 label="Sheet" value={String(loaded.sheetIndex)}
                 onChange={(value) => {
                   const sheetIndex = Number(value);
-                  change({ sheetIndex, ...sheetSettings(loaded.sheets[sheetIndex].rows, ship.crewImportMapping) });
+                  restart({ sheetIndex, ...sheetSettings(loaded.sheets[sheetIndex].rows, ship.crewImportMapping) });
                 }}
               >
                 {loaded.sheets.map((sheet, index) => <option key={index} value={index}>{sheet.name}</option>)}
@@ -223,7 +273,7 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
                       {columns.map((column) => (
                         <SelectField
                           key={column} label={columnLabel(header, column)} value={fieldOfColumn.get(column) ?? ''}
-                          onChange={(value) => change({ mapping: withColumnField(loaded.mapping, column, value === '' ? undefined : (value as CrewField)) })}
+                          onChange={(value) => restart({ mapping: withColumnField(loaded.mapping, column, value === '' ? undefined : (value as CrewField)) })}
                         >
                           <option value="">— ignore —</option>
                           {MAPPING_FIELDS.map(({ field, label }) => <option key={field} value={field}>{label}</option>)}
@@ -235,42 +285,50 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
                     )}
                   </div>
 
-                  <SelectField label="Date format" value={loaded.dateFormat} onChange={(value) => change({ dateFormat: value as DateFormat })}>
+                  <SelectField label="Date format" value={loaded.dateFormat} onChange={(value) => reread({ dateFormat: value as DateFormat })}>
                     <option value="day-first">Day first (DD.MM.YYYY)</option>
                     <option value="year-first">Year first (YYYY-MM-DD)</option>
                   </SelectField>
                   <div class="import-section">
                     <Field
                       label="Sign-on date for rows without one" type="date" value={loaded.defaultSignOn}
-                      onInput={(value) => change({ defaultSignOn: value })}
+                      onInput={(value) => reread({ defaultSignOn: value })}
                     />
                     <p class="helper-text">Given to new crew whose row has no sign-on date.</p>
                   </div>
-
-                  <div class="import-section">
-                    <h3>Preview</h3>
-                    {rows.length === 0 && <p class="empty">No crew found below the header row. Check the header row and the columns.</p>}
-                    {rows.length > 0 && (
-                      <>
-                        <p class="helper-text" aria-live="polite">{summary}</p>
-                        <ul class="import-list" role="list" aria-label="Preview">
-                          {rows.map((row) => (
-                            <PreviewItem
-                              key={row.rowNumber} row={row}
-                              onFix={() => setFixing(row.rowNumber)} onSkip={(skip) => edit(row.rowNumber, { skip })}
-                            />
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                  </div>
-                  <div class="form-actions">
-                    <button type="button" class="btn btn-primary" disabled={importing !== undefined || count === 0} onClick={() => void runImport()}>
-                      {`Import ${importing ?? count} crew`}
-                    </button>
-                  </div>
                 </>
               )}
+            </>
+          )}
+
+          {/* The one place the wizard says what it is doing or has done. It stays on the page and only its text changes, so that it is announced. */}
+          <p class="live" role="status">{reading ? 'Reading file…' : cleared ? CLEARED_MESSAGE : ''}</p>
+
+          {!fixRow && header && (
+            <>
+              <div class="import-section">
+                <h3>Preview</h3>
+                {rows.length === 0 && <p class="empty">No crew found below the header row. Check the header row and the columns.</p>}
+                {rows.length > 0 && (
+                  <>
+                    <p class="helper-text" aria-live="polite">{summary}</p>
+                    <ul class="import-list" role="list" aria-label="Preview">
+                      {rows.map((row) => (
+                        <PreviewItem
+                          key={row.rowNumber} row={row}
+                          updates={row.status === 'update' ? contractsById.get(row.existingId ?? '')?.signOnDate : undefined}
+                          onFix={() => openFix(row.rowNumber)} onSkip={(skip) => edit(row.rowNumber, { skip })}
+                        />
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn btn-primary" disabled={importing !== undefined || count === 0} onClick={() => void runImport()}>
+                  {`Import ${importing ?? count} crew`}
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -281,11 +339,11 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
           onDone={(draft) => {
             edit(fixRow.rowNumber, { draft });
             lastFixed.current = fixRow.rowNumber;
-            setFixing(undefined);
+            closeFix();
           }}
           onCancel={() => {
             lastFixed.current = fixRow.rowNumber;
-            setFixing(undefined);
+            closeFix();
           }}
         />
       )}

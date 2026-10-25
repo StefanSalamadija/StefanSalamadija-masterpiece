@@ -65,7 +65,13 @@ export function FixRow({ row, crew, today, onDone, onCancel }: {
   );
 }
 
-export function PreviewItem({ row, onFix, onSkip }: { row: PreviewRow; onFix: () => void; onSkip: (skip: boolean) => void }) {
+export function PreviewItem({ row, updates, onFix, onSkip }: {
+  row: PreviewRow;
+  /** The sign-on date of the saved contract this row updates, when it does. */
+  updates?: string;
+  onFix: () => void;
+  onSkip: (skip: boolean) => void;
+}) {
   const nameId = useId();
   const name = fullName(row.draft) || '(no name)';
   const detail = [rankLabel(row.draft), row.draft.passportNo && `Passport ${row.draft.passportNo}`].filter(Boolean).join(' · ');
@@ -88,6 +94,7 @@ export function PreviewItem({ row, onFix, onSkip }: { row: PreviewRow; onFix: ()
           </p>
         );
       })}
+      {updates !== undefined && row.changes.length > 0 && <p class="import-change">{`Updates the contract from ${updates}`}</p>}
       {row.changes.map((change) => <p key={change.field} class="import-change">{changeText(change)}</p>)}
       <div class="row-actions">
         {row.status === 'error' && (

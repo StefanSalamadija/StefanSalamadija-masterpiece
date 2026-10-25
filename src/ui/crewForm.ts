@@ -1,4 +1,4 @@
-import { fullName, overlappingContract, rejoinDraft } from '../domain/crew';
+import { overlapMessage, overlappingContract, rejoinDraft } from '../domain/crew';
 import { validateCrewMember } from '../domain/validation';
 import type { CrewDraft, CrewMember, FieldError, RankKey } from '../domain/types';
 
@@ -29,7 +29,7 @@ export const CONTROL_ORDER: readonly CrewControl[] = [
 ];
 
 /** What the form can say about a contract; the sign-off is made with its own dialog. */
-export type CrewFields = Omit<CrewDraft, 'signOffDate' | 'signOffPort'>;
+export type CrewFormFields = Omit<CrewDraft, 'signOffDate' | 'signOffPort'>;
 
 export const RANK_REQUIRED = 'Rank is required.';
 const SIGN_OFF_DATE_REQUIRED = 'Sign-off date is required.';
@@ -53,8 +53,8 @@ export function crewFormOf(m: CrewDraft): CrewForm {
   };
 }
 
-function fieldsWith(form: CrewForm, rank: RankKey): CrewFields {
-  const fields: CrewFields = {
+function fieldsWith(form: CrewForm, rank: RankKey): CrewFormFields {
+  const fields: CrewFormFields = {
     surname: form.surname.trim(), givenNames: form.givenNames.trim(), rank, nationality: form.nationality.trim(),
     dateOfBirth: form.dateOfBirth, placeOfBirth: form.placeOfBirth.trim(), passportNo: form.passportNo.trim(),
     passportExpiry: form.passportExpiry, seamansBookNo: form.seamansBookNo.trim(), seamansBookExpiry: form.seamansBookExpiry,
@@ -65,7 +65,7 @@ function fieldsWith(form: CrewForm, rank: RankKey): CrewFields {
 }
 
 /** The fields the form stands for, with the text trimmed; undefined while no rank is chosen. */
-export function crewFieldsOf(form: CrewForm): CrewFields | undefined {
+export function crewFieldsOf(form: CrewForm): CrewFormFields | undefined {
   return form.rank === '' ? undefined : fieldsWith(form, form.rank);
 }
 
@@ -73,7 +73,7 @@ export function crewFieldsOf(form: CrewForm): CrewFields | undefined {
  * The change that saves `fields` over `saved`. Whatever else is kept in the record (the sign-off) is not in it, and a
  * rank text the rank no longer needs is cleared.
  */
-export function crewPatchOf(fields: CrewFields, saved: CrewMember): Partial<CrewMember> {
+export function crewPatchOf(fields: CrewFormFields, saved: CrewMember): Partial<CrewMember> {
   return fields.rank !== 'other' && saved.rankOther !== undefined ? { ...fields, rankOther: undefined } : fields;
 }
 
@@ -82,9 +82,7 @@ export function overlapProblem(
   candidate: Parameters<typeof overlappingContract>[0], crew: CrewMember[], field: string,
 ): FieldError | undefined {
   const other = overlappingContract(candidate, crew);
-  if (!other) return undefined;
-  const span = other.signOffDate ? `from ${other.signOnDate} to ${other.signOffDate}` : `from ${other.signOnDate} (still onboard)`;
-  return problem(field, `This overlaps ${fullName(other)}'s contract ${span}.`);
+  return other && problem(field, overlapMessage(other));
 }
 
 /** What the form needs to know about the contract it edits and the ship's other contracts. */

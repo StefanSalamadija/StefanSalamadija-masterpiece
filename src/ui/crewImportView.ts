@@ -42,10 +42,13 @@ export function parseHeaderRow(text: string, rowCount: number): number | undefin
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= rowCount ? value : undefined;
 }
 
-/** What a sheet starts with: the row found to be the header (as typed, 1-based) and the columns mapped by that row and the saved mapping. */
-export function sheetSettings(rows: Cell[][], saved: CrewImportMapping | undefined): { headerText: string; mapping: ColumnMapping } {
+/**
+ * What a sheet starts with: the row found to be the header (its index, and as the user types it, 1-based) and the
+ * columns mapped by that row and the saved mapping.
+ */
+export function sheetSettings(rows: Cell[][], saved: CrewImportMapping | undefined): { headerRow: number; headerText: string; mapping: ColumnMapping } {
   const headerRow = detectHeaderRow(rows);
-  return { headerText: String(headerRow + 1), mapping: applySavedMapping(rows[headerRow], saved) };
+  return { headerRow, headerText: String(headerRow + 1), mapping: applySavedMapping(rows[headerRow], saved) };
 }
 
 export function headerRowMessage(rowCount: number): string {
@@ -81,7 +84,7 @@ export function columnLabel(header: Cell[] | undefined, column: number): string 
 /** The columns worth a choice: those with a header, and those with anything below it. */
 export function shownColumns(rows: Cell[][], headerRow: number): number[] {
   const below = rows.slice(headerRow + 1);
-  const width = Math.max(0, ...rows.slice(headerRow).map(row => row.length));
+  const width = rows.slice(headerRow).reduce((widest, row) => Math.max(widest, row.length), 0);
   const columns: number[] = [];
   for (let column = 0; column < width; column++) {
     const named = cellText(rows[headerRow]?.[column] ?? null) !== '';
@@ -145,6 +148,11 @@ export function previewSummary(rows: PreviewRow[]): string {
 /** What the user did to the preview: skipped rows, and rows with a draft of their own, by row number of the sheet. */
 export interface RowEdit { skip?: boolean; draft?: CrewDraft }
 export type RowEdits = Readonly<Record<number, RowEdit>>;
+
+/** True when the user has fixed or skipped any row. */
+export function hasEdits(edits: RowEdits): boolean {
+  return Object.values(edits).some(edit => edit.skip === true || edit.draft !== undefined);
+}
 
 export function applyEdits(rows: PreviewRow[], edits: RowEdits): PreviewRow[] {
   return rows.map(row => {
