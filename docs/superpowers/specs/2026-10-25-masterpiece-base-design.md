@@ -229,9 +229,11 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 - Cards and list rows have 10–12 px rounded corners on a dark surface. Status is shown as pill badges.
 - The main navigation is a bottom bar: Home, Ship, Profiles, Settings. The ship's sections are a row of chips under the header.
 - The header shows the ship's name, the ship's clock and the theme button.
-- **Logo (user-chosen): the "M" monogram.**
-  - A bold white "M" over a light-blue sea line, on a navy rounded tile (`#0B2545`). The Night version uses a `#12243A` tile with a teal sea line.
-  - It is used for the home-screen icon, the Android launch splash (navy background), the header brand and print footers.
+- **Logo (user-chosen): "M on the sea at sunrise" (logo v2).**
+  - A navy "M" stands on the waves, with the horizon behind it.
+  - The upper part of the tile is a bright, sunlit sky (warm white to light blue), with a small sun between the two peaks of the M. Below the horizon is blue sea, and dark navy waves sit under the M's feet.
+  - The Night version uses a dark sky, a pale moon, a teal horizon line and a light "M".
+  - It is used for the home-screen icon, the Android launch splash, the header brand and print footers. Print uses a one-colour line version.
 - **Welcome page (first start, approved as mocked up):**
   - The logo and "Masterpiece" on a navy band.
   - The tagline "Your ship's office in your pocket. Crew, certificates and paperwork — fully offline."
@@ -245,13 +247,24 @@ Themes (user decision: no red night mode):
 The header has a one-tap toggle, and the choice is remembered per device.
 Printing always uses a black-on-white print layout, whatever the theme.
 
-### 4.10 App PIN lock (optional)
+### 4.10 App lock: fingerprint and 4-digit passcode (user decision)
 
-- A 4–8 digit PIN, set in Settings. It is asked when the app opens and again after it has been in the background longer than a set time (default 5 minutes).
-- The PIN is stored only as a salted PBKDF2 hash.
-- After 5 wrong tries, waits grow: 30 s, then 1 min, then 5 min.
-- **Forgot PIN:** the only way out is to erase all data on this device and then import a backup. The app says so when the PIN is set.
-- **Limitation, stated in the app:** the PIN stops casual access but does not encrypt the data on the device. The phone's own screen lock and device encryption remain the real protection.
+- **Phones** (Android): unlock with the **fingerprint first**. If the fingerprint isn't recognised or the prompt is cancelled, the **4-digit passcode** is the fallback.
+- **Laptops:** the **4-digit passcode only**.
+- **Setting it up:**
+  - It is offered right after the first ship is created (*Protect Masterpiece*: set a passcode, plus "Also unlock with fingerprint" on phones), with a *Skip for now* option.
+  - Once on, the lock is required every time the app opens and after the app has been in the background longer than a set time (default 5 minutes).
+  - It can be turned off in Settings.
+- **How the fingerprint works:**
+  - It uses the phone's built-in sensor through the browser's standard secure-login feature (WebAuthn). It works offline.
+  - The app keeps only a public key and checks the phone's signed answer itself. No fingerprint data ever reaches the app.
+  - Android shows its own prompt and may offer the phone's own screen lock there.
+- **Passcode:**
+  - Exactly 4 digits, stored only as a salted PBKDF2 hash.
+  - After 5 wrong tries, waits grow: 30 s, then 1 min, then 5 min.
+  - Failed fingerprint attempts don't count towards the waits.
+- **Can't unlock** (forgotten passcode and no fingerprint): the only way out is to erase all data on this device and import a backup. The app says so when the lock is set up.
+- **Limitation, stated in the app:** the lock stops casual access but does not encrypt the data on the device. The phone's own screen lock and device encryption remain the real protection.
 
 ### 4.11 Data safety
 

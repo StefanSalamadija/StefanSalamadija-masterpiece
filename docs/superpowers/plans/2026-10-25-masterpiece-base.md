@@ -33,7 +33,7 @@
   - IDs come from `crypto.randomUUID()`.
   - Syncable records are never hard-deleted (soft delete only). The exceptions are snapshot restore and "erase all data on this device".
 - **Backup crypto:** password ≥ 8 characters; PBKDF2-SHA-256 with **600,000** iterations; AES-GCM 256; 16-byte salt; 12-byte IV.
-- **PIN:** 4–8 digits. Lockout after 5 wrong tries: 30 s, then 60 s, then 300 s. Relock after 5 minutes in the background by default.
+- **App lock (user decision):** phones unlock with the fingerprint first (WebAuthn platform authenticator), with an **exactly 4-digit** passcode as the fallback; laptops use the passcode only. Lockout after 5 wrong passcodes: 30 s, then 60 s, then 300 s. Relock after 5 minutes in the background by default.
 - **Warnings:** crew documents amber when expiry ≤ 6 months away, red when past. Certificates amber when expiry or next survey ≤ 90 days away, red when past.
 - **Defaults:** snapshots keep the last **5**; backup reminder **7** days.
 - **Ship's time offsets:** −720 to +840 minutes, in steps of 15.
@@ -905,28 +905,49 @@ expect((await prepareImport(B, t2, 'pw-12345678')).plan.summary.conflicts).toBe(
 
 ---
 
-### Task 12: PIN security rules
+### Task 12: App lock rules: 4-digit passcode and fingerprint
 
 **Files:**
-- Create: `src/security/pin.ts`
-- Test: `src/security/pin.test.ts`
+- Create: `src/security/pin.ts`, `src/security/fingerprint.ts`
+- Modify: `src/domain/types.ts` (adds `FingerprintCredential`; `PinSettings` gains `fingerprint?: FingerprintCredential`)
+- Test: `src/security/pin.test.ts`, `src/security/fingerprint.test.ts`
 
 **Interfaces:**
-- Consumes: `PinHash`, `LockoutState` (Task 2).
-- Produces:
-  - `isValidPin(pin: string): boolean` (`/^\d{4,8}$/`).
-  - `hashPin(pin: string, opts?: { iterations?: number }): Promise<PinHash>`: PBKDF2-SHA-256 with 100000 iterations by default and a random 16-byte salt.
-  - `verifyPin(pin: string, h: PinHash): Promise<boolean>`.
+- Consumes: `PinHash`, `LockoutState`, `PinSettings` (Task 2).
+- Produces in `types.ts`: `interface FingerprintCredential { credentialId: string /*base64url*/; publicKey: string /*SPKI, base64*/; alg: -7 | -257 }`.
+- Produces in `pin.ts` (the passcode is **exactly 4 digits**, per the user's decision):
+  - `isValidPin(pin: string): boolean` (`/^\d{4}$/`).
+  - `hashPin(pin: string, opts?: { iterations?: number }): Promise<PinHash>`: PBKDF2-SHA-256, 100000 iterations by default, random 16-byte salt.
+  - `verifyPin(pin: string, h: PinHash): Promise<boolean>`: constant-time comparison.
   - `registerFailure(s: LockoutState, now: Date): LockoutState`: the 5th failure locks for 30 s, the 6th for 60 s, the 7th and later for 300 s.
   - `registerSuccess(): LockoutState` (`{ failures: 0 }`).
   - `lockRemainingMs(s: LockoutState, now: Date): number`.
   - `shouldRelock(hiddenAt: string | undefined, now: Date, relockMinutes: number): boolean`: true when more than `relockMinutes` have passed.
+- Produces in `fingerprint.ts` (WebAuthn platform authenticator, fully offline, with local verification and no server):
+  - `isMobileDevice(userAgent: string): boolean`: `/Android|iPhone|iPad/i`.
+  - `isFingerprintAvailable(): Promise<boolean>`: true only when **all** hold: `isMobileDevice(navigator.userAgent)` (laptops use the passcode only, per the user's decision), `window.PublicKeyCredential` exists, and `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` resolves true.
+  - `registerFingerprint(): Promise<FingerprintCredential>`: `navigator.credentials.create({ publicKey: { rp: { name: 'Masterpiece' }, user: { id: <random 16 bytes>, name: 'masterpiece', displayName: 'Masterpiece' }, challenge: <random 32 bytes>, pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, attestation: 'none', timeout: 60000 } })`. It stores `rawId` as base64url, `response.getPublicKey()` as base64 SPKI, and `response.getPublicKeyAlgorithm()`.
+  - `unlockWithFingerprint(cred: FingerprintCredential): Promise<boolean>`: calls `navigator.credentials.get` with `allowCredentials: [{ type: 'public-key', id }]`, `userVerification: 'required'`, a random 32-byte challenge and a 60 s timeout, then returns `verifyAssertion(...)`. A cancelled, failed or timed-out prompt returns `false` and never throws.
+  - Pure, unit-tested helpers:
+    - `parseAuthenticatorData(bytes: Uint8Array): { rpIdHash: Uint8Array; userPresent: boolean; userVerified: boolean }`: UP is flag bit 0, UV is bit 2.
+    - `derToRawEcdsa(der: Uint8Array): Uint8Array`: 64-byte r‖s for WebCrypto ES256.
+    - `verifyAssertion(input: { cred: FingerprintCredential; authenticatorData: Uint8Array; clientDataJSON: Uint8Array; signature: Uint8Array; expectedChallenge: Uint8Array; expectedOrigin: string; expectedRpId: string }): Promise<boolean>`. It returns true only if **every** check passes:
+      - `clientData.type === 'webauthn.get'`;
+      - `clientData.challenge` (base64url) equals `expectedChallenge`;
+      - `clientData.origin === expectedOrigin`;
+      - `rpIdHash` equals SHA-256(`expectedRpId`);
+      - both `userPresent` and `userVerified` are set;
+      - the signature over `authenticatorData ‖ SHA-256(clientDataJSON)` verifies with the stored key (ES256 via `derToRawEcdsa`, RS256 PKCS1-v1_5 SHA-256).
+- **Limitation, stated in the app:**
+  - The lock stops casual access but does not encrypt the data on the device.
+  - Android shows its own fingerprint prompt, and may offer the phone's own screen lock as an alternative there. That choice belongs to the phone, not the app.
 
 - [ ] **Step 1: Write the failing tests.**
 
 ```ts
-expect(['1234', '12345678'].every(isValidPin)).toBe(true);
-expect(['123', '123456789', '12a4', ''].some(isValidPin)).toBe(false);
+// pin.test.ts
+expect(isValidPin('2580')).toBe(true);
+expect(['123', '12345', '12a4', '', ' 258'].some(isValidPin)).toBe(false);
 const h = await hashPin('2580', { iterations: 1000 });
 expect(await verifyPin('2580', h)).toBe(true);
 expect(await verifyPin('2581', h)).toBe(false);
@@ -942,12 +963,29 @@ expect(lockRemainingMs(s, new Date(t0.getTime() + 300_001))).toBe(0);
 expect(shouldRelock('2026-10-25T12:00:00.000Z', new Date('2026-10-25T12:04:00Z'), 5)).toBe(false);
 expect(shouldRelock('2026-10-25T12:00:00.000Z', new Date('2026-10-25T12:06:00Z'), 5)).toBe(true);
 expect(shouldRelock(undefined, t0, 5)).toBe(false);
+
+// fingerprint.test.ts — build a real ES256 key with crypto.subtle.generateKey, export SPKI as the stored cred,
+// hand-build authenticatorData (rpIdHash = SHA-256('localhost') ‖ flags ‖ 4-byte counter) and clientDataJSON
+// ({ type: 'webauthn.get', challenge: b64url(ch), origin: 'http://localhost:4173' }), sign authData ‖ SHA-256(clientDataJSON),
+// convert WebCrypto's raw r‖s signature to DER for the input (a test helper rawToDer).
+expect(isMobileDevice('Mozilla/5.0 (Linux; Android 14; Pixel 7)')).toBe(true);
+expect(isMobileDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(false);
+expect(parseAuthenticatorData(authData(0x05))).toMatchObject({ userPresent: true, userVerified: true });
+expect(parseAuthenticatorData(authData(0x01))).toMatchObject({ userPresent: true, userVerified: false });
+expect(derToRawEcdsa(rawToDer(raw))).toEqual(raw);   // including r/s with a leading 0x00 pad byte
+expect(await verifyAssertion(good)).toBe(true);
+expect(await verifyAssertion({ ...good, expectedChallenge: otherChallenge })).toBe(false);
+expect(await verifyAssertion({ ...good, expectedOrigin: 'https://evil.example' })).toBe(false);
+expect(await verifyAssertion({ ...good, expectedRpId: 'example.com' })).toBe(false);
+expect(await verifyAssertion({ ...good, authenticatorData: authData(0x01) /* UV not set, re-signed */ , signature: sigFor(authData(0x01)) })).toBe(false);
+expect(await verifyAssertion({ ...good, signature: flipByte(good.signature) })).toBe(false);
+expect(await verifyAssertion({ ...good, clientDataJSON: enc({ type: 'webauthn.create', challenge, origin }) })).toBe(false);
 ```
 
 - [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/security`. Expected: FAIL.
-- [ ] **Step 3: Implement `pin.ts`.**
-- [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
-- [ ] **Step 5: Commit.** `git add src/security && git commit -m "feat: PIN hashing and lockout rules"`
+- [ ] **Step 3: Implement `pin.ts`, `fingerprint.ts` and the type additions.** `registerFingerprint` and `unlockWithFingerprint` are thin wrappers over the browser API; they are covered by Task 21's e2e test with a virtual authenticator.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npx vitest run src/security && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: passcode and fingerprint lock rules"`
 
 ---
 
@@ -970,13 +1008,19 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
     - Header: `<h1>Masterpiece</h1>`, the ship name, and a clock element `data-testid="ship-clock"` with the text `HH:mm LT (UTC±hh:mm)`.
     - Theme button: `aria-label` is `Theme: Day`, `Theme: Night` or `Theme: High contrast`. It cycles day → night → contrast and sets `<html data-theme>` to `day`, `night` or `contrast`.
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
-    - **Logo (user-chosen: "M" monogram)** in `LogoMark.tsx` (`{ size: number; mode: 'day' | 'night' }`), as inline SVG with viewBox `0 0 100 100`:
-      - M: `path d="M22 70 L22 26 L50 54 L78 26 L78 70"`, no fill, stroke-width 10, round joins and caps.
-      - Sea line: `path d="M16 84 Q33 76 50 84 T84 84"`, no fill, stroke-width 5, round caps.
-      - Day: M `#FFFFFF`, sea line `#7AB8FF`, on a navy tile `#0B2545`. Night: M `#E6EDF5`, sea line `#5FD4CE`, on a tile `#12243A`.
+    - **Logo (user-chosen: logo v2, "M on the sea at sunrise")** in `LogoMark.tsx` (`{ size: number; mode: 'day' | 'night' }`). It is inline SVG with viewBox `0 0 100 100`, clipped to a rounded tile `rect width=100 height=100 rx=22`. Copy the geometry exactly from the mockup artboard "Logo v2" (https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x):
+      - **Sky:** `rect height=62`, linear gradient top→bottom `#FFF1C2` → `#D6EAFF` (0.55) → `#9CCBFF`, plus a radial glow (cx 0.5, cy 0.2, r 0.5, white → `#FFF8E1` transparent).
+      - **Sun:** `circle cx=50 cy=20 r=7.5 fill=#FFFDF2`.
+      - **Far sea:** `rect y=60 height=40 fill=#2E6DB4`.
+      - **Horizon:** `path d="M0 60 H100"`, white at 0.85 opacity, width 0.8.
+      - **M:** `path d="M24 77 L24 32 L50 57 L76 32 L76 77"`, no fill, stroke `#0B2545`, width 10, round joins and caps. Underneath it, a white halo of the same path at width 15, 0.9 opacity.
+      - **Front waves:** `path d="M0 78 Q12.5 72 25 78 T50 78 T75 78 T100 78 V100 H0 Z" fill=#0B2545`, with a crest line of the same curve in `#7AB8FF`, width 2.5.
+      - **Small sizes (≤ 64 px):** omit the glow, the horizon line, the halo and the small wave accents, and thicken the M to width 12–13.
+      - **Night:** sky `#0B1622` → `#1E3550`, moon `circle cx=50 cy=20 r=6 fill=#E6EDF5 opacity=.85`, far sea `#12243A`, horizon `#5FD4CE`, M `#E6EDF5` (no halo), front waves `#0E1B2B`, crest `#5FD4CE`.
+      - Use unique gradient and clip ids per instance (for example via a counter), because several logos can be on one page.
       - `role="img"`, `aria-label="Masterpiece logo"`.
-      - The same mark is used in the header brand line (24 px, before "Masterpiece").
-      - `public/icon.svg` is the Day tile with corner radius 22% (maskable: 20% padding). Regenerate the PNGs from it.
+      - **Header brand:** the 24 px small-size version before "Masterpiece".
+      - `public/icon.svg` is the Day tile. The maskable icon adds 20% padding of `#0B2545`. Regenerate the PNGs from it.
     - **Welcome screen (FirstShip.tsx, shown when no ships exist)**, matching the mockup "Welcome page — Day/Night":
       - A top band (Day: navy `#0B2545`; Night: page background) with a 120 px logo tile and `<h1>Masterpiece</h1>`.
       - The tagline, exactly: `Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.`
@@ -1015,7 +1059,7 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
   - **Print:** `@media print` forces background `#ffffff` and text `#000000` and hides nav, header buttons and banners, whatever the theme.
   - **e2e helpers** in `e2e/helpers.ts`:
     - `freshApp(page, opts?: { time?: string })`: installs `page.clock` at `opts.time ?? '2026-10-25T09:00:00Z'`, then goes to `./`.
-    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00')`: clicks `Create your first ship` on the welcome screen, then fills the form and clicks `Create ship`.
+    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00', opts?: { skipLock?: boolean })`: clicks `Create your first ship` on the welcome screen, then fills the form and clicks `Create ship`. With `skipLock` (default `true`), it clicks `Skip for now` if the Task 21 protect step appears. Before Task 21 exists, that step never appears.
     - `expectNoHorizontalScroll(page)`: sets a 360×740 viewport and asserts `document.documentElement.scrollWidth <= 360`.
 
 - [ ] **Step 1: Write the failing e2e tests** in `e2e/shell.spec.ts`:
@@ -1496,58 +1540,108 @@ The alert details use ISO dates in the domain layer. Home displays them in the s
 
 ---
 
-### Task 21: PIN lock UI
+### Task 21: App lock UI (fingerprint on phones, 4-digit passcode everywhere)
 
 **Files:**
-- Create: `src/ui/screens/PinLock.tsx`, `src/ui/components/PinSettings.tsx`
-- Modify: `src/app/App.tsx` (lock gate), `src/ui/screens/Settings.tsx` (adds the `App PIN lock` section)
-- Test: `e2e/pin.spec.ts`
+- Create: `src/ui/screens/LockScreen.tsx`, `src/ui/components/AppLockSettings.tsx`, `src/ui/screens/ProtectApp.tsx`
+- Modify: `src/app/App.tsx` (lock gate and first-start protect step), `src/ui/screens/Settings.tsx` (adds the `App lock` section)
+- Test: `e2e/lock.spec.ts`
 
 **Interfaces:**
-- Consumes: Task 12 (`isValidPin`, `hashPin`, `verifyPin`, `registerFailure`, `registerSuccess`, `lockRemainingMs`, `shouldRelock`), Task 9 (`updateSettings`), Task 13 (`useAppState`).
+- Consumes: Task 12 (`isValidPin`, `hashPin`, `verifyPin`, `registerFailure`, `registerSuccess`, `lockRemainingMs`, `shouldRelock`, `isFingerprintAvailable`, `registerFingerprint`, `unlockWithFingerprint`), Task 9 (`updateSettings`), Task 13 (`useAppState`, welcome flow).
+- **User decisions:**
+  - **Phones** unlock with the fingerprint first, with the 4-digit passcode as the fallback.
+  - **Laptops** use the 4-digit passcode only.
+  - The lock is offered right after the first ship is created, and stays on until it is turned off in Settings.
 - Produces:
-  - **Settings section** `App PIN lock`:
-    - Button `Set PIN` (or `Change PIN` / `Remove PIN` when one is set).
-    - Fields `New PIN`, `Repeat PIN` and `Lock after (minutes in background)` (default 5), and button `Save PIN`.
-    - The exact texts `The PIN stops casual access. It does not encrypt the data on this device — your phone's screen lock and encryption are the real protection.` and `If you forget the PIN, the only way back in is to erase all data on this device and restore a backup.`
-    - Invalid PIN: `Use 4 to 8 digits.`
-  - **Lock screen:** heading `Enter PIN`, input `PIN` (`inputmode="numeric"`), button `Unlock`.
-    - Wrong PIN → `Wrong PIN.`
-    - Locked out → `Too many attempts. Try again in <n> s.` (the countdown updates every second).
-    - Button `Forgot PIN?` opens a confirm dialog with the button `Erase everything`. It deletes the Dexie database, then `location.reload()`.
+  - **First-start protect step (`ProtectApp.tsx`).** It is shown once, after the first ship is created on the welcome screen, and again whenever no lock has been set up and `settings.lockPrompted` is not true.
+    - Heading `Protect Masterpiece`.
+    - Text `Set a 4-digit passcode to open the app.` On phones with a fingerprint sensor it adds ` You can also unlock with your fingerprint.`
+    - Fields `New passcode` and `Repeat passcode`.
+    - On a phone with a fingerprint sensor (`isFingerprintAvailable()`), the checkbox `Also unlock with fingerprint`, ticked by default.
+    - Buttons `Turn on app lock` and `Skip for now`.
+    - Either button sets `settings.lockPrompted = true`, so the step is not shown again.
+    - Turning the lock on with the fingerprint box ticked calls `registerFingerprint()`. If that fails, the passcode is still saved and the message `Fingerprint couldn't be set up. You can try again in Settings.` is shown.
+  - **Settings section `App lock`:**
+    - When off: button `Turn on app lock` (the same fields as the protect step).
+    - When on: `Change passcode`, the toggle `Unlock with fingerprint` (shown only when `isFingerprintAvailable()`), `Lock after (minutes in background)` (default 5) and `Turn off app lock`.
+    - Exact texts:
+      - `The lock stops casual access. It does not encrypt the data on this device — your phone's screen lock and encryption are the real protection.`
+      - `If you can't unlock (forgotten passcode and no fingerprint), the only way back in is to erase all data on this device and restore a backup.`
+    - Invalid passcode: `Use exactly 4 digits.` Mismatch: `The passcodes don't match.`
+  - **Lock screen (`LockScreen.tsx`):**
+    - The 64 px logo, heading `Masterpiece is locked`, and the active ship name.
+    - **With a fingerprint enrolled** (phone): on mount it calls `unlockWithFingerprint()` straight away, showing the button `Unlock with fingerprint` (to retry) and the link-button `Use passcode`. If the fingerprint returns false it switches to the passcode view with the text `Fingerprint not recognised — enter your passcode.`
+    - **Passcode view:** input `Passcode` (`inputmode="numeric"`, `maxlength="4"`, `autocomplete="off"`). It submits automatically at the 4th digit; there is also a button `Unlock`.
+      - Wrong passcode → `Wrong passcode.`
+      - Locked out → `Too many attempts. Try again in <n> s.` (the countdown updates every second). Fingerprint failures do not count towards the lockout.
+    - Button `Forgot passcode?` opens a confirm dialog with the button `Erase everything`. It deletes the Dexie database, then calls `location.reload()`.
   - **Gate:**
-    - The lock shows on app start when a PIN is set.
+    - The lock shows on app start when a passcode is set.
     - On `visibilitychange` to hidden, record `hiddenAt` in memory. On visible, lock if `shouldRelock` is true.
     - The lockout state is persisted in `settings.pin.lockout`, so a reload does not reset it.
+    - `Settings` gains `lockPrompted?: boolean`.
 
 - [ ] **Step 1: Write the failing e2e tests.**
 
 ```ts
-test('PIN lock, lockout, unlock, relock, forgot', async ({ page }) => {
-  await freshApp(page); await setupShip(page); await page.goto('./#/settings');
-  await page.getByRole('button', { name: 'Set PIN' }).click();
-  await page.getByLabel('New PIN').fill('123'); await expect(page.getByRole('alert')).toHaveText('Use 4 to 8 digits.');
-  await page.getByLabel('New PIN').fill('2580'); await page.getByLabel('Repeat PIN').fill('2580');
-  await page.getByRole('button', { name: 'Save PIN' }).click();
-  await page.reload(); await expect(page.getByRole('heading', { name: 'Enter PIN' })).toBeVisible();
-  for (let i = 0; i < 5; i++) { await page.getByLabel('PIN').fill('0000'); await page.getByRole('button', { name: 'Unlock' }).click(); }
+test('protect step and passcode lock (laptop: no fingerprint offered)', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
+  await expect(page.getByLabel('Also unlock with fingerprint')).toHaveCount(0);
+  await page.getByLabel('New passcode').fill('123'); await page.getByLabel('Repeat passcode').fill('123');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Use exactly 4 digits.');
+  await page.getByLabel('New passcode').fill('2580'); await page.getByLabel('Repeat passcode').fill('2580');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await page.reload(); await expect(page.getByRole('heading', { name: 'Masterpiece is locked' })).toBeVisible();
+  for (let i = 0; i < 5; i++) await page.getByLabel('Passcode').fill('0000');   // auto-submits at 4 digits
   await expect(page.getByText(/Too many attempts\. Try again in \d+ s\./)).toBeVisible();
   await page.clock.fastForward(31_000);
-  await page.getByLabel('PIN').fill('2580'); await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByLabel('Passcode').fill('2580');
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   const setVis = (v: string) => page.evaluate(v => { Object.defineProperty(document, 'visibilityState', { value: v, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); }, v);
   await setVis('hidden'); await page.clock.fastForward('06:00'); await setVis('visible');
-  await expect(page.getByRole('heading', { name: 'Enter PIN' })).toBeVisible();
-  await page.getByRole('button', { name: 'Forgot PIN?' }).click();
+  await expect(page.getByRole('heading', { name: 'Masterpiece is locked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Forgot passcode?' }).click();
   await page.getByRole('button', { name: 'Erase everything' }).click();
   await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
 });
+
+test('phone: fingerprint first, passcode as fallback', async ({ page }, info) => {
+  test.skip(info.project.name !== 'android');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByLabel('Also unlock with fingerprint')).toBeChecked();
+  await page.getByLabel('New passcode').fill('2580'); await page.getByLabel('Repeat passcode').fill('2580');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await page.reload();                                                      // fingerprint prompt runs on open and succeeds
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+  await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
+  await page.reload();
+  await expect(page.getByText('Fingerprint not recognised — enter your passcode.')).toBeVisible();
+  await page.getByLabel('Passcode').fill('2580');
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+});
+
+test('skip for now does not ask again', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toHaveCount(0);
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+});
 ```
 
-- [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/pin.spec.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement the lock screen, PIN settings and gate.**
-- [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
-- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: optional app PIN lock"`
+Task 13's `setupShip` helper must leave the protect step visible; it doesn't dismiss it. Earlier e2e specs that use `setupShip` click `Skip for now`, through the helper's new option `setupShip(page, name, offset, { skipLock = true })`. The default skips, so Tasks 13–20 need no change; this test passes `{ skipLock: false }`.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/lock.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement the protect step, the lock screen, the settings section and the gate.** Update the `setupShip` helper as above.
+- [ ] **Step 4: Run them and confirm they pass,** together with the earlier e2e specs. Run: `npx playwright test`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: app lock with fingerprint and 4-digit passcode"`
 
 ---
 
