@@ -18,28 +18,51 @@ export async function createRecord<T extends SyncRecord>(
   return record;
 }
 
-/** Applies `patch` to a stored record and stamps it as updated now by this device. The id and creation time cannot change. */
-export async function updateRecord<T extends SyncRecord>(
-  db: MasterpieceDB, table: TableName, id: string, patch: Partial<T>,
-): Promise<T> {
+/** Fields a patch never changes: identity, creation time, ship/personal side, owning ship, and deletion (see `softDelete`). */
+const FIXED_FIELDS: ReadonlySet<string> = new Set(['id', 'createdAt', 'scope', 'shipId', 'deleted']);
+
+/**
+ * Reads a record and writes the version `next` builds from it, stamped as changed now by this device, in one
+ * transaction. `next` returning undefined leaves the record as it is.
+ */
+async function rewrite(
+  db: MasterpieceDB, table: TableName, id: string,
+  next: (current: SyncRecord, stamp: Pick<BaseRecord, 'updatedAt' | 'updatedBy'>) => SyncRecord | undefined,
+): Promise<SyncRecord> {
   const { deviceId } = await getSettings(db);
   const t = syncTable(db, table);
   return guardWrite(() =>
     db.transaction('rw', t, async () => {
       const current = await t.get(id);
       if (!current) throw new Error(`There is no ${table} record with id ${id}.`);
-      const updated = {
-        ...current, ...patch, id: current.id, createdAt: current.createdAt, updatedAt: new Date().toISOString(), updatedBy: deviceId,
-      } as T;
-      await t.put(updated);
-      return updated;
+      const updated = next(current, { updatedAt: new Date().toISOString(), updatedBy: deviceId });
+      if (updated) await t.put(updated);
+      return updated ?? current;
     }),
   );
 }
 
-/** Marks a record deleted. It stays in the table as a tombstone, so the deletion reaches other devices. */
+/**
+ * Applies `patch` to a live record and stamps it as updated now by this device. Keys in `FIXED_FIELDS` are ignored,
+ * so a stale copy cannot move a record to another ship, change its side or undo a deletion. A deleted record is refused.
+ */
+export async function updateRecord<T extends SyncRecord>(
+  db: MasterpieceDB, table: TableName, id: string, patch: Partial<T>,
+): Promise<T> {
+  const changes = Object.fromEntries(Object.entries(patch).filter(([key]) => !FIXED_FIELDS.has(key)));
+  const updated = await rewrite(db, table, id, (current, stamp) => {
+    if (current.deleted) throw new Error(`Record is deleted: ${table}:${id}`);
+    return { ...current, ...changes, ...stamp };
+  });
+  return updated as T;
+}
+
+/**
+ * Marks a record deleted. It stays in the table as a tombstone, so the deletion reaches other devices. Deleting a
+ * tombstone again changes nothing, so it keeps its original deletion time.
+ */
 export async function softDelete(db: MasterpieceDB, table: TableName, id: string): Promise<void> {
-  await updateRecord(db, table, id, { deleted: true });
+  await rewrite(db, table, id, (current, stamp) => (current.deleted ? undefined : { ...current, deleted: true, ...stamp }));
 }
 
 /** The ship's records in `table` that are not deleted. */
@@ -59,14 +82,17 @@ export function allTables(db: MasterpieceDB): Promise<Tables> {
   });
 }
 
-/** Replaces the contents of every syncable table, all or nothing. Settings and snapshots are not touched. */
+/**
+ * Replaces the contents of every syncable table, all or nothing. A table missing from `t` is left empty. Settings and
+ * snapshots are not touched.
+ */
 export function replaceAllTables(db: MasterpieceDB, t: Tables): Promise<void> {
   return guardWrite(() =>
     db.transaction('rw', syncTables(db), async () => {
       for (const name of TABLE_NAMES) {
         const table = syncTable(db, name);
         await table.clear();
-        await table.bulkPut(t[name]);
+        await table.bulkPut(t[name] ?? []);
       }
     }),
   );

@@ -36,10 +36,12 @@ export async function getSettings(db: MasterpieceDB): Promise<Settings> {
   return guardWrite(() => db.transaction('rw', db.settings, async () => readOrCreate(db)));
 }
 
+/** Merges `patch` into the stored settings. The device id (and the record key) never change. */
 export function updateSettings(db: MasterpieceDB, patch: Partial<Settings>): Promise<Settings> {
   return guardWrite(() =>
     db.transaction('rw', db.settings, async () => {
-      const updated: Settings = { ...(await readOrCreate(db)), ...patch, key: DEVICE_KEY };
+      const current = await readOrCreate(db);
+      const updated: Settings = { ...current, ...patch, key: DEVICE_KEY, deviceId: current.deviceId };
       await db.settings.put(updated);
       return updated;
     }),

@@ -50,6 +50,16 @@ describe('createShip', () => {
     expect((await getSettings(db)).activeShipId).toBe(first.id);
   });
 
+  it('makes the new ship active when the active ship no longer exists or was deleted', async () => {
+    const db = freshDb();
+    await updateSettings(db, { activeShipId: 'never-existed' });
+    const a = await createShip(db, 'A', 0);
+    expect((await getSettings(db)).activeShipId).toBe(a.id);
+    await softDelete(db, 'ships', a.id); // a direct delete, unlike deleteShip, leaves activeShipId pointing at it
+    const b = await createShip(db, 'B', 0);
+    expect((await getSettings(db)).activeShipId).toBe(b.id);
+  });
+
   it('defaults the effective time of the first clock change to now', async () => {
     const db = freshDb();
     vi.useFakeTimers({ now: new Date('2026-12-01T10:30:00Z'), toFake: ['Date'] });
@@ -285,6 +295,15 @@ describe('copyShip', () => {
     expect((await getSettings(db)).activeShipId).toBe(src.id);
     await updateSettings(db, { activeShipId: undefined });
     const cp = await copyShip(db, src.id, 'MV OCEAN GEM', { includeCertificates: false });
+    expect((await getSettings(db)).activeShipId).toBe(cp.id);
+  });
+
+  it('makes the copy active when the active ship was deleted', async () => {
+    const db = freshDb();
+    const active = await createShip(db, 'MV OLD', 0);
+    const src = await createShip(db, 'MV OCEAN STAR', 180);
+    await softDelete(db, 'ships', active.id);
+    const cp = await copyShip(db, src.id, 'MV OCEAN PEARL', { includeCertificates: false });
     expect((await getSettings(db)).activeShipId).toBe(cp.id);
   });
 

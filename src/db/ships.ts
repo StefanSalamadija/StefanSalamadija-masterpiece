@@ -22,8 +22,15 @@ export async function listShips(db: MasterpieceDB): Promise<ShipProfile[]> {
   return ships.sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
 }
 
+/** True when `id` names a ship that exists and is not deleted. */
+async function isLiveShip(db: MasterpieceDB, id: string | undefined): Promise<boolean> {
+  if (id === undefined) return false;
+  const ship = await db.ships.get(id);
+  return ship !== undefined && !ship.deleted;
+}
+
 /**
- * Adds a ship and its first clock change, and makes it the active ship if there is none.
+ * Adds a ship and its first clock change, and makes it the active ship if there is no live active ship.
  * Must run inside a read-write transaction on `ships`, `clockChanges` and `settings`.
  */
 async function addShip(db: MasterpieceDB, particulars: Particulars, offsetMinutes: number, now: Date): Promise<ShipProfile> {
@@ -31,7 +38,8 @@ async function addShip(db: MasterpieceDB, particulars: Particulars, offsetMinute
   await createRecord<ClockChange>(db, 'clockChanges', {
     shipId: ship.id, effectiveAt: now.toISOString(), toOffsetMinutes: offsetMinutes,
   });
-  if (!(await getSettings(db)).activeShipId) await updateSettings(db, { activeShipId: ship.id });
+  const { activeShipId } = await getSettings(db);
+  if (!(await isLiveShip(db, activeShipId))) await updateSettings(db, { activeShipId: ship.id });
   return ship;
 }
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ClockChange, CrewDraft, CrewMember, SyncRecord, Tables, Voyage } from '../domain/types';
+import { TABLE_NAMES } from '../domain/types';
+import type { ClockChange, CrewDraft, CrewMember, ShipProfile, SyncRecord, Tables, Voyage } from '../domain/types';
 import { getDb, openDb } from './schema';
 import { getSettings, guessDeviceName, updateSettings } from './settings';
 import {
@@ -34,6 +35,15 @@ describe('database', () => {
     expect(db.crew.schema.primKey.name).toBe('id');
     expect(db.crew.schema.idxByName).toHaveProperty('shipId');
     expect(db.snapshots.schema.idxByName).toHaveProperty('createdAt');
+  });
+
+  it('has a table for every syncable table name, each one below a ship indexed by ship', () => {
+    const db = freshDb();
+    const tables = new Map(db.tables.map((t) => [t.name, t]));
+    for (const name of TABLE_NAMES) {
+      expect(tables.has(name), name).toBe(true);
+      if (name !== 'ships') expect(tables.get(name)?.schema.idxByName, name).toHaveProperty('shipId');
+    }
   });
 
   it('hands out one app database', () => {
@@ -72,6 +82,15 @@ describe('settings', () => {
     const after = await updateSettings(db, { theme: 'night', backupReminderDays: 14, lastSync: { 'dev-2': '2026-10-25T08:00:00.000Z' } });
     expect(after).toMatchObject({ deviceId: before.deviceId, theme: 'night', backupReminderDays: 14, key: 'device' });
     expect(await getSettings(db)).toEqual(after);
+  });
+
+  it('never lets a patch replace the device identity', async () => {
+    const db = freshDb();
+    const before = await getSettings(db);
+    const after = await updateSettings(db, { deviceId: 'someone-else', key: 'other' as 'device', theme: 'contrast' });
+    expect(after).toMatchObject({ deviceId: before.deviceId, key: 'device', theme: 'contrast' });
+    expect(await getSettings(db)).toEqual(after);
+    expect(await db.settings.count()).toBe(1);
   });
 
   it('creates the defaults first when the patch is the first thing written', async () => {
@@ -133,6 +152,47 @@ describe('records', () => {
     expect(u.id).toBe(c.id);
     expect(u.createdAt).toBe(c.createdAt);
     expect(await db.crew.count()).toBe(1);
+  });
+
+  it('never lets a patch move a record to another ship, change its side or delete it', async () => {
+    const db = freshDb();
+    const c = await createRecord<CrewMember>(db, 'crew', { shipId: 'ship-a', ...draft });
+    const u = await updateRecord<CrewMember>(db, 'crew', c.id, {
+      shipId: 'ship-b', scope: 'personal', deleted: true, nationality: 'Serbian',
+    });
+    expect(u).toMatchObject({ shipId: 'ship-a', scope: 'ship', deleted: false, nationality: 'Serbian' });
+    expect(await db.crew.get(c.id)).toEqual(u);
+  });
+
+  it('never gives a ship a ship id', async () => {
+    const db = freshDb();
+    const ship = await createShip(db, 'MV OCEAN STAR', 180);
+    await updateRecord<ShipProfile>(db, 'ships', ship.id, { shipId: 'other' } as unknown as Partial<ShipProfile>);
+    expect(await db.ships.get(ship.id)).not.toHaveProperty('shipId');
+  });
+
+  it('refuses to update a deleted record, even from a stale copy that says it is live', async () => {
+    const db = freshDb();
+    const c = await createRecord<CrewMember>(db, 'crew', { shipId: 's1', ...draft });
+    await softDelete(db, 'crew', c.id);
+    const tombstone = await db.crew.get(c.id);
+    await expect(updateRecord<CrewMember>(db, 'crew', c.id, { nationality: 'x' }))
+      .rejects.toThrow(`Record is deleted: crew:${c.id}`);
+    await expect(updateRecord<CrewMember>(db, 'crew', c.id, { ...c, deleted: false }))
+      .rejects.toThrow(`Record is deleted: crew:${c.id}`);
+    expect(await db.crew.get(c.id)).toEqual(tombstone);
+  });
+
+  it('leaves a tombstone as it is when it is deleted again', async () => {
+    const db = freshDb();
+    const c = await createRecord<CrewMember>(db, 'crew', { shipId: 's1', ...draft });
+    vi.useFakeTimers({ now: new Date('2026-11-01T12:00:00Z'), toFake: ['Date'] });
+    await softDelete(db, 'crew', c.id);
+    const tombstone = await db.crew.get(c.id);
+    vi.setSystemTime(new Date('2026-11-09T12:00:00Z'));
+    await softDelete(db, 'crew', c.id);
+    expect(await db.crew.get(c.id)).toEqual(tombstone);
+    expect(tombstone?.updatedAt).toBe('2026-11-01T12:00:00.000Z');
   });
 
   it('rejects an update or delete of a record that does not exist', async () => {
@@ -220,6 +280,14 @@ describe('allTables, putRecords and replaceAllTables', () => {
     expect(await getSettings(db)).toEqual(before);
     expect(before.activeShipId).toBe(ship.id);
     expect(await db.snapshots.count()).toBe(1);
+  });
+
+  it('empties a table that the replacement leaves out', async () => {
+    const { db, ship } = await seeded();
+    const { crew: _left, ...withoutCrew } = await allTables(db);
+    await replaceAllTables(db, withoutCrew as Tables);
+    expect(await db.crew.count()).toBe(0);
+    expect((await db.ships.toArray()).map((s) => s.id)).toEqual([ship.id]);
   });
 
   it('keeps the old data when the replacement cannot be written', async () => {
