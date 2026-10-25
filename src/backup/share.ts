@@ -1,4 +1,8 @@
-/** Hands the file to the system share sheet where there is one, else downloads it. `cancelled`: the user closed the share sheet. */
+/**
+ * Hands the file to the system share sheet where there is one, else downloads it. `cancelled`: the user closed the
+ * share sheet. Any other share failure (Android raises `NotAllowedError` when the tap that started the slow export is
+ * too old) falls back to a download, so the file is never lost.
+ */
 export async function shareOrDownload(fileName: string, text: string): Promise<'shared' | 'downloaded' | 'cancelled'> {
   const file = new File([text], fileName, { type: 'application/octet-stream' });
   if (navigator.canShare?.({ files: [file] })) {
@@ -7,7 +11,6 @@ export async function shareOrDownload(fileName: string, text: string): Promise<'
       return 'shared';
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return 'cancelled';
-      throw error;
     }
   }
   const url = URL.createObjectURL(file);

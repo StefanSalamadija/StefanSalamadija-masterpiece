@@ -21,4 +21,19 @@ describe('backupFileName', () => {
     expect(name).toBe('masterpiece-full-a-b-c-d-e-f-g-h-i-j-k-2026-10-25-0905.mpbak');
     expect(name).toMatch(/^[a-z0-9.-]+$/);
   });
+
+  it('caps the ship name part at 60 characters', () => {
+    const name = backupFileName('full', 'x'.repeat(100), '2026-10-25T09:05');
+    expect(name).toBe(`masterpiece-full-${'x'.repeat(60)}-2026-10-25-0905.mpbak`);
+  });
+
+  it('does not leave a dash at the cut when the 60th character ends a word', () => {
+    // 59 letters, a space, then more: the slug is cut right after the dash
+    const name = backupFileName('full', `${'y'.repeat(59)} tail`, '2026-10-25T09:05');
+    expect(name).toBe(`masterpiece-full-${'y'.repeat(59)}-2026-10-25-0905.mpbak`);
+  });
+
+  it('keeps a name of exactly 60 characters whole', () => {
+    expect(backupFileName('full', 'z'.repeat(60), '2026-10-25T09:05')).toContain(`-${'z'.repeat(60)}-`);
+  });
 });

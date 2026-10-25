@@ -4,7 +4,7 @@ import type { Snapshot, SnapshotReason, TableName, Tables } from '../domain/type
 import { allTables, replaceAllTables } from './records';
 import { syncTables, type MasterpieceDB } from './schema';
 import { getSettings, updateSettings } from './settings';
-import { listShips } from './ships';
+import { listShips, liveActiveShipId } from './ships';
 import { guardWrite } from './storage';
 
 /** How many snapshots are kept: the one just written plus the newest others by `createdAt`, ties going to the larger id. */
@@ -61,10 +61,8 @@ export async function listSnapshots(db: MasterpieceDB): Promise<SnapshotSummary[
 /** Points the active ship at a live ship: the one it already names, else the first live ship, else none. */
 async function keepActiveShipLive(db: MasterpieceDB): Promise<void> {
   const { activeShipId } = await getSettings(db);
-  const ships = await listShips(db);
-  if (ships.some((ship) => ship.id === activeShipId)) return;
-  const first = ships[0]?.id;
-  if (first !== activeShipId) await updateSettings(db, { activeShipId: first });
+  const next = liveActiveShipId(activeShipId, await listShips(db));
+  if (next !== activeShipId) await updateSettings(db, { activeShipId: next });
 }
 
 /**

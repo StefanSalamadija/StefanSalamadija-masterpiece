@@ -2,7 +2,7 @@ import { allTables, putRecords } from '../db/records';
 import { syncTables } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
 import { getSettings, updateSettings } from '../db/settings';
-import { listShips } from '../db/ships';
+import { listShips, liveActiveShipId } from '../db/ships';
 import { takeSnapshot } from '../db/snapshots';
 import { guardWrite } from '../db/storage';
 import { computeMerge, resolveMerge } from '../domain/merge';
@@ -10,7 +10,7 @@ import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { TABLE_NAMES } from '../domain/types';
 import type { ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
-import { DamagedFileError, openBackup, sealBackup } from './envelope';
+import { DamagedFileError, openBackup, sealBackup, validatePassword } from './envelope';
 import type { BackupHeader } from './envelope';
 import { backupFileName } from './fileName';
 
@@ -27,28 +27,37 @@ export function collectHandover(t: Tables, shipId: string): Tables {
 
 /**
  * Seals this device's data into a backup file. `shipId` names the ship the file is named after (its name and its
- * current ship's time); for a handover it is also the one ship exported. A full export, which has every ship and
- * table and every tombstone, also resets the backup reminder; a handover does not.
+ * current ship's time); for a handover it is also the one ship exported. A full export has every ship and table and
+ * every tombstone. It writes nothing to the settings: the file has not left the device yet, so the caller records a
+ * full backup with `recordFullBackup(db, exportedAt)` once the user has shared or saved it.
  */
 export async function exportBackup(
   db: MasterpieceDB, kind: 'full' | 'handover', password: string, opts: { shipId: string; iterations?: number },
-): Promise<{ fileName: string; text: string }> {
+): Promise<{ fileName: string; text: string; exportedAt: string }> {
+  const weak = validatePassword(password);
+  if (weak) throw new Error(weak);
   const settings = await getSettings(db);
   const tables = await allTables(db);
-  const ship = (tables.ships as ShipProfile[]).find((s) => s.id === opts.shipId);
-  if (!ship) throw new Error(`There is no ship with id ${opts.shipId}.`);
+  const ship = (tables.ships as ShipProfile[]).find((s) => s.id === opts.shipId && !s.deleted);
+  if (!ship) throw new Error(`Ship not found: ${opts.shipId}`);
 
   const now = new Date();
   const clock = (tables.clockChanges as ClockChange[]).filter((c) => c.shipId === ship.id);
-  const fileName = backupFileName(kind, ship.particulars.name, toShipLocal(now, shipOffsetAt(clock, now)).dateTime);
+  // Only an object is checked on import, so a hand-edited file may have no name; the file name must still be made.
+  const shipName = String(ship.particulars.name ?? '');
+  const fileName = backupFileName(kind, shipName, toShipLocal(now, shipOffsetAt(clock, now)).dateTime);
   const header: BackupHeader = {
     format: 'masterpiece-backup', version: 1, kind, deviceId: settings.deviceId, deviceName: settings.deviceName,
     exportedAt: now.toISOString(),
   };
   const payload = { tables: kind === 'full' ? tables : collectHandover(tables, ship.id) };
   const text = await sealBackup(header, payload, password, { iterations: opts.iterations });
-  if (kind === 'full') await updateSettings(db, { lastExportAt: header.exportedAt, firstExportDone: true });
-  return { fileName, text };
+  return { fileName, text, exportedAt: header.exportedAt };
+}
+
+/** Marks a full backup as made at `exportedAt` (from `exportBackup`), which resets the backup reminder. Call it once the file was shared or saved. */
+export async function recordFullBackup(db: MasterpieceDB, exportedAt: string): Promise<void> {
+  await updateSettings(db, { lastExportAt: exportedAt, firstExportDone: true });
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -83,24 +92,33 @@ export async function prepareImport(db: MasterpieceDB, text: string, password: s
   return { header, plan: computeMerge(local, payload.tables, settings.lastSync[header.deviceId]) };
 }
 
+/** The later of two instants; an `existing` that is missing or unreadable gives way to `incoming`. */
+function laterOf(existing: string | undefined, incoming: string): string {
+  if (existing === undefined) return incoming;
+  const known = Date.parse(existing);
+  return Number.isNaN(known) || Date.parse(incoming) > known ? incoming : existing;
+}
+
 /**
- * Merges a prepared import into this device. The data as it is now is first saved as a `'before-import'` snapshot.
- * The records, the time of this exchange with the other device (`lastSync`) and the active ship are then saved in one
- * transaction, so a failed write leaves all three as they were. Throws, before touching anything, if a conflict has
- * no decision.
+ * Merges a prepared import into this device. When it writes anything, the data as it is now is first saved as a
+ * `'before-import'` snapshot (an import that changes nothing must not push an older snapshot out). The records, the
+ * time of this exchange with the other device (`lastSync`, never moved back) and the active ship are then saved in
+ * one transaction, so a failed write leaves all three as they were. Throws, before touching anything, if a conflict
+ * has no decision.
  */
 export async function applyImport(db: MasterpieceDB, p: PreparedImport, decisions: MergeDecisions): Promise<void> {
   const { deviceId } = await getSettings(db);
   const writes = resolveMerge(p.plan, decisions, new Date().toISOString(), deviceId);
-  await takeSnapshot(db, 'before-import');
+  if (writes.length > 0) await takeSnapshot(db, 'before-import');
   await guardWrite(() =>
     db.transaction('rw', [...syncTables(db), db.settings], async () => {
       await putRecords(db, writes);
       const settings = await getSettings(db);
-      const ships = await listShips(db);
-      // The active ship must be a live one: keep it if it is, else the first live ship, else none.
-      const activeShipId = ships.some((ship) => ship.id === settings.activeShipId) ? settings.activeShipId : ships[0]?.id;
-      await updateSettings(db, { lastSync: { ...settings.lastSync, [p.header.deviceId]: p.header.exportedAt }, activeShipId });
+      const from = p.header.deviceId;
+      await updateSettings(db, {
+        lastSync: { ...settings.lastSync, [from]: laterOf(settings.lastSync[from], p.header.exportedAt) },
+        activeShipId: liveActiveShipId(settings.activeShipId, await listShips(db)),
+      });
     }),
   );
 }

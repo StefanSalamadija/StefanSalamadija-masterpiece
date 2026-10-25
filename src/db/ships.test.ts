@@ -3,7 +3,7 @@ import type { Certificate, ClockChange, CrewDraft, CrewMember, ShipProfile, Voya
 import { allTables, createRecord, listForShip, softDelete, updateRecord } from './records';
 import { openDb } from './schema';
 import { getSettings, updateSettings } from './settings';
-import { copyShip, createShip, deleteShip, deleteSummary, listShips } from './ships';
+import { copyShip, createShip, deleteShip, deleteSummary, listShips, liveActiveShipId } from './ships';
 import { StorageFullError } from './storage';
 
 const draft: CrewDraft = {
@@ -180,6 +180,13 @@ describe('deleteShip', () => {
     expect((await getSettings(db)).activeShipId).toBe(b.id);
   });
 
+  it('also moves an active ship that already pointed at a ship that is gone', async () => {
+    const { db, a, b } = await twoShips();
+    await updateSettings(db, { activeShipId: 'never-existed' });
+    await deleteShip(db, b.id);
+    expect((await getSettings(db)).activeShipId).toBe(a.id);
+  });
+
   it('leaves no active ship when the last ship is deleted', async () => {
     const db = freshDb();
     const a = await createShip(db, 'MV OCEAN STAR', 180);
@@ -313,5 +320,27 @@ describe('copyShip', () => {
     vi.spyOn(db.certificates, 'put').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
     await expect(copyShip(db, src.id, 'MV OCEAN PEARL', { includeCertificates: true })).rejects.toBeInstanceOf(StorageFullError);
     expect(await allTables(db)).toEqual(before);
+  });
+});
+
+describe('liveActiveShipId', () => {
+  // only `id` is read, so bare records are enough
+  const ships = (...ids: string[]) => ids.map((id) => ({ id }) as ShipProfile);
+
+  it('keeps the active ship when it is in the list', () => {
+    expect(liveActiveShipId('b', ships('a', 'b', 'c'))).toBe('b');
+  });
+
+  it('takes the first ship when none is active', () => {
+    expect(liveActiveShipId(undefined, ships('a', 'b'))).toBe('a');
+  });
+
+  it('takes the first ship when the active one is not in the list (missing or deleted)', () => {
+    expect(liveActiveShipId('gone', ships('a', 'b'))).toBe('a');
+  });
+
+  it('is undefined when there is no ship at all, whatever was active', () => {
+    expect(liveActiveShipId(undefined, [])).toBeUndefined();
+    expect(liveActiveShipId('gone', [])).toBeUndefined();
   });
 });

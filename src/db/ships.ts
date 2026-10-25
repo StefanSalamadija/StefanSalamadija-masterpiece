@@ -22,6 +22,14 @@ export async function listShips(db: MasterpieceDB): Promise<ShipProfile[]> {
   return ships.sort((a, b) => compare(a.createdAt, b.createdAt) || compare(a.id, b.id));
 }
 
+/**
+ * The ship that should be active: `activeShipId` if it is one of `ships`, else the first of them, else none. `ships`
+ * is `listShips` order (live ships only), so every device picks the same fallback.
+ */
+export function liveActiveShipId(activeShipId: string | undefined, ships: ShipProfile[]): string | undefined {
+  return ships.some((ship) => ship.id === activeShipId) ? activeShipId : ships[0]?.id;
+}
+
 /** True when `id` names a ship that exists and is not deleted. */
 async function isLiveShip(db: MasterpieceDB, id: string | undefined): Promise<boolean> {
   if (id === undefined) return false;
@@ -62,7 +70,8 @@ export async function deleteSummary(
 
 /**
  * Soft-deletes the ship and every live record that belongs to it, in one transaction. Records that were already
- * deleted keep their own deletion time. If the ship was the active one, the first remaining ship becomes active.
+ * deleted keep their own deletion time. If the active ship is no longer a live one, the first remaining ship becomes
+ * active (or none, if there is none).
  */
 export async function deleteShip(db: MasterpieceDB, shipId: string): Promise<void> {
   const { deviceId } = await getSettings(db);
@@ -77,9 +86,9 @@ export async function deleteShip(db: MasterpieceDB, shipId: string): Promise<voi
         const live = await table.where('shipId').equals(shipId).filter((r) => !r.deleted).toArray();
         await table.bulkPut(live.map((r) => ({ ...r, ...stamp })));
       }
-      if ((await getSettings(db)).activeShipId === shipId) {
-        await updateSettings(db, { activeShipId: (await listShips(db))[0]?.id });
-      }
+      const { activeShipId } = await getSettings(db);
+      const next = liveActiveShipId(activeShipId, await listShips(db));
+      if (next !== activeShipId) await updateSettings(db, { activeShipId: next });
     }),
   );
 }

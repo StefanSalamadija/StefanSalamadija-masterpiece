@@ -8,10 +8,10 @@ import { listSnapshots } from '../db/snapshots';
 import { StorageFullError } from '../db/storage';
 import { conflictKey } from '../domain/merge';
 import { TABLE_NAMES } from '../domain/types';
-import type { Certificate, ClockChange, CrewDraft, CrewMember, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
+import type { Certificate, ClockChange, CrewDraft, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
 import { DamagedFileError, NotABackupError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
-import { applyImport, collectHandover, exportBackup, prepareImport } from './service';
+import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
 
 const PW = 'pw-12345678';
 const FAST = { iterations: 1000 };
@@ -144,15 +144,25 @@ describe('exportBackup', () => {
     expect((await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).fileName).toContain('-2026-10-25-1400.mpbak');
   });
 
-  it('records a full export in the settings, so the reminder resets', async () => {
+  it('returns the export time, the same one that is in the file header', async () => {
     const a = await deviceA();
-    expect((await getSettings(a.db)).lastExportAt).toBeUndefined();
     at('2026-10-25T12:32:00.000Z');
-    await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
-    expect(await getSettings(a.db)).toMatchObject({ lastExportAt: '2026-10-25T12:32:00.000Z', firstExportDone: true });
+    const { text, exportedAt } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    expect(exportedAt).toBe('2026-10-25T12:32:00.000Z');
+    expect(readHeader(text).exportedAt).toBe(exportedAt);
   });
 
-  it('holds only the chosen ship in a handover, and leaves the backup reminder alone', async () => {
+  it('writes no settings itself, for either kind: nothing has left the device yet', async () => {
+    const a = await deviceA();
+    const before = await getSettings(a.db);
+    await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...FAST });
+    expect(await getSettings(a.db)).toEqual(before);
+    expect(before.lastExportAt).toBeUndefined();
+    expect(before.firstExportDone).toBeUndefined();
+  });
+
+  it('holds only the chosen ship in a handover, with its ship-scope records and tombstones', async () => {
     const a = await deviceA();
     const h = await exportBackup(a.db, 'handover', 'relief-pass', { shipId: a.ship.id, ...FAST });
     expect(readHeader(h.text).kind).toBe('handover');
@@ -165,27 +175,72 @@ describe('exportBackup', () => {
     expect(payload.tables.voyages.map((v) => v.id)).toEqual([a.voyage.id]);
     expect(payload.tables.certificates.map((c) => c.id)).toEqual([a.cert.id]);
     expect(payload.tables.clockChanges).toHaveLength(1);
-
-    const settings = await getSettings(a.db);
-    expect(settings.lastExportAt).toBeUndefined();
-    expect(settings.firstExportDone).toBeUndefined();
-    await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
-    const before = (await getSettings(a.db)).lastExportAt;
-    expect(before).toBeDefined();
-    await exportBackup(a.db, 'handover', 'relief-pass', { shipId: a.ship.id, ...FAST });
-    expect((await getSettings(a.db)).lastExportAt).toBe(before);
   });
 
-  it('rejects an unknown ship and exports nothing', async () => {
+  it('rejects a ship that is not there, and exports nothing', async () => {
     const a = await deviceA();
-    await expect(exportBackup(a.db, 'full', PW, { shipId: 'nope', ...FAST })).rejects.toThrow(/nope/);
-    expect((await getSettings(a.db)).lastExportAt).toBeUndefined();
+    await expect(exportBackup(a.db, 'full', PW, { shipId: 'nope', ...FAST })).rejects.toThrow(new Error('Ship not found: nope'));
+    await expect(exportBackup(a.db, 'handover', PW, { shipId: 'nope', ...FAST })).rejects.toThrow(new Error('Ship not found: nope'));
   });
 
-  it('rejects an out-of-range iteration count and records nothing', async () => {
+  it('rejects a ship that has been deleted', async () => {
+    const a = await deviceA();
+    await deleteShip(a.db, a.other.id);
+    for (const kind of ['full', 'handover'] as const) {
+      await expect(exportBackup(a.db, kind, PW, { shipId: a.other.id, ...FAST })).rejects.toThrow(new Error(`Ship not found: ${a.other.id}`));
+    }
+  });
+
+  it('still names the file when the ship has no name in its particulars', async () => {
+    const a = await deviceA();
+    await a.db.ships.put({ ...a.ship, particulars: {} as ShipProfile['particulars'] });
+    at('2026-10-25T12:32:00.000Z');
+    expect((await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).fileName)
+      .toBe('masterpiece-full-ship-2026-10-25-1432.mpbak');
+  });
+
+  it('rejects an out-of-range iteration count', async () => {
     const a = await deviceA();
     await expect(exportBackup(a.db, 'full', PW, { shipId: a.ship.id, iterations: 10 })).rejects.toThrow(RangeError);
-    expect((await getSettings(a.db)).lastExportAt).toBeUndefined();
+  });
+
+  describe('the password', () => {
+    it.each(['full', 'handover'] as const)('must be at least 8 characters for a %s export', async (kind) => {
+      const a = await deviceA();
+      await expect(exportBackup(a.db, kind, '1234567', { shipId: a.ship.id, ...FAST })).rejects.toThrow(new Error('Use at least 8 characters.'));
+      await expect(exportBackup(a.db, kind, '12345678', { shipId: a.ship.id, ...FAST })).resolves.toMatchObject({ text: expect.any(String) });
+    });
+
+    it('is counted in characters, not bytes', async () => {
+      const a = await deviceA();
+      await expect(exportBackup(a.db, 'full', 'šđčćžšđ', { shipId: a.ship.id, ...FAST })).rejects.toThrow('Use at least 8 characters.'); // 7
+      await expect(exportBackup(a.db, 'full', 'šđčćžšđč', { shipId: a.ship.id, ...FAST })).resolves.toBeDefined(); // 8, 16 bytes
+    });
+
+    it('is checked before anything else, so a weak password is reported even with a bad ship', async () => {
+      const a = await deviceA();
+      await expect(exportBackup(a.db, 'full', 'short', { shipId: 'nope', ...FAST })).rejects.toThrow('Use at least 8 characters.');
+    });
+  });
+});
+
+describe('recordFullBackup', () => {
+  it('sets lastExportAt and firstExportDone, which resets the reminder', async () => {
+    const a = await deviceA();
+    const before = await getSettings(a.db);
+    await recordFullBackup(a.db, '2026-10-25T12:32:00.000Z');
+    expect(await getSettings(a.db)).toEqual({ ...before, lastExportAt: '2026-10-25T12:32:00.000Z', firstExportDone: true });
+  });
+
+  it('is what a full export is followed by, and a handover is not', async () => {
+    const a = await deviceA();
+    const { exportedAt } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    await recordFullBackup(a.db, exportedAt);
+    const recorded = (await getSettings(a.db)).lastExportAt;
+    expect(recorded).toBe(exportedAt);
+    at('2026-10-26T08:00:00.000Z');
+    await exportBackup(a.db, 'handover', 'relief-pass', { shipId: a.ship.id, ...FAST });
+    expect((await getSettings(a.db)).lastExportAt).toBe(recorded);
   });
 });
 
@@ -194,7 +249,8 @@ describe('prepareImport and applyImport between two devices', () => {
     const a = await deviceA();
     const b = freshDb();
     at('2026-10-25T09:00:00.000Z');
-    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const { text, exportedAt } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    await recordFullBackup(a.db, exportedAt);
     const p = await prepareImport(b, text, PW);
     expect(p.header).toEqual(readHeader(text));
     expect(p.plan.summary).toMatchObject({ added: 9, updated: 0, deleted: 0, conflicts: 0 });
@@ -219,8 +275,43 @@ describe('prepareImport and applyImport between two devices', () => {
     const again = await prepareImport(b, text, PW);
     expect(again.plan.items).toEqual([]);
     expect(again.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 0 });
+    const snapshots = await b.snapshots.count();
     await applyImport(b, again, { conflicts: {}, applyDeletions: true });
     expect(await allTables(b)).toEqual(afterFirst);
+    expect(await b.snapshots.count()).toBe(snapshots); // nothing to change, so no snapshot to push an older one out
+  });
+
+  it('takes a snapshot only when something is written, but still records the exchange and repairs the active ship', async () => {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    const snapshots = await b.snapshots.count();
+    expect(snapshots).toBe(1);
+    await updateSettings(b, { activeShipId: 'ghost' });
+    at('2026-10-25T10:00:00.000Z');
+    const { text, exportedAt } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST }); // nothing new
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.items).toEqual([]);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect(await b.snapshots.count()).toBe(snapshots);
+    const settings = await getSettings(b);
+    expect(settings.lastSync[(await getSettings(a.db)).deviceId]).toBe(exportedAt);
+    expect(settings.activeShipId).toBe(a.ship.id);
+  });
+
+  it('takes no snapshot when the user declines every change in the plan', async () => {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    const snapshots = await b.snapshots.count();
+    at('2026-10-25T10:00:00.000Z');
+    await softDelete(a.db, 'crew', a.crew.id);
+    at('2026-10-25T11:00:00.000Z');
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.summary.deleted).toBe(1);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: false });
+    expect(await b.snapshots.count()).toBe(snapshots);
   });
 
   it('merges into what the device already has: the snapshot holds the old data and local-only records stay', async () => {
@@ -257,6 +348,26 @@ describe('prepareImport and applyImport between two devices', () => {
     expect(lastSync['some-old-device']).toBe('2026-01-01T00:00:00.000Z');
   });
 
+  it('never moves lastSync back when an older file from the same device is imported after a newer one', async () => {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const older = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    at('2026-10-25T09:30:00.000Z');
+    await updateRecord(a.db, 'crew', a.crew.id, { nationality: 'Croatian' });
+    at('2026-10-25T10:00:00.000Z');
+    const newer = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const b = freshDb();
+    const deviceId = (await getSettings(a.db)).deviceId;
+    await applyImport(b, await prepareImport(b, newer.text, PW), { conflicts: {}, applyDeletions: true });
+    expect((await getSettings(b)).lastSync[deviceId]).toBe(newer.exportedAt);
+
+    const p = await prepareImport(b, older.text, PW);
+    expect(p.plan.items).toEqual([]); // B already has the newer version of everything
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect((await getSettings(b)).lastSync[deviceId]).toBe(newer.exportedAt);
+    expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Croatian' });
+  });
+
   it('is an update, not a conflict, when only the other device changed a record since the last exchange', async () => {
     const a = await deviceA();
     at('2026-10-25T09:00:00.000Z');
@@ -282,7 +393,7 @@ describe('prepareImport and applyImport between two devices', () => {
       at('2026-10-25T11:00:00.000Z');
       const t2 = (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text;
       const p = await prepareImport(b, t2, PW);
-      return { a, b, p, key: `crew:${a.crew.id}`, deviceB: (await getSettings(b)).deviceId };
+      return { a, b, p, text: t2, key: `crew:${a.crew.id}`, deviceB: (await getSettings(b)).deviceId };
     }
 
     it('reports it for the user to decide', async () => {
@@ -303,6 +414,16 @@ describe('prepareImport and applyImport between two devices', () => {
       at('2026-10-25T12:00:00.000Z');
       await applyImport(b, p, { conflicts: { [key]: 'local' }, applyDeletions: true });
       expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Montenegrin', updatedAt: '2026-10-25T12:00:00.000Z', updatedBy: deviceB });
+    });
+
+    it.each(['local', 'incoming'] as const)('shows zero changes when the same file is prepared again after choosing %s', async (choice) => {
+      const { b, p, text, key } = await conflict();
+      expect(p.plan.summary.conflicts).toBe(1);
+      at('2026-10-25T12:00:00.000Z');
+      await applyImport(b, p, { conflicts: { [key]: choice }, applyDeletions: true });
+      const again = await prepareImport(b, text, PW);
+      expect(again.plan.items).toEqual([]);
+      expect(again.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 0 });
     });
 
     it('refuses to apply while a conflict has no decision, and changes nothing, not even the snapshots', async () => {
@@ -382,10 +503,16 @@ describe('prepareImport and applyImport between two devices', () => {
       expect((await getSettings(b)).activeShipId).toBe(a.ship.id);
       at('2026-10-25T10:00:00.000Z');
       await deleteShip(a.db, a.ship.id);
-      if (alsoDeleteOther) await deleteShip(a.db, a.other.id);
       at('2026-10-25T11:00:00.000Z');
-      const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.other.id, ...FAST });
-      return { a, b, text };
+      if (!alsoDeleteOther) {
+        const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.other.id, ...FAST });
+        return { a, b, text };
+      }
+      // With every ship deleted, exportBackup has no ship to name the file after, so seal the file directly.
+      await deleteShip(a.db, a.other.id);
+      const { deviceId, deviceName } = await getSettings(a.db);
+      const header: BackupHeader = { format: 'masterpiece-backup', version: 1, kind: 'full', deviceId, deviceName, exportedAt: new Date().toISOString() };
+      return { a, b, text: await sealBackup(header, { tables: await allTables(a.db) }, PW, FAST) };
     }
 
     it('moves to the first remaining live ship when the file deletes it', async () => {
