@@ -1,0 +1,327 @@
+import { describe, expect, it } from 'vitest';
+import type { CrewMember } from '../types';
+import { guessMapping } from './mapping';
+import { buildPreview, revalidateRow, type PreviewRow } from './preview';
+import type { Cell } from './readSpreadsheet';
+
+let seq = 0;
+function crewMember(over: Partial<CrewMember> = {}): CrewMember {
+  seq += 1;
+  return {
+    id: `crew-${seq}`, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    updatedBy: 'test-device', deleted: false, scope: 'ship', shipId: 'ship-1',
+    surname: 'PETROVIĆ', givenNames: 'Ivan', rank: 'chiefOfficer', nationality: 'Croatian',
+    dateOfBirth: '1985-01-05', placeOfBirth: 'Split', passportNo: '012 345 678', passportExpiry: '2030-01-01',
+    seamansBookNo: 'sb 998', seamansBookExpiry: '2030-02-02', signOnDate: '2026-06-01', signOnPort: 'Rijeka',
+    ...over,
+  };
+}
+
+const HEADER: Cell[] = ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No', 'Sign on'];
+const BRIEF_ROWS: Cell[][] = [
+  ['MV Ocean Star crew list'],
+  HEADER,
+  ['PETROVIĆ', 'Ivan', 'Master', '05.01.1985', '012345678', '01.06.2026'],
+  ["O'BRIEN", 'Jean-Luc', 'A/B', '31.02.1990', 'X1', ''],
+  ['ŠAŠIĆ', 'Marko', 'C/O', '', 'P 77', ''],
+  [],
+  ['Total crew: 3'],
+];
+
+interface Options { rows: Cell[][]; headerRow?: number; existing?: CrewMember[]; dateFormat?: 'day-first' | 'year-first' }
+function build({ rows, headerRow = 0, existing = [], dateFormat = 'day-first' }: Options): PreviewRow[] {
+  return buildPreview({
+    rows, headerRow, mapping: guessMapping(rows[headerRow]), dateFormat, existing,
+    currentYear: 2026, today: '2026-10-25', defaultSignOnDate: '2026-10-25',
+  });
+}
+const buildBrief = (existing: CrewMember[] = []): PreviewRow[] => build({ rows: BRIEF_ROWS, headerRow: 1, existing });
+const table = (header: Cell[], ...data: Cell[][]): Cell[][] => [header, ...data];
+
+describe('buildPreview', () => {
+  const existing = [crewMember()];
+
+  it('classifies new, updated and faulty rows and skips the footer and blank rows', () => {
+    const rows = buildBrief(existing);
+    expect(rows.map(r => r.rowNumber)).toEqual([3, 4, 5]);
+    expect(rows[0]).toMatchObject({ status: 'update', existingId: existing[0].id, changes: [{ field: 'rank', from: 'chiefOfficer', to: 'master' }] });
+    expect(rows[1].status).toBe('error');
+    expect(rows[1].errors[0]).toMatchObject({ field: 'dateOfBirth', message: 'Enter a valid date.' });
+    expect(rows[1].draft).toMatchObject({ surname: "O'BRIEN", givenNames: 'Jean-Luc', rank: 'ab', signOnDate: '2026-10-25' });
+    expect(rows[2]).toMatchObject({ status: 'new', draft: { surname: 'ŠAŠIĆ', rank: 'chiefOfficer', passportNo: 'P 77' } });
+    const fixed = revalidateRow({ ...rows[1], draft: { ...rows[1].draft, dateOfBirth: '1990-02-28' } }, existing, '2026-10-25');
+    expect(fixed.status).toBe('new');
+  });
+
+  it('does not skip any row by default and leaves new rows without changes', () => {
+    const rows = buildBrief(existing);
+    expect(rows.map(r => r.skip)).toEqual([false, false, false]);
+    expect(rows[2].changes).toEqual([]);
+    expect(rows[2]).not.toHaveProperty('existingId');
+    expect(rows[2].errors).toEqual([]);
+  });
+
+  it('keeps names and text exactly as typed, apart from trimming', () => {
+    const rows = build({ rows: table(['Surname', 'Given names', 'Rank', 'Passport No', 'Nationality'], ['  Šašić ', "Jean-Luc  d'Arc", 'Master', ' P 77 ', ' Hrvatska '], ['Petrović', 'Ivan', 'Master', 'X9', null]) });
+    expect(rows[0].draft).toMatchObject({ surname: 'Šašić', givenNames: "Jean-Luc  d'Arc", passportNo: 'P 77', nationality: 'Hrvatska' });
+    expect(rows[1].draft.nationality).toBe('');
+  });
+
+  it('uses the default sign-on date for a new row with no sign-on date, and the file date otherwise', () => {
+    const rows = buildBrief();
+    expect(rows[1].draft.signOnDate).toBe('2026-10-25');
+    expect(buildBrief(existing)[0].draft.signOnDate).toBe('2026-06-01');
+    const noColumn = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['Šašić', 'Master', 'P1']) });
+    expect(noColumn[0]).toMatchObject({ status: 'new', draft: { signOnDate: '2026-10-25' } });
+  });
+
+  it('reads Excel dates and serial numbers', () => {
+    const rows = build({ rows: table(HEADER, ['Šašić', 'Marko', 'Master', new Date(Date.UTC(1985, 0, 5)), 'P1', 31052]) });
+    expect(rows[0].draft).toMatchObject({ dateOfBirth: '1985-01-05', signOnDate: '1985-01-05' });
+  });
+
+  it('follows the date format of the mapping', () => {
+    const rows = table(HEADER, ['Šašić', 'Marko', 'Master', '1985/1/5', 'P1', '05.01.2026']);
+    expect(build({ rows, dateFormat: 'year-first' })[0]).toMatchObject({ status: 'error', draft: { dateOfBirth: '1985-01-05', signOnDate: '05.01.2026' } });
+    expect(build({ rows, dateFormat: 'day-first' })[0]).toMatchObject({ status: 'new', draft: { dateOfBirth: '1985-01-05', signOnDate: '2026-01-05' } });
+  });
+
+  describe('invalid dates', () => {
+    it('keep the raw text in the draft and give one "Enter a valid date." error for that field', () => {
+      const rows = build({ rows: table(['Surname', 'Rank', 'Passport No', 'Date of birth', 'Passport expiry', 'Sign on', 'Sign off date'], ['Šašić', 'Master', 'P1', '31.02.1990', 'n/a', 0, ' soon ']) });
+      expect(rows[0].status).toBe('error');
+      expect(rows[0].draft).toMatchObject({ dateOfBirth: '31.02.1990', passportExpiry: 'n/a', signOnDate: '0', signOffDate: 'soon' });
+      expect(rows[0].errors).toEqual([
+        { field: 'dateOfBirth', message: 'Enter a valid date.', severity: 'error' },
+        { field: 'passportExpiry', message: 'Enter a valid date.', severity: 'error' },
+        { field: 'signOnDate', message: 'Enter a valid date.', severity: 'error' },
+        { field: 'signOffDate', message: 'Enter a valid date.', severity: 'error' },
+      ]);
+    });
+
+    it('do not replace an existing date, and do not get the default sign-on date', () => {
+      const rows = build({ rows: table(HEADER, ['PETROVIĆ', 'Ivan', 'Master', '', '012345678', 'ASAP']), existing });
+      expect(rows[0].status).toBe('error');
+      expect(rows[0].draft.signOnDate).toBe('ASAP');
+      expect(rows[0].errors.filter(e => e.field === 'signOnDate')).toHaveLength(1);
+      expect(rows[0].existingId).toBe(existing[0].id);
+    });
+  });
+
+  describe('ranks', () => {
+    it('parse the rank text, and keep an unknown rank under "other"', () => {
+      const rows = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['A', 'Pumpman', 'P1'], ['B', 'C/E', 'P2']) });
+      expect(rows[0].draft).toMatchObject({ rank: 'other', rankOther: 'Pumpman' });
+      expect(rows[0].status).toBe('new');
+      expect(rows[1].draft.rank).toBe('chiefEngineer');
+      expect(rows[1].draft).not.toHaveProperty('rankOther');
+    });
+
+    it('make a missing rank an error for a new row, and keep the existing rank for an updated one', () => {
+      const rows = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['A', '', 'P1'], ['PETROVIĆ', '', '012345678']), existing });
+      expect(rows[0]).toMatchObject({ status: 'error', errors: [{ field: 'rank', message: 'Rank is required.' }] });
+      expect(rows[1]).toMatchObject({ status: 'update', draft: { rank: 'chiefOfficer' }, changes: [] });
+      const noColumn = build({ rows: table(['Surname', 'Passport No'], ['A', 'P1']) });
+      expect(noColumn[0]).toMatchObject({ status: 'error', errors: [{ field: 'rank', message: 'Rank is required.' }] });
+    });
+
+    it('drop a stale "other" rank text when the file gives a known rank', () => {
+      const pumpman = crewMember({ rank: 'other', rankOther: 'Pumpman' });
+      const [row] = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['PETROVIĆ', 'Fitter', '012345678']), existing: [pumpman] });
+      expect(row.draft.rank).toBe('fitter');
+      expect(row.draft).not.toHaveProperty('rankOther');
+      expect(row.changes).toEqual([{ field: 'rank', from: 'other', to: 'fitter' }]);
+    });
+
+    it('list a changed "other" rank text, and keep it when the file has none', () => {
+      const pumpman = crewMember({ rank: 'other', rankOther: 'Pumpman' });
+      const changed = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['PETROVIĆ', 'Pump man', '012345678']), existing: [pumpman] });
+      expect(changed[0].changes).toEqual([{ field: 'rankOther', from: 'Pumpman', to: 'Pump man' }]);
+      const blank = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['PETROVIĆ', '', '012345678']), existing: [pumpman] });
+      expect(blank[0]).toMatchObject({ status: 'update', draft: { rank: 'other', rankOther: 'Pumpman' }, changes: [] });
+    });
+  });
+
+  describe('matching existing crew', () => {
+    it('lists no change when the values are identical, apart from the formatting of the passport and book numbers', () => {
+      const rows = table(
+        ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No', "Seaman's book", 'Sign on'],
+        ['PETROVIĆ', 'Ivan', 'C/O', '05.01.1985', ' 012345678 ', 'SB998', '01.06.2026'],
+      );
+      const [row] = build({ rows, existing });
+      expect(row).toMatchObject({ status: 'update', existingId: existing[0].id, changes: [] });
+      expect(row.draft).toMatchObject({ passportNo: '012 345 678', seamansBookNo: 'sb 998' });
+    });
+
+    it('keeps the existing formatting of the passport number when only the case differs', () => {
+      const rows = table(['Surname', 'Rank', 'Passport No'], ['PETROVIĆ', 'C/O', 'ab123']);
+      const [row] = build({ rows, existing: [crewMember({ passportNo: 'AB 123' })] });
+      expect(row.draft.passportNo).toBe('AB 123');
+      expect(row.changes).toEqual([]);
+    });
+
+    it('lists every changed field in the order of the record, with its old and new value', () => {
+      const rows = table(
+        ['Surname', 'Given names', 'Rank', 'Nationality', 'Date of birth', 'Place of birth', 'Passport No', 'Passport expiry', "Seaman's book No", 'Seaman\'s book expiry', 'Sign on', 'Sign on port', 'Sign off date', 'Sign off port'],
+        ['Petrovic', 'Ivo', 'Master', 'Serbian', '06.01.1985', 'Zadar', '012345678', '01.01.2031', 'SB-1', '03.03.2030', '02.06.2026', 'Bar', '10.10.2026', 'Koper'],
+      );
+      const [row] = build({ rows, existing });
+      expect(row.status).toBe('update');
+      expect(row.changes).toEqual([
+        { field: 'surname', from: 'PETROVIĆ', to: 'Petrovic' },
+        { field: 'givenNames', from: 'Ivan', to: 'Ivo' },
+        { field: 'rank', from: 'chiefOfficer', to: 'master' },
+        { field: 'nationality', from: 'Croatian', to: 'Serbian' },
+        { field: 'dateOfBirth', from: '1985-01-05', to: '1985-01-06' },
+        { field: 'placeOfBirth', from: 'Split', to: 'Zadar' },
+        { field: 'passportExpiry', from: '2030-01-01', to: '2031-01-01' },
+        { field: 'seamansBookNo', from: 'sb 998', to: 'SB-1' },
+        { field: 'seamansBookExpiry', from: '2030-02-02', to: '2030-03-03' },
+        { field: 'signOnDate', from: '2026-06-01', to: '2026-06-02' },
+        { field: 'signOnPort', from: 'Rijeka', to: 'Bar' },
+        { field: 'signOffDate', from: '', to: '2026-10-10' },
+        { field: 'signOffPort', from: '', to: 'Koper' },
+      ]);
+    });
+
+    it('never lets an empty file cell overwrite an existing value, whether the column is mapped or not', () => {
+      const rows = table(
+        ['Surname', 'Given names', 'Rank', 'Nationality', 'Date of birth', 'Passport No', 'Sign on'],
+        ['', '', '', '', '', '012345678', ''],
+      );
+      const [row] = build({ rows, existing: [crewMember({ signOffDate: '2026-12-01', signOffPort: 'Koper' })] });
+      expect(row).toMatchObject({ status: 'update', changes: [], errors: [] });
+      expect(row.draft).toMatchObject({
+        surname: 'PETROVIĆ', givenNames: 'Ivan', rank: 'chiefOfficer', nationality: 'Croatian', dateOfBirth: '1985-01-05',
+        placeOfBirth: 'Split', passportExpiry: '2030-01-01', signOnDate: '2026-06-01', signOnPort: 'Rijeka', signOffDate: '2026-12-01', signOffPort: 'Koper',
+      });
+    });
+
+    it('matches the passport without regard to spaces and case, and picks the latest contract', () => {
+      const older = crewMember({ passportNo: 'ab 123', signOnDate: '2025-01-01', signOffDate: '2025-06-01' });
+      const latest = crewMember({ passportNo: 'AB123', signOnDate: '2026-03-01' });
+      const deleted = crewMember({ passportNo: 'AB 123', signOnDate: '2026-09-01', deleted: true });
+      const [row] = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['PETROVIĆ', 'C/O', 'Ab 1 23']), existing: [older, latest, deleted] });
+      expect(row).toMatchObject({ status: 'update', existingId: latest.id });
+    });
+
+    it('treats a row without a passport number as new', () => {
+      const rows = table(['Surname', 'Given names', 'Rank'], ['PETROVIĆ', 'Ivan', 'Master']);
+      expect(build({ rows, existing })[0]).toMatchObject({ status: 'new', draft: { signOnDate: '2026-10-25' } });
+    });
+  });
+
+  describe('which rows are crew', () => {
+    it('skips rows that have no surname, given names, full name or passport number', () => {
+      const rows = table(['Surname', 'Rank', 'Nationality'], ['', 'Master', 'Croatian'], [null, null, null], ['Šašić', 'Master', 'Croatian']);
+      expect(build({ rows }).map(r => r.rowNumber)).toEqual([4]);
+    });
+
+    it('skips rows with a lone name and nothing else, like a total or a department heading', () => {
+      const rows = table(['Surname', 'Given names', 'Rank', 'Passport No'], ['DECK DEPARTMENT'], ['Šašić', 'Marko', 'Master', 'P1'], ['', 'Total crew:'], ['Total crew: 1', null, null, null]);
+      expect(build({ rows }).map(r => r.rowNumber)).toEqual([3]);
+    });
+
+    it('keeps a name with one more value, and a row that has a passport number alone', () => {
+      const rows = table(['Surname', 'Rank', 'Passport No'], ['Šašić', 'Master', ''], ['', '', 'P1']);
+      const result = build({ rows });
+      expect(result.map(r => r.rowNumber)).toEqual([2, 3]);
+      expect(result[1]).toMatchObject({ status: 'error', errors: [{ field: 'surname', message: 'Surname is required.' }, { field: 'rank', message: 'Rank is required.' }] });
+    });
+
+    it('imports a sheet that has a single mapped column', () => {
+      const rows = table(['Name'], ['Ivan Petrović']);
+      expect(build({ rows })[0].draft).toMatchObject({ surname: 'Petrović', givenNames: 'Ivan' });
+    });
+
+    it('starts after the header row, wherever it is, and numbers rows from the top of the sheet', () => {
+      const rows: Cell[][] = [[], [], ['logo'], HEADER, ['Šašić', 'Marko', 'Master', '', 'P1', '']];
+      expect(build({ rows, headerRow: 3 }).map(r => r.rowNumber)).toEqual([5]);
+      expect(build({ rows: [HEADER], headerRow: 0 })).toEqual([]);
+    });
+
+    it('reads rows shorter than the header as having empty cells', () => {
+      const rows = table(HEADER, ['Šašić', 'Marko', 'Master'], ['Petrović', 'Ivan']);
+      const result = build({ rows });
+      expect(result[0]).toMatchObject({ status: 'new', draft: { passportNo: '', dateOfBirth: '', signOnDate: '2026-10-25' } });
+      expect(result[1].errors).toEqual([{ field: 'rank', message: 'Rank is required.', severity: 'error' }]);
+    });
+  });
+
+  describe('names', () => {
+    const fullNames = table(['Name', 'Rank', 'Passport No'], ['PETROVIĆ, Ivan', 'Master', 'P1'], ['Jean-Luc Picard', 'Master', 'P2']);
+
+    it('are split from a full name column when surname and given names are not mapped', () => {
+      const rows = build({ rows: fullNames });
+      expect(rows[0].draft).toMatchObject({ surname: 'PETROVIĆ', givenNames: 'Ivan' });
+      expect(rows[1].draft).toMatchObject({ surname: 'Picard', givenNames: 'Jean-Luc' });
+    });
+
+    it('come from the surname and given names columns when those are mapped as well as a full name', () => {
+      const rows = table(['Surname', 'Given names', 'Name', 'Rank', 'Passport No'], ['Šašić', 'Marko', 'IGNORED Name', 'Master', 'P1']);
+      expect(build({ rows })[0].draft).toMatchObject({ surname: 'Šašić', givenNames: 'Marko' });
+    });
+
+    it('ignore a full name column when only one of surname and given names is mapped', () => {
+      const rows = table(['Surname', 'Name', 'Rank', 'Passport No'], ['Šašić', 'IGNORED Name', 'Master', 'P1']);
+      expect(build({ rows })[0].draft).toMatchObject({ surname: 'Šašić', givenNames: '' });
+    });
+  });
+
+  it('numbers written as passport numbers are kept as text', () => {
+    const rows = table(['Surname', 'Rank', 'Passport No'], ['Šašić', 'Master', 12345678]);
+    expect(build({ rows })[0].draft.passportNo).toBe('12345678');
+  });
+
+  it('reports a date of birth that is not in the past', () => {
+    const rows = table(HEADER, ['Šašić', 'Marko', 'Master', '25.10.2026', 'P1', '']);
+    expect(build({ rows })[0]).toMatchObject({ status: 'error', errors: [{ field: 'dateOfBirth', message: 'Date of birth must be in the past.' }] });
+  });
+});
+
+describe('revalidateRow', () => {
+  const existing = [crewMember()];
+
+  it('recomputes the status, errors and changes for the edited draft, and keeps the row number and skip flag', () => {
+    const [first] = buildBrief(existing);
+    const edited = revalidateRow({ ...first, skip: true, draft: { ...first.draft, rank: 'master', nationality: 'Serbian' } }, existing, '2026-10-25');
+    expect(edited).toMatchObject({ rowNumber: 3, skip: true, status: 'update', existingId: existing[0].id });
+    expect(edited.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }, { field: 'nationality', from: 'Croatian', to: 'Serbian' }]);
+    const reverted = revalidateRow({ ...edited, draft: { ...edited.draft, rank: 'chiefOfficer', nationality: 'Croatian' } }, existing, '2026-10-25');
+    expect(reverted).toMatchObject({ status: 'update', changes: [] });
+  });
+
+  it('turns a new row into an update when its passport number now matches, and back again', () => {
+    const rows = buildBrief(existing);
+    const matched = revalidateRow({ ...rows[2], draft: { ...rows[2].draft, passportNo: '012345678' } }, existing, '2026-10-25');
+    expect(matched).toMatchObject({ status: 'update', existingId: existing[0].id });
+    expect(matched.draft.passportNo).toBe('012 345 678');
+    expect(matched.draft.nationality).toBe('Croatian');
+    const unmatched = revalidateRow({ ...matched, draft: { ...matched.draft, passportNo: 'ZZ9' } }, existing, '2026-10-25');
+    expect(unmatched.status).toBe('new');
+    expect(unmatched).not.toHaveProperty('existingId');
+    expect(unmatched.changes).toEqual([]);
+  });
+
+  it('reports the fields the user left empty, rather than replacing them with the default sign-on date', () => {
+    const rows = buildBrief();
+    const cleared = revalidateRow({ ...rows[2], draft: { ...rows[2].draft, surname: '  ', signOnDate: '' } }, [], '2026-10-25');
+    expect(cleared.status).toBe('error');
+    expect(cleared.errors.map(e => [e.field, e.message])).toEqual([['surname', 'Surname is required.'], ['signOnDate', 'Sign-on date is required.']]);
+  });
+
+  it('asks for the rank text when the rank is "other" and the text is empty', () => {
+    const rows = buildBrief();
+    const other = revalidateRow({ ...rows[2], draft: { ...rows[2].draft, rank: 'other', rankOther: ' ' } }, [], '2026-10-25');
+    expect(other).toMatchObject({ status: 'error', errors: [{ field: 'rank', message: 'Rank is required.' }] });
+    const named = revalidateRow({ ...other, draft: { ...other.draft, rankOther: 'Pumpman' } }, [], '2026-10-25');
+    expect(named).toMatchObject({ status: 'new', errors: [] });
+  });
+
+  it('does not change the row it is given', () => {
+    const rows = buildBrief(existing);
+    const before = structuredClone(rows[0]);
+    revalidateRow(rows[0], existing, '2026-10-25');
+    expect(rows[0]).toEqual(before);
+  });
+});
