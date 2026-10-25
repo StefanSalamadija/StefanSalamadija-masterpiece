@@ -9,7 +9,7 @@
 - Business rules are pure TypeScript functions in `src/domain/` and `src/security/`, unit-tested with Vitest. Persistence is in `src/db/`, backup files in `src/backup/`, screens in `src/ui/`.
 - Screens are tested end-to-end with Playwright against the production build, served by `vite preview` so the service worker is real.
 
-**Tech Stack:** TypeScript 7, Preact 11, Vite 8, vite-plugin-pwa 2 (Workbox), Dexie 4, read-excel-file 9, Vitest 5, fake-indexeddb 6, Playwright 1.63, write-excel-file 4 (tests only).
+**Tech Stack:** TypeScript 7, Preact 11, Vite 8, vite-plugin-pwa 2 (Workbox), Dexie 4, SheetJS Community Edition 0.20.3 (official CDN tarball), Vitest 5, fake-indexeddb 6, Playwright 1.63.
 
 **Spec:** `docs/superpowers/specs/2026-10-25-masterpiece-base-design.md`
 
@@ -17,8 +17,10 @@
 
 - **Runtime:** Node 22, npm. Project root `/home/user/masterpiece`.
 - **Dependencies (exact ranges):**
-  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, `read-excel-file@^9.3.12`.
-  - Dev: `vite@^8.3.5`, `@preact/preset-vite@^2.10.6`, `@babel/core@^7`, `vite-plugin-pwa@^2.0.0`, `workbox-window@^7.4.1`, `vitest@^5.0.5`, `fake-indexeddb@^6.2.6`, `typescript@^7.0.2`, `@playwright/test@1.63.0` (exact: it must match the preinstalled browsers in `/opt/pw-browsers`; never run `playwright install`), `write-excel-file@^4.1.1` (tests only).
+  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, and `xlsx` (SheetJS CE). SheetJS is installed **only in Task 5** with `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
+    - This needs `cdn.sheetjs.com` allowed in the environment's network policy. If the download is refused, stop at Task 5 and report; do not substitute another package.
+    - Never use the npm-registry `xlsx@0.18.5`, which is outdated and has known vulnerabilities.
+  - Dev: `vite@^8.3.5`, `@preact/preset-vite@^2.10.6`, `@babel/core@^7`, `vite-plugin-pwa@^2.0.0`, `workbox-window@^7.4.1`, `vitest@^5.0.5`, `fake-indexeddb@^6.2.6`, `typescript@^7.0.2`, `@playwright/test@1.63.0` (exact: it must match the preinstalled browsers in `/opt/pw-browsers`; never run `playwright install`).
   - Adding any other dependency needs a plan change.
 - **Offline:** no network requests at runtime (no CDNs, web fonts or analytics). Every asset is bundled and precached.
 - **Vite paths:** `base: './'`. The manifest uses `start_url: '.'` and `scope: '.'`, because the GitHub repo name is not yet known.
@@ -373,7 +375,8 @@ expect(resolveField('crew.byRank.master.fullName', { ...ctx, crew: ctx.crew.map(
 ### Task 5: Spreadsheet and CSV reading, header detection
 
 **Files:**
-- Create: `src/domain/crewImport/csv.ts`, `src/domain/crewImport/readSpreadsheet.ts`, `src/domain/crewImport/header.ts`, `src/test/makeXlsx.ts`
+- Create: `src/domain/crewImport/csv.ts`, `src/domain/crewImport/readSpreadsheet.ts`, `src/domain/crewImport/header.ts`, `src/test/makeWorkbook.ts`
+- Modify: `package.json` (add SheetJS from the CDN tarball, per Global Constraints)
 - Test: `src/domain/crewImport/csv.test.ts`, `src/domain/crewImport/readSpreadsheet.test.ts`, `src/domain/crewImport/header.test.ts`
 
 **Interfaces:**
@@ -382,16 +385,20 @@ expect(resolveField('crew.byRank.master.fullName', { ...ctx, crew: ctx.crew.map(
   - `type Cell = string | number | boolean | Date | null`; `interface SheetGrid { name: string; rows: Cell[][] }`.
   - `parseCsv(text: string): string[][]`. Strips a BOM, handles `"` quoting with `""` escapes and CRLF, and drops trailing empty lines. The delimiter is `;` when the first line has more unquoted `;` than `,`.
   - `readSpreadsheet(fileName: string, data: ArrayBuffer): Promise<SheetGrid[]>`:
-    - `.xlsx` (case-insensitive) → default export of `read-excel-file/universal`; each `{ sheet, data }` becomes `{ name, rows }`.
+    - `.xlsx` or `.xls` (case-insensitive) → `XLSX.read(new Uint8Array(data), { type: 'array', cellNF: true, cellDates: false })`.
+      - Build each sheet's grid from cell **(0,0)** to the end of `!ref`, so `rows[i][j]` is sheet row i+1, column j+1, even when `!ref` starts lower.
+      - Cell values by type: `s` → string; `b` → boolean; `e` or missing → `null`; `d` → `Date`.
+      - `n` → number, unless `XLSX.SSF.is_date(cell.z)` is true. In that case it becomes a `Date` at **UTC midnight** of the serial (`Date.UTC(1899, 11, 30) + Math.floor(v) × 86400000`). Never rely on SheetJS local-time date conversion.
     - `.csv` → UTF-8 decode, then `parseCsv`; the sheet name is the file name without its extension.
-  - `class UnsupportedFileError extends Error { kind: 'xls' | 'unknown' }` with exact messages:
-    - xls: `Old Excel format (.xls) isn't supported. Open the file in Excel, choose Save As → Excel Workbook (.xlsx), then import that file.`
-    - unknown: `This file type isn't supported. Use an Excel workbook (.xlsx) or a CSV file.`
+  - `class UnsupportedFileError extends Error` with message `This file type isn't supported. Use an Excel file (.xlsx or .xls) or a CSV file.`
+  - `class UnreadableFileError extends Error` with message `This file can't be read. If it's password-protected in Excel, remove the password, save it again and retry.` Thrown when SheetJS fails to parse the file.
   - `normaliseHeader(s: Cell): string`: NFD, strip `\p{M}`, lowercase, remove every non-`[a-z0-9]`.
   - `HEADER_SYNONYMS: Record<CrewField, string[]>`, with the normalised values from the table below.
   - `matchHeader(cell: Cell): CrewField | undefined`: an exact synonym match first. Otherwise, the longest synonym of at least 4 characters that the normalised header starts with. This handles headers like "Date of birth (DD.MM.YYYY)".
   - `detectHeaderRow(rows: Cell[][]): number`: the first row within the first 15 where `matchHeader` recognises ≥ 3 cells; otherwise the index of the first non-empty row.
-  - Test helper `makeXlsx(sheets: { name: string; rows: (string | number | Date | null)[][] }[]): Promise<ArrayBuffer>` using `write-excel-file/node` `.toBuffer()`.
+  - Test helper `makeWorkbook(sheets: { name: string; rows: (string | number | null)[][] }[], bookType: 'xlsx' | 'biff8', dateCells?: { sheet: number; addr: string; serial: number }[]): ArrayBuffer`.
+    - It uses `XLSX.utils.aoa_to_sheet` and `XLSX.write({ type: 'array', bookType })`.
+    - Each `dateCells` entry is written as `{ t: 'n', v: serial, z: 'dd.mm.yyyy' }`, which gives a timezone-independent date fixture.
 
 | CrewField | Synonyms (normalised) |
 |---|---|
@@ -417,14 +424,23 @@ expect(resolveField('crew.byRank.master.fullName', { ...ctx, crew: ctx.crew.map(
 expect(parseCsv('Surname,Given names\r\n"Smith, Jr",John\r\n')).toEqual([['Surname', 'Given names'], ['Smith, Jr', 'John']]);
 expect(parseCsv('Surname;Rank\nPetrović;Master')).toEqual([['Surname', 'Rank'], ['Petrović', 'Master']]);
 expect(parseCsv('﻿a,"He said ""hi"""\n\n\n')).toEqual([['a', 'He said "hi"']]);
-const buf = await makeXlsx([{ name: 'Crew', rows: [['Surname', 'DOB'], ['PETROVIĆ', new Date(Date.UTC(1985, 0, 5))]] }, { name: 'Notes', rows: [['x']] }]);
-const sheets = await readSpreadsheet('CREW.XLSX', buf);
-expect(sheets.map(s => s.name)).toEqual(['Crew', 'Notes']);
-expect(sheets[0].rows[1][1]).toBeInstanceOf(Date);
+const book = [{ name: 'Crew', rows: [['Surname', 'DOB', 'No'], ['PETROVIĆ', null, 7]] }, { name: 'Notes', rows: [['x']] }];
+const dob = [{ sheet: 0, addr: 'B2', serial: 31052 }];
+for (const [fileName, type] of [['CREW.XLSX', 'xlsx'], ['crew.xls', 'biff8']] as const) {
+  const sheets = await readSpreadsheet(fileName, makeWorkbook(book, type, dob));
+  expect(sheets.map(s => s.name)).toEqual(['Crew', 'Notes']);
+  expect(sheets[0].rows[1]).toEqual(['PETROVIĆ', new Date(Date.UTC(1985, 0, 5)), 7]);
+}
+// a sheet whose used range starts at C3 still maps to sheet rows and columns
+const offset = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([['Surname']], { origin: 'C3' });
+XLSX.utils.book_append_sheet(offset, ws, 'S');
+const grid = (await readSpreadsheet('o.xlsx', XLSX.write(offset, { type: 'array', bookType: 'xlsx' })))[0].rows;
+expect(grid[2][2]).toBe('Surname');
+expect(grid[0][0]).toBeNull();
 const csv = await readSpreadsheet('crew.csv', new TextEncoder().encode('Surname\nŠašić').buffer);
 expect(csv).toEqual([{ name: 'crew', rows: [['Surname'], ['Šašić']] }]);
-await expect(readSpreadsheet('crew.xls', new ArrayBuffer(8))).rejects.toMatchObject({ kind: 'xls' });
-await expect(readSpreadsheet('crew.pdf', new ArrayBuffer(8))).rejects.toMatchObject({ kind: 'unknown' });
+await expect(readSpreadsheet('crew.pdf', new ArrayBuffer(8))).rejects.toBeInstanceOf(UnsupportedFileError);
+await expect(readSpreadsheet('crew.xlsx', new TextEncoder().encode('not a workbook \u0000\u0001').buffer)).rejects.toBeInstanceOf(UnreadableFileError);
 expect(normaliseHeader("Seaman's Book No.")).toBe('seamansbookno');
 expect(normaliseHeader('Date of Birth (DD.MM.YYYY)')).toBe('dateofbirthddmmyyyy');
 expect(matchHeader('Date of Birth (DD.MM.YYYY)')).toBe('dateOfBirth');
@@ -1126,13 +1142,13 @@ Also add one test where the passport expiry is `2026-10-01` and the row shows `E
 
 **Interfaces:**
 - Consumes:
-  - Task 5: `readSpreadsheet`, `UnsupportedFileError`, `detectHeaderRow`.
+  - Task 5: `readSpreadsheet`, `UnsupportedFileError`, `UnreadableFileError`, `detectHeaderRow`.
   - Task 6: `applySavedMapping`, `toSavedMapping`, `buildPreview`, `revalidateRow`.
   - Task 9: `createRecord`, `updateRecord`.
   - Task 10: `takeSnapshot`.
   - Task 15: `CrewEdit` fields for the inline fix.
 - Produces, in order on screen:
-  - File input `Crew list file` (accepts `.xlsx,.csv,.xls`).
+  - File input `Crew list file` (accepts `.xlsx,.xls,.csv`).
   - Select `Sheet`; number input `Header row` (1-based).
   - Per-column select, labelled by the column's header text, with options `— ignore —` plus field labels.
   - Select `Date format`, with options `Day first (DD.MM.YYYY)` and `Year first (YYYY-MM-DD)`.
@@ -1144,10 +1160,10 @@ Also add one test where the passport expiry is `2026-10-01` and the row shows `E
   2. Create the new records and update the matched ones with the changed fields only.
   3. Save the mapping with `toSavedMapping` to `ship.crewImportMapping`.
   4. Go to `#/ship/crew` with the status `Imported <n> crew.`.
-- A `.xls` file shows the `UnsupportedFileError` message with `role="alert"`.
+- `UnsupportedFileError` and `UnreadableFileError` messages are shown with `role="alert"`.
 
 - [ ] **Step 1: Write the failing e2e tests.**
-  - `makeCrewXlsx(path)` uses `write-excel-file/node` to write a sheet with these rows:
+  - `makeCrewXlsx(path, bookType: 'xlsx' | 'biff8' = 'xlsx')` uses SheetJS (`import * as XLSX from 'xlsx'`, `XLSX.writeFile`) to write a sheet with these rows:
     1. `['CREW LIST']`
     2. `['MV OCEAN STAR']`
     3. *(empty row)*
@@ -1177,11 +1193,21 @@ test('import crew from Excel, fix error, re-import shows no changes', async ({ p
   await expect(page.getByRole('listitem').filter({ hasText: 'No changes' })).toHaveCount(2); // the O'BRIEN row still has its bad date in the file
   await expectNoHorizontalScroll(page);
 });
-test('.xls is explained', async ({ page }, info) => {
-  const xls = info.outputPath('old.xls'); await fs.writeFile(xls, 'x');
+test('old .xls crew list imports the same way', async ({ page }, info) => {
+  const xls = info.outputPath('crew.xls'); await makeCrewXlsx(xls, 'biff8');
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(xls);
-  await expect(page.getByRole('alert')).toContainText('Save As → Excel Workbook (.xlsx)');
+  await expect(page.getByLabel('Header row')).toHaveValue('4');
+  await expect(page.getByRole('listitem').filter({ hasText: 'New' })).toHaveCount(2);
+});
+test('unsupported and unreadable files are explained', async ({ page }, info) => {
+  const pdf = info.outputPath('crew.pdf'); await fs.writeFile(pdf, '%PDF-1.4');
+  const bad = info.outputPath('locked.xlsx'); await fs.writeFile(bad, 'not a workbook');
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(pdf);
+  await expect(page.getByRole('alert')).toHaveText("This file type isn't supported. Use an Excel file (.xlsx or .xls) or a CSV file.");
+  await page.getByLabel('Crew list file').setInputFiles(bad);
+  await expect(page.getByRole('alert')).toContainText('password-protected');
 });
 ```
 

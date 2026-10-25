@@ -115,8 +115,8 @@ The fields are exposed through one lookup function, `resolveField(name, { asAt? 
 - A crew member counts as onboard at D when `signOnDate ≤ D` and (`signOffDate` is empty or `signOffDate ≥ D`).
 - The day of sign-on and the day of sign-off both count as onboard.
 
-**Import from Excel/CSV** (.xlsx, .csv)
-- Old-format **.xls** files are not read directly. The app explains how to re-save them as .xlsx in Excel.
+**Import from Excel/CSV** (.xlsx, .xls, .csv)
+- If a file can't be read (for example it is password-protected in Excel), the app says so and suggests removing the password and saving it again.
 - CSV files may use commas or semicolons (European Excel exports use semicolons).
 - If a crew list has a single full-name column, it is split into surname and given names: "SURNAME, Given" (comma), or leading words in capitals taken as the surname.
 - A *sign-on date for rows without one* is applied to rows that lack it (default: today, ship's time).
@@ -255,8 +255,10 @@ Printing always uses a black-on-white print layout, whatever the theme.
 ## 5. Technical design
 
 - **Stack:** TypeScript, Preact, Vite. PWA via `vite-plugin-pwa` (Workbox precache of all assets for full offline use). IndexedDB via Dexie. Plain CSS with variables and three theme sets, mobile-first, usable one-handed on a phone.
-- **Spreadsheet reading:** `read-excel-file` for .xlsx, and a small built-in parser for .csv.
-  SheetJS was considered but rejected: its official download server is unreachable from the build environment, and the npm-registry copy is outdated and has known vulnerabilities.
+- **Spreadsheet reading:** SheetJS Community Edition 0.20.3 for .xlsx and .xls, installed from the official SheetJS CDN tarball, and a small built-in parser for .csv.
+  - The build environment must allow `cdn.sheetjs.com`.
+  - The npm-registry `xlsx@0.18.5` is outdated, has known vulnerabilities and is never used.
+  - Excel dates are converted from the serial number directly, so results don't depend on the device's time zone.
 - **Code units:**
   - `db/`: schema, migrations, record helpers (timestamps, soft delete, scope).
   - `domain/`: pure functions, no I/O:
