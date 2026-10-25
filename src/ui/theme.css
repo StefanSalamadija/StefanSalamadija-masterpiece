@@ -118,7 +118,8 @@ a {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -432,7 +433,8 @@ select {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-height: 48px;
   padding: 10px 12px;
@@ -441,6 +443,17 @@ select {
   background: var(--surface);
   color: var(--text);
   font-size: 16px;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+/* A control that is scrolled into view (a failed Save focuses the first one with a problem) must clear the sticky bars and show its label. */
+.field input,
+.field select,
+.field textarea {
+  scroll-margin-block: 120px;
 }
 
 .field input[aria-invalid='true'] {
@@ -664,7 +677,8 @@ select {
 }
 
 .ship-list,
-.crew-list {
+.crew-list,
+.cert-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -701,7 +715,8 @@ select {
 }
 
 .particulars-form,
-.crew-form {
+.crew-form,
+.certificate-form {
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -802,7 +817,8 @@ select {
   gap: 8px;
 }
 
-.crew-row-head {
+.crew-row-head,
+.cert-row-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -824,7 +840,8 @@ select {
   color: var(--muted);
 }
 
-.crew-name {
+.crew-name,
+.cert-name {
   font-size: 18px;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -834,6 +851,37 @@ select {
   margin: 0;
   font-size: 13px;
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Certificates ---- */
+
+.cert-row {
+  padding: 0;
+}
+
+/* The whole card is the link to the certificate. */
+.cert-link {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: var(--target);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+
+.cert-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cert-details > span {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

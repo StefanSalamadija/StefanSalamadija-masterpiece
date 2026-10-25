@@ -4,6 +4,8 @@ import { ErrorToast } from '../ui/components/ErrorToast';
 import { Header } from '../ui/components/Header';
 import { Nav, ShipNav } from '../ui/components/Nav';
 import { UpdateBanner } from '../ui/components/UpdateBanner';
+import { CertificateEdit } from '../ui/screens/CertificateEdit';
+import { Certificates } from '../ui/screens/Certificates';
 import { Crew } from '../ui/screens/Crew';
 import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
@@ -24,6 +26,9 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/crew/new': CrewEdit,
   '/ship/crew/import': CrewImport,
   '/ship/crew/:id': CrewEdit,
+  '/ship/certificates': Certificates,
+  '/ship/certificates/new': CertificateEdit,
+  '/ship/certificates/:id': CertificateEdit,
   '/profiles': Profiles,
 };
 
