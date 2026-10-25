@@ -1,6 +1,6 @@
 import { createContext } from 'preact';
 import type { ComponentChildren } from 'preact';
-import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import { listForShip } from '../db/records';
 import { getDb, type MasterpieceDB } from '../db/schema';
 import { liveActiveShipId, listShips } from '../db/ships';
@@ -91,7 +91,8 @@ export function AppStateProvider({ children }: { children: ComponentChildren }) 
   }, []);
 
   const theme = data?.settings?.theme;
-  useEffect(() => {
+  // A layout effect runs before the browser paints, so a theme switch never shows a frame with the old palette.
+  useLayoutEffect(() => {
     if (theme) applyTheme(theme);
   }, [theme]);
 

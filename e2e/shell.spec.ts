@@ -13,6 +13,8 @@ test('first ship and header clock', async ({ page }) => {
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   await expect(page.getByTestId('ship-clock')).toHaveText('12:00 LT (UTC+03:00)');
   await expectNoHorizontalScroll(page);
+  await page.clock.runFor(60_000);
+  await expect(page.getByTestId('ship-clock')).toHaveText('12:01 LT (UTC+03:00)');
 });
 
 test('theme cycles, persists, and prints black on white', async ({ page }) => {
@@ -59,4 +61,24 @@ test('navigation links, the ship chips, and unknown routes falling back to Home'
   await page.goto('./#/nowhere');
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
   await expect(main.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+});
+
+test.describe('theme before the app starts', () => {
+  test.use({ serviceWorkers: 'block' }); // so that page.route sees every request
+
+  test('the stored theme is on <html> before any script of the app runs, and a bad value is ignored', async ({ page }) => {
+    await freshApp(page); await setupShip(page);
+    await page.getByRole('button', { name: 'Theme: Day' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+
+    // From here on the app's own scripts never load, so only the inline script in index.html can set the theme.
+    await page.route('**/assets/*.js', (route) => route.abort());
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(11, 22, 34)');
+
+    await page.evaluate(() => localStorage.setItem('mp-theme', 'purple'));
+    await page.reload();
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
+  });
 });

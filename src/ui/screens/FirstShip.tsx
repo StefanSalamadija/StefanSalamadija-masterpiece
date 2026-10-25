@@ -39,12 +39,12 @@ export function FirstShip() {
   }
 
   return (
-    <div class="welcome">
+    <main class="welcome">
       <div class="welcome-band">
         <LogoMark size={120} mode={logoMode(settings.theme)} />
         <h1>Masterpiece</h1>
       </div>
-      <main class="welcome-body">
+      <div class="welcome-body">
         <p class="tagline">Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.</p>
         {creating ? (
           <form class="first-ship-form" aria-labelledby="first-ship-heading" onSubmit={submit} noValidate>
@@ -85,7 +85,7 @@ export function FirstShip() {
           </svg>
           Your data stays on this device. No account needed.
         </p>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

@@ -99,6 +99,13 @@ body {
   font-weight: 600;
 }
 
+/* Text that sets its own medium weight gets the high-contrast weight too. The mono clock stays 500: the only weight bundled. */
+:root[data-theme='contrast'] .brand h1,
+:root[data-theme='contrast'] .field label,
+:root[data-theme='contrast'] .field-error {
+  font-weight: 600;
+}
+
 h1,
 h2,
 h3 {
@@ -329,7 +336,7 @@ select {
   flex: none;
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: var(--target);
   padding: 0 16px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -342,7 +349,6 @@ select {
 }
 
 :root[data-theme='contrast'] .chip {
-  min-height: var(--target);
   border-width: 2px;
   font-weight: 600;
 }
@@ -381,14 +387,10 @@ select {
 }
 
 .btn-small {
-  min-height: 40px;
+  min-height: var(--target);
   padding: 0 14px;
   font-size: 14px;
   border-radius: 8px;
-}
-
-:root[data-theme='contrast'] .btn-small {
-  min-height: var(--target);
 }
 
 .btn-primary {
@@ -581,6 +583,9 @@ select {
 
 .toast-action {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
   color: inherit;
   font-weight: 600;
 }

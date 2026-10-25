@@ -26,7 +26,10 @@ export function UpdateBanner() {
   return (
     <div class="update-banner no-print" role="status">
       <div class="container banner-inner">
-        <span class="banner-text">{updateBannerText(info)}</span>
+        <span class="banner-text">
+          {updateBannerText(info)}
+          <span aria-hidden="true"> — </span>
+        </span>
         <button type="button" class="btn btn-primary btn-small" onClick={() => applyUpdate().catch(reportError)}>
           Update
         </button>

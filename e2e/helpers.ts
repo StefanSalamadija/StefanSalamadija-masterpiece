@@ -9,7 +9,8 @@ export async function freshApp(page: Page, opts: { time?: string } = {}): Promis
 
 /**
  * Creates the first ship from the welcome screen. `offset` is the label of the ship's-time option, such as `UTC+03:00`.
- * With `skipLock` (the default) it also clicks `Skip for now` on the protect step, if that step appears.
+ * With `skipLock` (the default) it also clicks `Skip for now` on the protect step, if that step appears, and then waits
+ * for the header to show the ship. Without it, it returns as soon as the header or the protect step is on screen.
  */
 export async function setupShip(
   page: Page, name = 'MV OCEAN STAR', offset = 'UTC+03:00', opts: { skipLock?: boolean } = {},
@@ -19,11 +20,13 @@ export async function setupShip(
   await page.getByLabel('Ship name').fill(name);
   await page.getByLabel("Ship's time (UTC offset)").selectOption({ label: offset });
   await page.getByRole('button', { name: 'Create ship' }).click();
-  if (!skipLock) return;
-  // Once the header shows the ship, the protect step (if there is one) is already on screen: no need to wait for it.
-  await expect(page.getByRole('banner')).toContainText(name);
+  // Either the header of the app, or the protect step, which may cover the whole screen without it.
+  const header = page.getByRole('banner');
   const skip = page.getByRole('button', { name: 'Skip for now' });
-  if ((await skip.count()) > 0) await skip.click();
+  await expect(header.or(skip).first()).toBeVisible();
+  if (!skipLock) return;
+  if (await skip.isVisible()) await skip.click();
+  await expect(header).toContainText(name);
 }
 
 /** At phone width (360 px) the page must not scroll sideways. */

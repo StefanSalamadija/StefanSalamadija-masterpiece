@@ -16,7 +16,8 @@ function isReleaseInfo(value: unknown): value is ReleaseInfo {
 /**
  * The release note of the newest published version, read from `./version.json` on the server (never from a cache).
  * Null when it can't be had for any reason: offline, not found, or not a release note. The banner then falls back to
- * a plain message. This is the only request the app makes, and it sends nothing about the user.
+ * a plain message. Apart from the app's own files (and the service worker's check of its same-origin `sw.js`), this
+ * is the only request the app makes, and it sends nothing about the user.
  */
 export async function fetchReleaseInfo(): Promise<ReleaseInfo | null> {
   try {
