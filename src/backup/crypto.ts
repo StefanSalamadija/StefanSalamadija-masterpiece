@@ -6,12 +6,19 @@ export interface EncryptedBlob { kdf: KdfParams; iv: string; ciphertext: string 
 export const DEFAULT_ITERATIONS = 600_000;
 /** Files that ask for fewer iterations than this are refused when opening. Real backups always use far more; tests use 1000. */
 export const MIN_ITERATIONS = 1000;
+/** Files that ask for more are refused too: a crafted count would keep a phone busy for minutes with no way to cancel. */
+export const MAX_ITERATIONS = 10_000_000;
 export const SALT_BYTES = 16;
 export const IV_BYTES = 12;
 /** AES-GCM appends a 128-bit authentication tag to the ciphertext. */
 export const TAG_BYTES = 16;
 
 const CHUNK = 0x8000;
+
+/** An integer from `MIN_ITERATIONS` to `MAX_ITERATIONS` inclusive. Checked before any key derivation, on sealing and on opening. */
+export function isValidIterations(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= MIN_ITERATIONS && value <= MAX_ITERATIONS;
+}
 
 /** Standard base64 with padding. Chunked so a multi-megabyte array cannot overflow the argument limit of `fromCharCode`. */
 export function toBase64(bytes: Uint8Array): string {
@@ -62,6 +69,7 @@ export async function encryptBytes(
   opts: { iterations?: number } = {},
 ): Promise<EncryptedBlob> {
   const iterations = opts.iterations ?? DEFAULT_ITERATIONS;
+  if (!isValidIterations(iterations)) throw new RangeError(`iterations must be an integer between ${MIN_ITERATIONS} and ${MAX_ITERATIONS}`);
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const key = await deriveKey(password, salt, iterations);

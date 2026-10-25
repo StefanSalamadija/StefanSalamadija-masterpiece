@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { decryptBytes, encryptBytes } from './crypto';
+import { describe, expect, it, vi } from 'vitest';
+import { MAX_ITERATIONS, MIN_ITERATIONS, decryptBytes, encryptBytes, isValidIterations } from './crypto';
 import {
   BackupError, DamagedFileError, NewerVersionError, NotABackupError, WrongPasswordError,
   openBackup, readHeader, sealBackup, validatePassword,
@@ -257,6 +257,38 @@ describe('sealBackup / openBackup', () => {
       await expect(openBackup(JSON.stringify(j), PW)).resolves.toBeDefined();
     });
 
+    it('opens (and fails to decrypt) a file whose iterations were changed from 1000 to 1001', async () => {
+      const j = await parsed();
+      await expect(openBackup(JSON.stringify({ ...j, kdf: { ...j.kdf, iterations: 1001 } }), PW)).rejects.toBeInstanceOf(WrongPasswordError);
+    });
+
+    it.each([
+      ['one more than the maximum', MAX_ITERATIONS + 1],
+      ['the largest 32-bit count', 2 ** 32 - 1],
+      ['a count beyond 32 bits', 2 ** 40],
+    ])('rejects iterations of %s before any key derivation runs', async (_label, iterations) => {
+      const j = await parsed();
+      const derive = vi.spyOn(globalThis.crypto.subtle, 'deriveKey');
+      try {
+        await expect(openBackup(JSON.stringify({ ...j, kdf: { ...j.kdf, iterations } }), PW)).rejects.toBeInstanceOf(DamagedFileError);
+        expect(derive).not.toHaveBeenCalled();
+      } finally {
+        derive.mockRestore();
+      }
+    });
+
+    it('lets iterations of exactly the maximum through validation (the derivation itself is stubbed out)', async () => {
+      const j = await parsed();
+      const derive = vi.spyOn(globalThis.crypto.subtle, 'deriveKey').mockRejectedValue(new Error('stubbed'));
+      try {
+        await expect(openBackup(JSON.stringify({ ...j, kdf: { ...j.kdf, iterations: MAX_ITERATIONS } }), PW)).rejects.toBeInstanceOf(WrongPasswordError);
+        expect(derive).toHaveBeenCalledOnce();
+        expect(derive.mock.calls[0]?.[0]).toMatchObject({ iterations: MAX_ITERATIONS });
+      } finally {
+        derive.mockRestore();
+      }
+    });
+
     it('rejects a decrypted payload that is not JSON', async () => {
       await expect(openBackup(await fileWithPlaintext('not json'), PW)).rejects.toBeInstanceOf(DamagedFileError);
     });
@@ -343,5 +375,39 @@ describe('encryptBytes / decryptBytes', () => {
   it('fails when the associated data differs', async () => {
     const env = await encryptBytes(enc.encode('secret'), 'pw-12345678', enc.encode('a'), FAST);
     await expect(decryptBytes(env, 'pw-12345678', enc.encode('b'))).rejects.toThrow();
+  });
+
+  it.each([
+    ['999', 999],
+    ['0', 0],
+    ['a negative number', -1000],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['1.5', 1.5],
+    ['1000.5', 1000.5],
+    ['one more than the maximum', MAX_ITERATIONS + 1],
+  ])('refuses to seal with iterations of %s', async (_label, iterations) => {
+    const message = 'iterations must be an integer between 1000 and 10000000';
+    await expect(encryptBytes(enc.encode('x'), 'pw-12345678', enc.encode('a'), { iterations })).rejects.toThrow(new RangeError(message));
+    await expect(encryptBytes(enc.encode('x'), 'pw-12345678', enc.encode('a'), { iterations })).rejects.toBeInstanceOf(RangeError);
+    await expect(sealBackup(H, P, 'pw-12345678', { iterations })).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it('seals with the smallest allowed count', async () => {
+    const env = await encryptBytes(enc.encode('x'), 'pw-12345678', enc.encode('a'), { iterations: MIN_ITERATIONS });
+    expect(env.kdf.iterations).toBe(MIN_ITERATIONS);
+  });
+});
+
+describe('isValidIterations', () => {
+  it('accepts integers from 1000 to 10,000,000 inclusive and nothing else', () => {
+    expect(MIN_ITERATIONS).toBe(1000);
+    expect(MAX_ITERATIONS).toBe(10_000_000);
+    expect(isValidIterations(1000)).toBe(true);
+    expect(isValidIterations(600_000)).toBe(true);
+    expect(isValidIterations(10_000_000)).toBe(true);
+    for (const bad of [999, 10_000_001, 0, -1, 1000.5, NaN, Infinity, 2 ** 32 - 1, '1000', null, undefined]) {
+      expect(isValidIterations(bad)).toBe(false);
+    }
   });
 });

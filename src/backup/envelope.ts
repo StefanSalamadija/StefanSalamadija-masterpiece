@@ -1,7 +1,7 @@
 import { TABLE_NAMES } from '../domain/types';
 import type { SyncRecord, Tables } from '../domain/types';
 import {
-  IV_BYTES, MIN_ITERATIONS, SALT_BYTES, TAG_BYTES, base64ByteLength, decryptBytes, encryptBytes, isBase64,
+  IV_BYTES, SALT_BYTES, TAG_BYTES, base64ByteLength, decryptBytes, encryptBytes, isBase64, isValidIterations,
 } from './crypto';
 import type { EncryptedBlob } from './crypto';
 
@@ -86,7 +86,7 @@ function parseEncrypted(file: Record<string, unknown>): EncryptedBlob {
   if (!isObject(kdf) || typeof iv !== 'string' || typeof ciphertext !== 'string') throw new DamagedFileError();
   const { name, hash, iterations, salt } = kdf;
   if (name !== 'PBKDF2' || hash !== 'SHA-256') throw new DamagedFileError();
-  if (typeof iterations !== 'number' || !Number.isInteger(iterations) || iterations < MIN_ITERATIONS) throw new DamagedFileError();
+  if (!isValidIterations(iterations)) throw new DamagedFileError();
   if (typeof salt !== 'string' || !isBase64(salt) || base64ByteLength(salt) !== SALT_BYTES) throw new DamagedFileError();
   if (!isBase64(iv) || base64ByteLength(iv) !== IV_BYTES) throw new DamagedFileError();
   if (!isBase64(ciphertext) || base64ByteLength(ciphertext) < TAG_BYTES) throw new DamagedFileError();
