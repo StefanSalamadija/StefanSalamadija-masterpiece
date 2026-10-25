@@ -226,9 +226,9 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 - The main navigation is a bottom bar: Home, Ship, Profiles, Settings. The ship's sections are a row of chips under the header.
 - The header shows the ship's name, the ship's clock and the theme button.
 
-Themes:
-- **Day (Bridge Console):** dark navy background `#0B1622`, cards `#12243A`, lines `#1E3550`, text `#E6EDF5`, secondary text `#9FB3C8`, teal accent `#5FD4CE`, amber warnings `#F2B33D`, red alarms `#FF6B5E`.
-- **Night:** pure red on black, with no white or blue light, to keep night vision on the bridge. Text `#F00000` is used for legibility (about 4.7:1 contrast). Brightness is lowered with the phone's own screen brightness.
+Themes (user decision: no red night mode):
+- **Day (white with blue):** white page and light-grey cards with dark text, a navy `#0B2545` header and bottom bar, blue `#1D5FD1` buttons and accents, amber and red badges.
+- **Night (dark navy Bridge Console):** background `#0B1622`, cards `#12243A`, lines `#1E3550`, text `#E6EDF5`, secondary text `#9FB3C8`, teal accent `#5FD4CE`, amber warnings `#F2B33D`, red alarms `#FF6B5E`. At night, lower the phone's own brightness.
 - **High contrast:** black on white, bold text and larger touch targets, for bright sun on deck.
 
 The header has a one-tap toggle, and the choice is remembered per device.

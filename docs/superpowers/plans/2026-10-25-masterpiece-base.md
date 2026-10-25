@@ -972,21 +972,29 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
     - First ship screen: heading `Create your first ship`, label `Ship name`, select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`), button `Create ship`, and link `Import a backup instead` → `#/settings/import`.
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
-  - **Visual style "Bridge Console"** (user-chosen; spec §4.9; reference mockups at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x, artboards "A · Bridge Console — Home/Crew list" and "Night mode"):
+  - **Visual style "Bridge Console"** (user-chosen; spec §4.9). Reference mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x: artboards "Day mode — Home" and "A · Bridge Console — Night mode".
     - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
-    - **Day tokens** (CSS variables on `:root[data-theme="day"]`):
-      - `--bg #0B1622`, `--surface #12243A`, `--line #1E3550`, `--nav-bg #0E1B2B`
-      - `--text #E6EDF5`, `--muted #9FB3C8`
-      - `--accent #5FD4CE` (`--on-accent #04211F`)
-      - `--amber #F2B33D` (`--on-amber #241703`)
-      - `--red #FF6B5E` (`--on-red #1A0503`)
-    - **Shapes:** cards and rows use radius 10–12 px; badges are pills.
-    - **Layout:**
+    - **Shared shapes and layout (all themes):**
+      - Cards and rows use radius 10–12 px; badges are pills.
       - Header: brand line, ship name, clock (Plex Mono), theme button 44×44.
-      - Bottom nav bar: Home / Ship / Profiles / Settings, each with an inline stroke icon, the active one in `--accent`.
+      - Bottom nav bar: Home / Ship / Profiles / Settings, each with an inline stroke icon; the active one uses `--nav-active`.
       - Ship sub-nav: a horizontal chip row, the active chip filled `--accent`.
-  - **Night theme:** every colour token is pure red on black, with green and blue channels both 0. Background `#000000`, text `#F00000`, borders `#4D0000`. There is no separate muted colour: secondary text uses the same red at a smaller size. Filled badges are `#F00000` with black text; amber badges are outlined.
-  - **High contrast:** black on white, `font-weight: 600`, minimum touch target 48 px.
+    - Every theme defines the same CSS variables on `:root[data-theme="…"]`:
+      - `--bg`, `--surface`, `--line`, `--text`, `--muted`
+      - `--bar-bg`, `--bar-text`, `--bar-muted` (header and bottom bar), `--nav-active`
+      - `--accent`, `--on-accent`, `--amber`, `--on-amber`, `--red`, `--on-red`
+  - **Day theme (white with blue):**
+    - Page and cards: `--bg #FFFFFF`, `--surface #F3F6FA`, `--line #D5DEE8`, `--text #0B1622`, `--muted #4A6380`.
+    - Navy header and bottom bar: `--bar-bg #0B2545`, `--bar-text #FFFFFF`, `--bar-muted #B8C7D9`, `--nav-active #7AB8FF`.
+    - Blue buttons: `--accent #1D5FD1`, `--on-accent #FFFFFF`.
+    - Badges: `--amber #F2B33D` (`--on-amber #241703`), `--red #C81E1E` (`--on-red #FFFFFF`).
+  - **Night theme (dark navy, the Bridge Console mockup):**
+    - Page and cards: `--bg #0B1622`, `--surface #12243A`, `--line #1E3550`, `--text #E6EDF5`, `--muted #9FB3C8`.
+    - Bars: `--bar-bg #0E1B2B`, `--bar-text #E6EDF5`, `--bar-muted #9FB3C8`, `--nav-active #5FD4CE`.
+    - Accent: `--accent #5FD4CE`, `--on-accent #04211F`.
+    - Badges: `--amber #F2B33D` (`--on-amber #241703`), `--red #FF6B5E` (`--on-red #1A0503`).
+    - No red night palette (user decision).
+  - **High contrast:** black on white, bars black with white text, `font-weight: 600`, minimum touch target 48 px.
   - **Print:** `@media print` forces background `#ffffff` and text `#000000` and hides nav, header buttons and banners, whatever the theme.
   - **e2e helpers** in `e2e/helpers.ts`:
     - `freshApp(page, opts?: { time?: string })`: installs `page.clock` at `opts.time ?? '2026-10-25T09:00:00Z'`, then goes to `./`.
@@ -1010,8 +1018,8 @@ test('theme cycles, persists, and prints black on white', async ({ page }) => {
   await page.getByRole('button', { name: 'Theme: Day' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   const [bg, fg] = await page.evaluate(() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.body).color]);
-  expect(bg).toBe('rgb(0, 0, 0)');
-  expect(fg).toMatch(/^rgb\(\d+, 0, 0\)$/);
+  expect(bg).toBe('rgb(11, 22, 34)');      // night: dark navy #0B1622
+  expect(fg).toBe('rgb(230, 237, 245)');   // #E6EDF5
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await page.emulateMedia({ media: 'print' });
