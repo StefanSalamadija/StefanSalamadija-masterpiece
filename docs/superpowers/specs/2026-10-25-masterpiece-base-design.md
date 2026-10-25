@@ -40,7 +40,7 @@ At sign-off they can give the relief a ship-only handover file.
 3. **SMS forms engine:** fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. Starts once the user sends 3–5 sample forms.
 4. **Cargo:** draft survey (initial/final, trim, hog/sag and density corrections), final trimming pours, air draft (keel to hatch cover) for loader clearance. Hydrostatic tables are entered per ship profile. Results are an aid and are checked against the approved stability booklet/loading computer.
 5. **Admin:** port and crew papers (crew lists, IMO FAL), voyage reports (noon, arrival/departure, NOR, SOF), planned tasks and due dates, work/rest hours, cargo/ballast logs and ROB.
-6. **Finance and converters:** currency (offline rates, updated when online or entered by hand), units, financial calculators, personal planning (personal data), and ship's business (ship data: master's cash, wages and advances, slop chest, disbursements).
+6. **Finance and converters** (includes the **personal budget planner**, designed in `2026-10-25-masterpiece-budget-design.md`): currency (offline rates, updated when online or entered by hand), units, financial calculators, personal planning (personal data), and ship's business (ship data: master's cash, wages and advances, slop chest, disbursements).
 
 ## 4. Piece 1 scope
 
