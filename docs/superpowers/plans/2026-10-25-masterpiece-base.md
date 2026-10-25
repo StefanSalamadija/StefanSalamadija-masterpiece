@@ -1486,7 +1486,10 @@ test('snapshot restore', async ({ page }) => {
 Spell out the commented steps as Playwright calls, using the labels above. Each device is a separate `browser.newContext()` with `freshApp`.
 
 - [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/backup.spec.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement the screens and dialog.** Export calls `shareOrDownload`. In Playwright (desktop) `canShare` is false, so the download path runs.
+- [ ] **Step 3: Implement the screens and dialog.** Export calls `exportBackup`, then `shareOrDownload`.
+  - Only when that resolves `'shared'` or `'downloaded'` does it call `recordFullBackup(db, exportedAt)`, so the backup reminder only resets once a file really left the app.
+  - On `'cancelled'` it shows `Export cancelled — no backup was made.`
+  - The handover `Ship` select lists only live ships. In Playwright (desktop) `canShare` is false, so the download path runs.
 - [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: settings, encrypted export/import with review, snapshot restore"`
 
