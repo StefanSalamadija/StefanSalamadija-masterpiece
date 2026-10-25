@@ -27,6 +27,14 @@ export function isValidIsoDate(s: string): boolean {
   return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(y, m);
 }
 
+const LOCAL_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** True only for a real calendar date and a real time written exactly as `YYYY-MM-DDTHH:mm`, as a `datetime-local` input gives it. */
+export function isValidLocalDateTime(s: string): boolean {
+  const [date, time, ...rest] = s.split('T');
+  return rest.length === 0 && time !== undefined && isValidIsoDate(date) && LOCAL_TIME.test(time);
+}
+
 /** Adds (or, if negative, subtracts) calendar months, clamping to the end of a shorter month. Throws on an invalid date. */
 export function addMonths(date: string, n: number): string {
   const [y, m, d] = parts(date);

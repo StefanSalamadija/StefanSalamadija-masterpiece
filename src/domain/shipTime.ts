@@ -16,6 +16,11 @@ export function isValidOffset(min: number): boolean {
   return Number.isInteger(min) && min >= MIN_OFFSET && min <= MAX_OFFSET && min % OFFSET_STEP === 0;
 }
 
+/** `offset` moved by `deltaMinutes` and held within the range, so an hour past the last offset stays on the last. */
+export function stepOffset(offset: number, deltaMinutes: number): number {
+  return Math.min(MAX_OFFSET, Math.max(MIN_OFFSET, offset + deltaMinutes));
+}
+
 /** `180` → `UTC+03:00`, `-570` → `UTC-09:30`. */
 export function formatOffset(min: number): string {
   const abs = Math.abs(min);
@@ -24,12 +29,25 @@ export function formatOffset(min: number): string {
   return `UTC${min < 0 ? '-' : '+'}${hh}:${mm}`;
 }
 
-function byEffectiveThenCreated(a: ClockChange, b: ClockChange): number {
-  return Date.parse(a.effectiveAt) - Date.parse(b.effectiveAt) || Date.parse(a.createdAt) - Date.parse(b.createdAt);
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Live changes, earliest first; equal `effectiveAt` is ordered by `createdAt`, so the last of a tie wins. */
-function liveChanges(changes: ClockChange[]): ClockChange[] {
+/**
+ * Earlier effective time first; at the same time the one created later comes later, so it wins. Only when both are
+ * equal (two devices, or two taps, in the same millisecond) the id decides, so that the result never depends on the
+ * order the changes were read in and every device resolves a tie the same way.
+ */
+function byEffectiveThenCreated(a: ClockChange, b: ClockChange): number {
+  return (
+    Date.parse(a.effectiveAt) - Date.parse(b.effectiveAt) ||
+    Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
+    compareText(a.id, b.id)
+  );
+}
+
+/** Live changes, earliest first; of equal `effectiveAt` the one created later comes later, so the last of a tie wins. */
+export function liveChanges(changes: ClockChange[]): ClockChange[] {
   return changes.filter((c) => !c.deleted).sort(byEffectiveThenCreated);
 }
 

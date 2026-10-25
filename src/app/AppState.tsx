@@ -23,7 +23,10 @@ export interface AppState {
   activeShip?: ShipProfile;
   /** The active ship's UTC offset in minutes right now (the device's own offset when there is no ship). */
   offsetMinutes: number;
-  /** The current instant. Refreshed every 30 seconds, on the half minute, so the displayed minute is never late. */
+  /**
+   * The current instant. Refreshed every 30 seconds, on the half minute, so the displayed minute is never late, and
+   * whenever the stored data changes, so that a change just written (a clock change) is seen at once.
+   */
   nowUtc: Date;
   /** Today's date on the ship, `YYYY-MM-DD`. */
   shipToday: string;
@@ -83,7 +86,11 @@ function useNow(stepMs: number): Date {
 export function AppStateProvider({ children }: { children: ComponentChildren }) {
   const db = getDb();
   const data = useLive(() => loadAppData(db), [db]);
-  const nowUtc = useNow(TICK_MS);
+  const ticked = useNow(TICK_MS);
+  // The instant also moves on whenever the data changes: a clock change just made takes effect from the moment it was
+  // asked for, which is after the last tick, so it would not show (header clock, offset) until the next one.
+  // (`ticked` and `data` are not read; they only say when to take the time again.)
+  const nowUtc = useMemo(() => new Date(), [ticked, data]);
   const [persistence, setPersistence] = useState<AppState['persistence']>('unsupported');
 
   useEffect(() => {

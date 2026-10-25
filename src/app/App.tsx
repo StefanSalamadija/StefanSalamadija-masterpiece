@@ -13,6 +13,8 @@ import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
 import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
+import { ShipTime } from '../ui/screens/ShipTime';
+import { Voyage } from '../ui/screens/Voyage';
 import { AppStateProvider, useAppState } from './AppState';
 import { useRoute } from './router';
 import type { RoutePath } from './router';
@@ -29,6 +31,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/certificates': Certificates,
   '/ship/certificates/new': CertificateEdit,
   '/ship/certificates/:id': CertificateEdit,
+  '/ship/voyage': Voyage,
+  '/ship/time': ShipTime,
   '/profiles': Profiles,
 };
 

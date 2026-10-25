@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, addMonths, isValidIsoDate } from './dates';
+import { addDays, addMonths, isValidIsoDate, isValidLocalDateTime } from './dates';
 
 describe('isValidIsoDate', () => {
   it('accepts real calendar dates', () => {
@@ -18,6 +18,24 @@ describe('isValidIsoDate', () => {
   it('rejects anything that is not exactly YYYY-MM-DD', () => {
     for (const bad of ['', '2026-1-5', '25.10.2026', '2026-10-25T00:00', ' 2026-10-25', 'abcd-ef-gh']) {
       expect(isValidIsoDate(bad)).toBe(false);
+    }
+  });
+});
+
+describe('isValidLocalDateTime', () => {
+  it('accepts a real date with a real time, as YYYY-MM-DDTHH:mm', () => {
+    expect(isValidLocalDateTime('2026-10-25T09:00')).toBe(true);
+    expect(isValidLocalDateTime('2028-02-29T00:00')).toBe(true);
+    expect(isValidLocalDateTime('2026-12-31T23:59')).toBe(true);
+  });
+  it('rejects a date that does not exist or a time that does not', () => {
+    for (const bad of ['2026-02-30T10:00', '2026-13-01T10:00', '2026-10-25T24:00', '2026-10-25T10:60', '2026-10-25T99:99']) {
+      expect(isValidLocalDateTime(bad)).toBe(false);
+    }
+  });
+  it('rejects anything that is not exactly that shape', () => {
+    for (const bad of ['', '2026-10-25', '2026-10-25 09:00', '2026-10-25T9:00', '2026-10-25T09:00:00', '2026-10-25T09:00Z', ' 2026-10-25T09:00']) {
+      expect(isValidLocalDateTime(bad)).toBe(false);
     }
   });
 });

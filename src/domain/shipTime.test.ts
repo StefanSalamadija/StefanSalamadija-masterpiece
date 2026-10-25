@@ -4,9 +4,11 @@ import {
   deviceOffsetMinutes,
   formatOffset,
   isValidOffset,
+  liveChanges,
   nextScheduledChange,
   shipLocalToInstant,
   shipOffsetAt,
+  stepOffset,
   toShipLocal,
 } from './shipTime';
 import type { ClockChange } from './types';
@@ -78,6 +80,56 @@ describe('shipOffsetAt', () => {
     const b = cc('2026-10-24T00:00:00.000Z', 120, '2026-10-02T00:00:00.000Z');
     expect(shipOffsetAt([b, a], new Date('2026-10-25T00:00:00Z'))).toBe(120);
     expect(shipOffsetAt([a, b], new Date('2026-10-25T00:00:00Z'))).toBe(120);
+  });
+});
+
+describe('shipOffsetAt, changes with the same effectiveAt and createdAt', () => {
+  // Two devices (or two quick taps) can write at the same millisecond: the winner must not depend on the order read.
+  const at = '2026-10-24T00:00:00.000Z';
+  const a = { ...cc(at, 60), id: 'aaa' };
+  const b = { ...cc(at, 120), id: 'bbb' };
+
+  it('is decided by id, so every device and every reading order agrees', () => {
+    const now = new Date('2026-10-25T00:00:00Z');
+    expect(shipOffsetAt([a, b], now)).toBe(120);
+    expect(shipOffsetAt([b, a], now)).toBe(120);
+  });
+  it('orders them the same way in liveChanges', () => {
+    expect(liveChanges([b, a]).map((c) => c.id)).toEqual(['aaa', 'bbb']);
+  });
+});
+
+describe('liveChanges', () => {
+  it('drops deleted changes and puts the rest earliest first, ties by createdAt', () => {
+    const late = cc('2026-10-24T00:00:00.000Z', 60, '2026-10-02T00:00:00.000Z');
+    const early = cc('2026-10-24T00:00:00.000Z', 120, '2026-10-01T00:00:00.000Z');
+    const first = cc('2026-10-20T00:00:00.000Z', 180);
+    const gone = { ...cc('2026-10-21T00:00:00.000Z', 240), deleted: true };
+    expect(liveChanges([late, gone, first, early])).toEqual([first, early, late]);
+  });
+  it('does not change the list it is given', () => {
+    const list = [cc('2026-10-24T00:00:00.000Z', 60), cc('2026-10-20T00:00:00.000Z', 120)];
+    const copy = [...list];
+    liveChanges(list);
+    expect(list).toEqual(copy);
+  });
+});
+
+describe('stepOffset', () => {
+  it('moves by the step', () => {
+    expect(stepOffset(180, 60)).toBe(240);
+    expect(stepOffset(180, -60)).toBe(120);
+    expect(stepOffset(-30, 60)).toBe(30);
+    expect(stepOffset(330, 60)).toBe(390);
+  });
+  it('stops at the ends of the range instead of leaving it', () => {
+    expect(stepOffset(840, 60)).toBe(840);
+    expect(stepOffset(810, 60)).toBe(840);
+    expect(stepOffset(-720, -60)).toBe(-720);
+    expect(stepOffset(-690, -60)).toBe(-720);
+  });
+  it('gives an offset that is always valid', () => {
+    expect(OFFSET_OPTIONS.every((o) => isValidOffset(stepOffset(o, 60)) && isValidOffset(stepOffset(o, -60)))).toBe(true);
   });
 });
 

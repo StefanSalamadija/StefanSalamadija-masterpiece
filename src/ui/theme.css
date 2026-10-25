@@ -678,7 +678,9 @@ textarea {
 
 .ship-list,
 .crew-list,
-.cert-list {
+.cert-list,
+.voyage-list,
+.history-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -716,7 +718,8 @@ textarea {
 
 .particulars-form,
 .crew-form,
-.certificate-form {
+.certificate-form,
+.voyage-form {
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -745,6 +748,7 @@ textarea {
 
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
 }
@@ -1157,4 +1161,70 @@ textarea {
   display: inline-flex;
   align-items: center;
   min-height: var(--target);
+}
+
+/* ---- Voyage and ship's time ---- */
+
+.voyage-form {
+  margin-bottom: 24px;
+}
+
+.time-now {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.time-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.time-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.time-actions .btn {
+  flex: 1 1 140px;
+}
+
+/* A select with the button that acts on it, side by side where there is room and stacked on a phone. */
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.inline-form .field {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.history-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
