@@ -9,6 +9,8 @@ import type { FingerprintCredential } from '../domain/types';
 import { constantTimeEqual } from './pin';
 
 const PROMPT_TIMEOUT_MS = 60_000;
+/** The challenge is 32 random bytes; anything much shorter is not a challenge worth trusting. */
+const MIN_CHALLENGE_BYTES = 16;
 const FLAG_USER_PRESENT = 0x01;
 const FLAG_USER_VERIFIED = 0x04;
 /** rpIdHash (32) + flags (1) + signature counter (4). */
@@ -65,7 +67,13 @@ export async function registerFingerprint(): Promise<FingerprintCredential> {
   if (!created || !response || !publicKey) throw new Error('This browser did not hand over the fingerprint key.');
   const alg = response.getPublicKeyAlgorithm();
   if (alg !== -7 && alg !== -257) throw new Error('This phone chose a fingerprint key type the app cannot check.');
-  return { credentialId: toBase64Url(new Uint8Array(created.rawId)), publicKey: toBase64(new Uint8Array(publicKey)), alg };
+  const spki = new Uint8Array(publicKey);
+  try {
+    await importVerifyKey(spki, alg);
+  } catch {
+    throw new Error('The fingerprint key this phone made cannot be used by the app.');
+  }
+  return { credentialId: toBase64Url(new Uint8Array(created.rawId)), publicKey: toBase64(spki), alg };
 }
 
 /** True only when the phone's prompt succeeded and its answer verifies. Cancelled, failed or timed-out prompts give false; never throws. */
@@ -134,19 +142,22 @@ export function derToRawEcdsa(der: Uint8Array): Uint8Array {
   return raw;
 }
 
+/** ES256 is ECDSA over P-256; RS256 is RSASSA-PKCS1-v1_5. Rejects if the bytes are not a key of that kind. */
+function importVerifyKey(spki: Uint8Array<ArrayBuffer>, alg: -7 | -257): Promise<CryptoKey> {
+  const { subtle } = globalThis.crypto;
+  return alg === -7
+    ? subtle.importKey('spki', spki, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+    : subtle.importKey('spki', spki, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+}
+
 async function signatureMatches(cred: FingerprintCredential, signed: Uint8Array<ArrayBuffer>, signature: Uint8Array): Promise<boolean> {
   const { subtle } = globalThis.crypto;
-  const spki = fromBase64(cred.publicKey);
+  if (cred.alg !== -7 && cred.alg !== -257) return false;
+  const key = await importVerifyKey(fromBase64(cred.publicKey), cred.alg);
   if (cred.alg === -7) {
-    const key = await subtle.importKey('spki', spki, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-    const raw = derToRawEcdsa(signature);
-    return subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, new Uint8Array(raw), signed);
+    return subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, new Uint8Array(derToRawEcdsa(signature)), signed);
   }
-  if (cred.alg === -257) {
-    const key = await subtle.importKey('spki', spki, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-    return subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, new Uint8Array(signature), signed);
-  }
-  return false;
+  return subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, new Uint8Array(signature), signed);
 }
 
 /** True only if every WebAuthn check passes. Malformed input of any kind gives false; never throws. */
@@ -164,10 +175,12 @@ export async function verifyAssertion(input: {
     const authenticatorData = new Uint8Array(input.authenticatorData);
     const clientData: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(clientDataJSON));
     if (typeof clientData !== 'object' || clientData === null) return false;
-    const { type, challenge, origin } = clientData as Record<string, unknown>;
+    const { type, challenge, origin, crossOrigin } = clientData as Record<string, unknown>;
     if (type !== 'webauthn.get') return false;
+    if (input.expectedChallenge.length < MIN_CHALLENGE_BYTES) return false;
     if (challenge !== toBase64Url(input.expectedChallenge)) return false;
     if (origin !== input.expectedOrigin) return false;
+    if (crossOrigin === true) return false;
 
     const auth = parseAuthenticatorData(authenticatorData);
     const expectedRpIdHash = await sha256(new TextEncoder().encode(input.expectedRpId));

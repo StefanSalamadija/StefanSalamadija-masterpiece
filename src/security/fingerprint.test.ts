@@ -76,13 +76,13 @@ async function rs256Signer(): Promise<Signer> {
   };
 }
 
-interface Made { flags: number; type: string; challenge: Uint8Array; origin: string; rpId: string }
+interface Made { flags: number; type: string; challenge: Uint8Array; origin: string; rpId: string; crossOrigin?: boolean }
 
 /** A complete assertion whose signature covers whatever the overrides put in it, so each test breaks exactly one rule. */
 async function assertion(signer: Signer, made: Partial<Made> = {}): Promise<Input> {
   const m: Made = { flags: 0x05, type: 'webauthn.get', challenge: CHALLENGE, origin: ORIGIN, rpId: RP_ID, ...made };
   const authenticatorData = await authData(m.flags, m.rpId);
-  const clientDataJSON = enc({ type: m.type, challenge: b64url(m.challenge), origin: m.origin });
+  const clientDataJSON = enc({ type: m.type, challenge: b64url(m.challenge), origin: m.origin, ...(m.crossOrigin === undefined ? {} : { crossOrigin: m.crossOrigin }) });
   const signature = await signer.sign(concat(authenticatorData, await sha256(clientDataJSON)));
   return { cred: signer.cred, authenticatorData, clientDataJSON, signature, expectedChallenge: CHALLENGE, expectedOrigin: ORIGIN, expectedRpId: RP_ID };
 }
@@ -239,8 +239,8 @@ describe('verifyAssertion (ES256)', () => {
 
   it('accepts many genuine assertions, whatever shape their DER takes', async () => {
     for (let i = 0; i < 30; i++) {
-      const signed = await assertion(es, { challenge: Uint8Array.of(i, i + 1, i + 2) });
-      expect(await verifyAssertion({ ...signed, expectedChallenge: Uint8Array.of(i, i + 1, i + 2) })).toBe(true);
+      const challenge = Uint8Array.from({ length: 32 }, (_, j) => (i * 31 + j * 7) % 256);
+      expect(await verifyAssertion({ ...(await assertion(es, { challenge })), expectedChallenge: challenge })).toBe(true);
     }
   });
 
@@ -262,6 +262,20 @@ describe('verifyAssertion (ES256)', () => {
   it('refuses an assertion that is not a get (for example a registration)', async () => {
     expect(await verifyAssertion(await assertion(es, { type: 'webauthn.create' }))).toBe(false);
     expect(await verifyAssertion(await assertion(es, { type: '' }))).toBe(false);
+  });
+
+  it('refuses an assertion made inside a cross-origin frame, but accepts crossOrigin: false', async () => {
+    expect(await verifyAssertion(await assertion(es, { crossOrigin: true }))).toBe(false);
+    expect(await verifyAssertion(await assertion(es, { crossOrigin: false }))).toBe(true);
+  });
+
+  it('refuses a challenge shorter than 16 bytes, however well it matches', async () => {
+    for (const length of [0, 1, 15]) {
+      const short = Uint8Array.from({ length }, (_, i) => i + 1);
+      expect(await verifyAssertion({ ...(await assertion(es, { challenge: short })), expectedChallenge: short })).toBe(false);
+    }
+    const minimum = Uint8Array.from({ length: 16 }, (_, i) => i + 1);
+    expect(await verifyAssertion({ ...(await assertion(es, { challenge: minimum })), expectedChallenge: minimum })).toBe(true);
   });
 
   it('refuses when the user was not verified (re-signed, so only the flag is wrong)', async () => {
@@ -368,6 +382,14 @@ describe('registerFingerprint and unlockWithFingerprint (browser wrappers, stubb
     expect(get.mock.calls[0][0].publicKey!.challenge).not.toEqual(get.mock.calls[1][0].publicKey!.challenge);
   });
 
+  it('refuses a recorded answer replayed against a new challenge', async () => {
+    const live = stubBrowser(es);
+    expect(await unlockWithFingerprint(es.cred)).toBe(true);
+    const recorded = await live.mock.results[0].value;
+    vi.stubGlobal('navigator', { credentials: { get: vi.fn(async () => recorded) } });
+    expect(await unlockWithFingerprint(es.cred)).toBe(false);
+  });
+
   it('refuses an answer for another origin or relying party', async () => {
     stubBrowser(es, { origin: 'https://evil.example', rpId: RP_ID });
     expect(await unlockWithFingerprint(es.cred)).toBe(false);
@@ -411,6 +433,28 @@ describe('registerFingerprint and unlockWithFingerprint (browser wrappers, stubb
     expect(pk.authenticatorSelection).toEqual({ authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' });
     expect(pk.attestation).toBe('none');
     expect(pk.timeout).toBe(60_000);
+  });
+
+  it('rejects a public key that cannot be imported, so a bad key is never stored', async () => {
+    const answer = (publicKey: ArrayBuffer, alg: number) => vi.stubGlobal('navigator', {
+      credentials: { create: async () => ({ rawId: toAB(CRED_ID), response: { getPublicKey: () => publicKey, getPublicKeyAlgorithm: () => alg } }) },
+    });
+    answer(toAB(Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8)), -7);
+    await expect(registerFingerprint()).rejects.toThrow();
+    answer(toAB(new Uint8Array(0)), -7);
+    await expect(registerFingerprint()).rejects.toThrow();
+    // A genuine P-256 key claimed to be RSA is just as unusable.
+    answer(toAB(Uint8Array.from(atob(es.cred.publicKey), (c) => c.charCodeAt(0))), -257);
+    await expect(registerFingerprint()).rejects.toThrow();
+  });
+
+  it('registers an RS256 credential as well', async () => {
+    const rs = await rs256Signer();
+    const spki = Uint8Array.from(atob(rs.cred.publicKey), (c) => c.charCodeAt(0));
+    vi.stubGlobal('navigator', {
+      credentials: { create: async () => ({ rawId: toAB(CRED_ID), response: { getPublicKey: () => toAB(spki), getPublicKeyAlgorithm: () => -257 } }) },
+    });
+    expect(await registerFingerprint()).toEqual({ credentialId: b64url(CRED_ID), publicKey: rs.cred.publicKey, alg: -257 });
   });
 
   it('rejects when the browser cannot hand back the public key or chose an algorithm the app cannot verify', async () => {

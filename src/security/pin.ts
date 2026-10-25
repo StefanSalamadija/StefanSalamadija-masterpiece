@@ -21,6 +21,7 @@ async function derive(pin: string, salt: Uint8Array<ArrayBuffer>, iterations: nu
 }
 
 export async function hashPin(pin: string, opts: { iterations?: number } = {}): Promise<PinHash> {
+  if (!isValidPin(pin)) throw new Error('Passcode must be exactly 4 digits');
   const iterations = opts.iterations ?? PIN_ITERATIONS;
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const hash = await derive(pin, salt, iterations);
@@ -56,14 +57,24 @@ export function registerSuccess(): LockoutState {
   return { failures: 0 };
 }
 
-/**
- * Milliseconds until another passcode may be tried; 0 when not locked. Capped at the longest lock, so a ship's clock
- * that jumps backwards cannot leave the app locked for hours.
- */
+/** Milliseconds until another passcode may be tried; 0 when not locked. Run the state through `clampLockout` first. */
 export function lockRemainingMs(s: LockoutState, now: Date): number {
   if (!s.lockedUntil) return 0;
   const remaining = Date.parse(s.lockedUntil) - now.getTime();
-  return remaining > 0 ? Math.min(remaining, MAX_LOCK_MS) : 0;
+  return remaining > 0 ? remaining : 0;
+}
+
+/**
+ * No lock lasts longer than 300 s, so a stored end of lock further away than that means the clock went backwards
+ * after the lock was taken (the ship's clock was fast, then corrected). Returns the state with its end of lock moved
+ * to 300 s from now; anything else is returned unchanged. The caller must persist the result, otherwise the stored
+ * end of lock stays hours away.
+ */
+export function clampLockout(s: LockoutState, now: Date): LockoutState {
+  if (!s.lockedUntil) return s;
+  const until = Date.parse(s.lockedUntil);
+  if (Number.isNaN(until) || until - now.getTime() <= MAX_LOCK_MS) return s;
+  return { ...s, lockedUntil: new Date(now.getTime() + MAX_LOCK_MS).toISOString() };
 }
 
 /** True once the app has been hidden for more than `relockMinutes`. Never hidden: false. Unreadable time: true (stay locked). */

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { constantTimeEqual, hashPin, isValidPin, lockRemainingMs, registerFailure, registerSuccess, shouldRelock, verifyPin } from './pin';
+import {
+  clampLockout, constantTimeEqual, hashPin, isValidPin, lockRemainingMs, registerFailure, registerSuccess, shouldRelock, verifyPin,
+} from './pin';
 import type { LockoutState, PinHash } from '../domain/types';
 
 const FAST = { iterations: 1000 };
@@ -45,6 +47,12 @@ describe('hashPin / verifyPin', () => {
     const material = await subtle.importKey('raw', new TextEncoder().encode('2580'), 'PBKDF2', false, ['deriveBits']);
     const bits = new Uint8Array(await subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1000 }, material, 256));
     expect(h.hash).toBe(btoa(String.fromCharCode(...bits)));
+  });
+
+  it('refuses to hash anything but exactly four digits', async () => {
+    for (const pin of ['', '123', '12345', '12a4', ' 258', '2580 ', '2580\n']) {
+      await expect(hashPin(pin, FAST)).rejects.toThrow('Passcode must be exactly 4 digits');
+    }
   });
 
   it('answers false, never throws, for a stored hash that cannot be used', async () => {
@@ -96,9 +104,42 @@ describe('lockout', () => {
     expect(s).toEqual({ failures: 4 });
   });
 
-  it('never reports more than the longest lock, so a clock that jumped back cannot lock the app for hours', () => {
-    const s: LockoutState = { failures: 7, lockedUntil: new Date(t0.getTime() + 6 * 3600_000).toISOString() };
+  it('a lock taken while the clock was 6 h fast ends 300 s after the clock is corrected, once clampLockout is applied', () => {
+    const fast = new Date(t0.getTime() + 6 * 3600_000);
+    let s: LockoutState = { failures: 6 };
+    s = registerFailure(s, fast);
+    expect(lockRemainingMs(s, fast)).toBe(300_000);
+    // The clock is corrected: the stored end of lock is now hours away.
+    expect(lockRemainingMs(s, t0)).toBe(6 * 3600_000 + 300_000);
+    s = clampLockout(s, t0);
+    expect(s.failures).toBe(7);
     expect(lockRemainingMs(s, t0)).toBe(300_000);
+    expect(lockRemainingMs(s, new Date(t0.getTime() + 299_999))).toBe(1);
+    expect(lockRemainingMs(s, new Date(t0.getTime() + 300_000))).toBe(0);
+  });
+
+  describe('clampLockout', () => {
+    it('leaves a lock that is at most the longest lock away exactly as it is', () => {
+      for (const ms of [1, 30_000, 299_999, 300_000]) {
+        const s: LockoutState = { failures: 7, lockedUntil: new Date(t0.getTime() + ms).toISOString() };
+        expect(clampLockout(s, t0)).toBe(s);
+      }
+    });
+
+    it('moves the end of a lock that is further away to 300 s from now, keeping the failure count', () => {
+      const s: LockoutState = { failures: 9, lockedUntil: new Date(t0.getTime() + 300_001).toISOString() };
+      expect(clampLockout(s, t0)).toEqual({ failures: 9, lockedUntil: '2026-10-25T12:05:00.000Z' });
+      expect(s.lockedUntil).toBe('2026-10-25T12:05:00.001Z');
+    });
+
+    it('leaves a state with no lock, an expired lock or an unreadable end of lock unchanged', () => {
+      const none: LockoutState = { failures: 3 };
+      const expired: LockoutState = { failures: 5, lockedUntil: new Date(t0.getTime() - 1000).toISOString() };
+      const garbage: LockoutState = { failures: 5, lockedUntil: 'garbage' };
+      expect(clampLockout(none, t0)).toBe(none);
+      expect(clampLockout(expired, t0)).toBe(expired);
+      expect(clampLockout(garbage, t0)).toBe(garbage);
+    });
   });
 
   it('treats a missing or unreadable end of lock as not locked', () => {
