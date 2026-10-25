@@ -1,0 +1,39 @@
+/*
+ * Printing is always black on white, whatever the theme. This file is loaded after theme.css, so these rules win.
+ */
+@media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --line: #000000;
+    --text: #000000;
+    --muted: #000000;
+    --bar-bg: #ffffff;
+    --bar-text: #000000;
+    --bar-muted: #000000;
+    --nav-active: #000000;
+    --accent: #000000;
+    --on-accent: #ffffff;
+    --amber: #ffffff;
+    --on-amber: #000000;
+    --red: #ffffff;
+    --on-red: #000000;
+    --bar-border: #000000;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .app-header {
+    position: static;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

@@ -7,7 +7,7 @@ import { chromium } from '@playwright/test';
 const publicDir = new URL('../public/', import.meta.url);
 const svg = readFileSync(new URL('icon.svg', publicDir));
 const svgUri = `data:image/svg+xml;base64,${svg.toString('base64')}`;
-const NAVY = '#0b3d5c';
+const NAVY = '#0B2545';
 
 // `padding` is the fraction of the canvas left empty on each side.
 // `background` fills the whole canvas (maskable icons must be full-bleed).

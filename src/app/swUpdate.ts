@@ -1,4 +1,5 @@
 import { registerSW } from 'virtual:pwa-register';
+import { scheduleUpdateChecks } from './updateSchedule';
 
 const listeners = new Set<() => void>();
 let needRefresh = false;
@@ -8,6 +9,10 @@ const updateSW = registerSW({
   onNeedRefresh() {
     needRefresh = true;
     listeners.forEach((cb) => cb());
+  },
+  onRegisteredSW(_swUrl, registration) {
+    // The browser checks for a new version when the app starts; this keeps checking while a phone app stays open for days.
+    if (registration) scheduleUpdateChecks(registration, { isOnline: () => navigator.onLine, events: window });
   },
 });
 
