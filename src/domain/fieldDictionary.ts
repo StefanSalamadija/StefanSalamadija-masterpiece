@@ -1,0 +1,91 @@
+import { fullName, onboardAt } from './crew';
+import { formatOffset, shipOffsetAt, toShipLocal } from './shipTime';
+import type { Certificate, ClockChange, CrewMember, Particulars, ShipProfile, Voyage } from './types';
+
+export interface FieldContext {
+  ship: ShipProfile;
+  crew: CrewMember[];
+  voyages: Voyage[];
+  certificates: Certificate[];
+  clockChanges: ClockChange[];
+  nowUtc: Date;
+}
+
+export type FieldValue = string | number | CrewMember[] | undefined;
+
+const VESSEL_KEYS: readonly (keyof Particulars)[] = [
+  'name', 'imo', 'callSign', 'mmsi', 'flag', 'portOfRegistry', 'gt', 'nt', 'dwt', 'loa', 'beam', 'yearBuilt',
+  'owners', 'managers', 'pandi', 'classSociety',
+];
+
+/** Dictionary name after `voyage.` → the `Voyage` field it reads. */
+const VOYAGE_FIELDS: Readonly<Record<string, keyof Voyage>> = {
+  no: 'voyageNo', lastPort: 'lastPort', nextPort: 'nextPort', eta: 'etaLocal',
+  cargo: 'cargo', charterers: 'charterers', agents: 'agents',
+};
+
+const CERT_FIELDS: readonly (keyof Certificate)[] = ['number', 'issuedBy', 'issueDate', 'expiryDate', 'nextSurveyDue'];
+
+/** The fixed dictionary names. The `crew.byRank.<rank>.<field>` and `cert.<key>.<field>` patterns are not listed. */
+export const FIELD_NAMES: readonly string[] = [
+  ...VESSEL_KEYS.map((k) => `vessel.${k}`),
+  ...Object.keys(VOYAGE_FIELDS).map((k) => `voyage.${k}`),
+  'today', 'now', 'nowUtc', 'ship.timeZone', 'crew.onboard', 'crew.onboardCount',
+];
+
+function scalar(value: unknown): string | number | undefined {
+  return typeof value === 'string' || typeof value === 'number' ? value : undefined;
+}
+
+function has(list: readonly string[], key: string): boolean {
+  return list.includes(key);
+}
+
+function crewField(m: CrewMember, field: string): FieldValue {
+  if (field === 'fullName') return fullName(m);
+  return Object.hasOwn(m, field) ? scalar(m[field as keyof CrewMember]) : undefined;
+}
+
+/**
+ * Looks up a dictionary name ("enter once, use everywhere"). `opts.asAt` (`YYYY-MM-DD`, default ship's today) is the
+ * reference date for `crew.*` and `today`; `now` and `nowUtc` are always the real current time.
+ * Deleted records are ignored, and an unknown name or an unset value gives `undefined`.
+ */
+export function resolveField(name: string, ctx: FieldContext, opts?: { asAt?: string }): FieldValue {
+  const offset = shipOffsetAt(ctx.clockChanges, ctx.nowUtc);
+  const shipNow = toShipLocal(ctx.nowUtc, offset);
+  const asAt = opts?.asAt ?? shipNow.date;
+  const parts = name.split('.');
+
+  switch (name) {
+    case 'today': return asAt;
+    case 'now': return shipNow.dateTime;
+    case 'nowUtc': return ctx.nowUtc.toISOString();
+    case 'ship.timeZone': return formatOffset(offset);
+    case 'crew.onboard': return onboardAt(ctx.crew, asAt);
+    case 'crew.onboardCount': return onboardAt(ctx.crew, asAt).length;
+  }
+
+  if (parts.length === 2 && parts[0] === 'vessel') {
+    return has(VESSEL_KEYS, parts[1]) ? ctx.ship.particulars[parts[1] as keyof Particulars] : undefined;
+  }
+
+  if (parts.length === 2 && parts[0] === 'voyage') {
+    if (!Object.hasOwn(VOYAGE_FIELDS, parts[1])) return undefined;
+    const voyage = ctx.voyages.find((v) => !v.deleted && v.active);
+    return voyage && scalar(voyage[VOYAGE_FIELDS[parts[1]]]);
+  }
+
+  if (parts.length === 4 && parts[0] === 'crew' && parts[1] === 'byRank') {
+    const member = onboardAt(ctx.crew, asAt).find((m) => m.rank === parts[2]);
+    return member && crewField(member, parts[3]);
+  }
+
+  if (parts.length === 3 && parts[0] === 'cert') {
+    if (!has(CERT_FIELDS, parts[2])) return undefined;
+    const cert = ctx.certificates.find((c) => !c.deleted && c.key === parts[1]);
+    return cert && scalar(cert[parts[2] as keyof Certificate]);
+  }
+
+  return undefined;
+}
