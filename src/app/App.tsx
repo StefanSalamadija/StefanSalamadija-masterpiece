@@ -6,6 +6,7 @@ import { Nav, ShipNav } from '../ui/components/Nav';
 import { UpdateBanner } from '../ui/components/UpdateBanner';
 import { Crew } from '../ui/screens/Crew';
 import { CrewEdit } from '../ui/screens/CrewEdit';
+import { CrewImport } from '../ui/screens/CrewImport';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
 import { Particulars } from '../ui/screens/Particulars';
@@ -21,6 +22,7 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/particulars': Particulars,
   '/ship/crew': Crew,
   '/ship/crew/new': CrewEdit,
+  '/ship/crew/import': CrewImport,
   '/ship/crew/:id': CrewEdit,
   '/profiles': Profiles,
 };

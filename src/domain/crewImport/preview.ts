@@ -156,7 +156,7 @@ function evaluate(draft: CrewDraft, match: CrewMember | undefined, today: string
   };
 }
 
-const DUPLICATE_PASSPORT: FieldError = { field: 'passportNo', message: 'Duplicate passport number in this file.', severity: 'error' };
+export const DUPLICATE_PASSPORT: FieldError = { field: 'passportNo', message: 'Duplicate passport number in this file.', severity: 'error' };
 
 /**
  * One row per person in the sheet below the header, ready to be shown, edited and confirmed.

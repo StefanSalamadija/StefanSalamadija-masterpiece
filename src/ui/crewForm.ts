@@ -43,7 +43,8 @@ export function blankCrewForm(): CrewForm {
   };
 }
 
-export function crewFormOf(m: CrewMember): CrewForm {
+/** The form for a saved contract, or for a draft that is not saved yet. */
+export function crewFormOf(m: CrewDraft): CrewForm {
   return {
     surname: m.surname, givenNames: m.givenNames, rank: m.rank, rankOther: m.rankOther ?? '',
     nationality: m.nationality, dateOfBirth: m.dateOfBirth, placeOfBirth: m.placeOfBirth, passportNo: m.passportNo,

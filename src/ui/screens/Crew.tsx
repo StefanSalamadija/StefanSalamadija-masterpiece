@@ -1,6 +1,7 @@
 import type { RefObject } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
+import { takeFlash } from '../../app/flash';
 import { navigate } from '../../app/router';
 import { createRecord, listForShip, softDelete, updateRecord } from '../../db/records';
 import { rankLabel } from '../../domain/catalogues';
@@ -144,6 +145,8 @@ function CrewList({ shipId }: { shipId: string }) {
   const { db, shipToday } = useAppState();
   const crew = useLive(() => listForShip<CrewMember>(db, 'crew', shipId), [db, shipId]);
   const [looking, setLooking] = useState(crewListView);
+  // What the screen before left to say, such as the import's "Imported 3 crew.": taken once, when this screen opens.
+  const [flash] = useState(takeFlash);
   const [requested, setDialog] = useState<DialogState>();
   const addLink = useRef<HTMLAnchorElement>(null);
 
@@ -171,6 +174,7 @@ function CrewList({ shipId }: { shipId: string }) {
           <a class="btn btn-outline" href="#/ship/crew/import">Import from Excel</a>
         </div>
       </div>
+      {flash && <p class="notice" role="status">{flash}</p>}
       <div class="crew-controls">
         <Field label="As at" type="date" value={looking.asAt ?? shipToday} onInput={(asAtText) => look({ asAt: asAtText })} />
         <div class="toggle" role="group" aria-label="Show">

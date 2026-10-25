@@ -863,6 +863,160 @@ select {
   color: var(--on-red);
 }
 
+/* ---- Crew import ---- */
+
+/* A message the screen before left to say, such as "Imported 3 crew.". */
+.notice {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  font-weight: 600;
+}
+
+:root[data-theme='contrast'] .notice {
+  border-width: 2px;
+  border-left-width: 6px;
+}
+
+.import-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.import-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.import-section .helper-text {
+  margin: 0;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .mapping-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.mapping-grid .field label {
+  overflow-wrap: anywhere;
+}
+
+.import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.import-row-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.import-row-number {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.import-row-name {
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.import-row[data-skipped='true'] .import-row-name {
+  text-decoration: line-through;
+}
+
+.import-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-change {
+  font-size: 14px;
+}
+
+/* The status is always in words; the colour only backs it up. */
+.import-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1.5px solid var(--muted);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.import-status[data-status='new'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.import-status[data-status='update'] {
+  border-color: var(--accent);
+}
+
+.import-status[data-status='same'] {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+:root[data-theme='contrast'] .import-status[data-status='same'] {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.import-status[data-status='error'] {
+  border-color: var(--red);
+  background: var(--red);
+  color: var(--on-red);
+}
+
 /* ---- Dialogs ---- */
 
 .dialog {
