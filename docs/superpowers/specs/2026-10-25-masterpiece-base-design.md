@@ -229,6 +229,13 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 - Cards and list rows have 10–12 px rounded corners on a dark surface. Status is shown as pill badges.
 - The main navigation is a bottom bar: Home, Ship, Profiles, Settings. The ship's sections are a row of chips under the header.
 - The header shows the ship's name, the ship's clock and the theme button.
+- **Logo (user-chosen): the "M" monogram.**
+  - A bold white "M" over a light-blue sea line, on a navy rounded tile (`#0B2545`). The Night version uses a `#12243A` tile with a teal sea line.
+  - It is used for the home-screen icon, the Android launch splash (navy background), the header brand and print footers.
+- **Welcome page (first start, approved as mocked up):**
+  - The logo and "Masterpiece" on a navy band.
+  - The tagline "Your ship's office in your pocket. Crew, certificates and paperwork — fully offline."
+  - Two large buttons, *Create your first ship* and *Import a backup*, a line for new phones and reliefs, and the note "Your data stays on this device. No account needed."
 
 Themes (user decision: no red night mode):
 - **Day (white with blue):** white page and light-grey cards with dark text, a navy `#0B2545` header and bottom bar, blue `#1D5FD1` buttons and accents, amber and red badges.

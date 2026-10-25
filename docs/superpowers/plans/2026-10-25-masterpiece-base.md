@@ -954,8 +954,8 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
 ### Task 13: App shell: state, router, header, themes, first ship, errors, update banner
 
 **Files:**
-- Create: `src/app/AppState.tsx`, `src/app/router.ts`, `src/ui/useLive.ts`, `src/ui/theme.css`, `src/ui/print.css`, `src/ui/components/Header.tsx`, `src/ui/components/Nav.tsx`, `src/ui/components/UpdateBanner.tsx`, `src/ui/components/ErrorToast.tsx`, `src/ui/screens/FirstShip.tsx`
-- Modify: `src/app/App.tsx`, `src/main.tsx`
+- Create: `src/app/AppState.tsx`, `src/app/router.ts`, `src/ui/useLive.ts`, `src/ui/theme.css`, `src/ui/print.css`, `src/ui/components/Header.tsx`, `src/ui/components/Nav.tsx`, `src/ui/components/UpdateBanner.tsx`, `src/ui/components/ErrorToast.tsx`, `src/ui/components/LogoMark.tsx`, `src/ui/screens/FirstShip.tsx`
+- Modify: `src/app/App.tsx`, `src/main.tsx`, `public/icon.svg` (and re-run `scripts/make-icons.mjs` to regenerate the three PNGs), `vite.config.ts` (manifest `theme_color` and `background_color` both `'#0B2545'`)
 - Test: `e2e/helpers.ts`, `e2e/shell.spec.ts`
 
 **Interfaces:**
@@ -970,7 +970,24 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
     - Header: `<h1>Masterpiece</h1>`, the ship name, and a clock element `data-testid="ship-clock"` with the text `HH:mm LT (UTC±hh:mm)`.
     - Theme button: `aria-label` is `Theme: Day`, `Theme: Night` or `Theme: High contrast`. It cycles day → night → contrast and sets `<html data-theme>` to `day`, `night` or `contrast`.
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
-    - First ship screen: heading `Create your first ship`, label `Ship name`, select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`), button `Create ship`, and link `Import a backup instead` → `#/settings/import`.
+    - **Logo (user-chosen: "M" monogram)** in `LogoMark.tsx` (`{ size: number; mode: 'day' | 'night' }`), as inline SVG with viewBox `0 0 100 100`:
+      - M: `path d="M22 70 L22 26 L50 54 L78 26 L78 70"`, no fill, stroke-width 10, round joins and caps.
+      - Sea line: `path d="M16 84 Q33 76 50 84 T84 84"`, no fill, stroke-width 5, round caps.
+      - Day: M `#FFFFFF`, sea line `#7AB8FF`, on a navy tile `#0B2545`. Night: M `#E6EDF5`, sea line `#5FD4CE`, on a tile `#12243A`.
+      - `role="img"`, `aria-label="Masterpiece logo"`.
+      - The same mark is used in the header brand line (24 px, before "Masterpiece").
+      - `public/icon.svg` is the Day tile with corner radius 22% (maskable: 20% padding). Regenerate the PNGs from it.
+    - **Welcome screen (FirstShip.tsx, shown when no ships exist)**, matching the mockup "Welcome page — Day/Night":
+      - A top band (Day: navy `#0B2545`; Night: page background) with a 120 px logo tile and `<h1>Masterpiece</h1>`.
+      - The tagline, exactly: `Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.`
+      - Primary button `Create your first ship`, 56 px high. It reveals the form:
+        - heading `Create your first ship`;
+        - label `Ship name`;
+        - select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`);
+        - button `Create ship`.
+      - Secondary link `Import a backup` → `#/settings/import`, 56 px high, styled as an outline button.
+      - The helper text, exactly: `New phone or taking over from your relief? Import their backup or handover file.`
+      - The footer note with a padlock icon, exactly: `Your data stays on this device. No account needed.`
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
   - **Visual style "Bridge Console"** (user-chosen; spec §4.9). Reference mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x: artboards "Day mode — Home" and "A · Bridge Console — Night mode".
     - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
@@ -998,7 +1015,7 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
   - **Print:** `@media print` forces background `#ffffff` and text `#000000` and hides nav, header buttons and banners, whatever the theme.
   - **e2e helpers** in `e2e/helpers.ts`:
     - `freshApp(page, opts?: { time?: string })`: installs `page.clock` at `opts.time ?? '2026-10-25T09:00:00Z'`, then goes to `./`.
-    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00')`: fills the first ship form.
+    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00')`: clicks `Create your first ship` on the welcome screen, then fills the form and clicks `Create ship`.
     - `expectNoHorizontalScroll(page)`: sets a 360×740 viewport and asserts `document.documentElement.scrollWidth <= 360`.
 
 - [ ] **Step 1: Write the failing e2e tests** in `e2e/shell.spec.ts`:
@@ -1006,8 +1023,12 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
 ```ts
 test('first ship and header clock', async ({ page }) => {
   await freshApp(page);
-  await expect(page.getByRole('heading', { name: 'Create your first ship' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Import a backup instead' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Masterpiece' })).toBeVisible();
+  await expect(page.getByText("Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.")).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Masterpiece logo' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Import a backup' })).toHaveAttribute('href', '#/settings/import');
+  await expect(page.getByText('Your data stays on this device. No account needed.')).toBeVisible();
+  await expectNoHorizontalScroll(page);
   await setupShip(page);
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   await expect(page.getByTestId('ship-clock')).toHaveText('12:00 LT (UTC+03:00)');
@@ -1388,7 +1409,7 @@ test('full backup round trip on a wiped device', async ({ page }) => {
   expect((await dl).suggestedFilename()).toMatch(/^masterpiece-full-mv-ocean-star-2026-10-25-\d{4}\.mpbak$/);
   await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('masterpiece'); q.onsuccess = q.onerror = q.onblocked = r; }));
   await page.reload();
-  await page.getByRole('link', { name: 'Import a backup instead' }).click();
+  await page.getByRole('link', { name: 'Import a backup' }).click();
   await page.getByLabel('Backup file').setInputFiles(file);
   await page.getByLabel('Password').fill('wrong-password'); await page.getByRole('button', { name: 'Open' }).click();
   await expect(page.getByRole('alert')).toHaveText('Wrong password, or the file is damaged. Nothing was changed.');
@@ -1519,7 +1540,7 @@ test('PIN lock, lockout, unlock, relock, forgot', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Enter PIN' })).toBeVisible();
   await page.getByRole('button', { name: 'Forgot PIN?' }).click();
   await page.getByRole('button', { name: 'Erase everything' }).click();
-  await expect(page.getByRole('heading', { name: 'Create your first ship' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
 });
 ```
 
