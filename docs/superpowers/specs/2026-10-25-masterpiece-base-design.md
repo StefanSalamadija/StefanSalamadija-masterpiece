@@ -285,7 +285,9 @@ Printing always uses a black-on-white print layout, whatever the theme.
 
 ### 4.13 Updates
 
-- The service worker checks for a new version when online.
+- The service worker checks for a new version when the app starts, every hour while it is open and online, and as soon as the connection returns.
+- New versions are published by merging to `main`; GitHub Actions deploys them to GitHub Pages.
+- Updates arrive as an in-app banner, not a phone notification, because push notifications would need an online push service.
 - The user sees *"New version available — Update"*. The app never reloads by itself in the middle of a task.
 - Data schema changes run as versioned migrations, each preceded by a `before-update` snapshot.
 

@@ -1033,6 +1033,7 @@ expect(await verifyAssertion({ ...good, clientDataJSON: enc({ type: 'webauthn.cr
       - The helper text, exactly: `New phone or taking over from your relief? Import their backup or handover file.`
       - The footer note with a padlock icon, exactly: `Your data stays on this device. No account needed.`
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
+    - **Update checks:** besides the check on app start, `swUpdate.ts` calls the service worker registration's `update()` every 60 minutes while `navigator.onLine`, and once on each `online` event. Use the `onRegisteredSW(swUrl, registration)` callback of `registerSW`; when offline, skip the check. The spec decision is to let a phone app that stays open for days still find updates. Unit-test the scheduling with fake timers and a stub registration: it calls `update` after 60 min when online, does not call it when offline, and calls it immediately on `online`.
   - **Visual style "Bridge Console"** (user-chosen; spec §4.9). Reference mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x: artboards "Day mode — Home" and "A · Bridge Console — Night mode".
     - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
     - **Shared shapes and layout (all themes):**
