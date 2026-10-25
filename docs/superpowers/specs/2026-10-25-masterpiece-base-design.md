@@ -288,6 +288,12 @@ Printing always uses a black-on-white print layout, whatever the theme.
 - The service worker checks for a new version when the app starts, every hour while it is open and online, and as soon as the connection returns.
 - New versions are published by merging to `main`; GitHub Actions deploys them to GitHub Pages.
 - Updates arrive as an in-app banner, not a phone notification, because push notifications would need an online push service.
+- **The banner shows what's new**, for example *"Version 1.2.0 — Crew list print and Excel export. Update"*. It falls back to *"New version available — Update"* when the release note can't be fetched.
+- **Release control (user decision):**
+  - The owner asks for changes in a Claude session. Claude builds them on a branch with tests and reviews, and gives a plain-language summary.
+  - Nothing is merged to `main` (and so published) until the owner approves.
+  - There is no separate preview deployment.
+  - A bad release is rolled back by reverting the merge.
 - The user sees *"New version available — Update"*. The app never reloads by itself in the middle of a task.
 - Data schema changes run as versioned migrations, each preceded by a `before-update` snapshot.
 

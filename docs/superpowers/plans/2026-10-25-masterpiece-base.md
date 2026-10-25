@@ -1033,6 +1033,13 @@ expect(await verifyAssertion({ ...good, clientDataJSON: enc({ type: 'webauthn.cr
       - The helper text, exactly: `New phone or taking over from your relief? Import their backup or handover file.`
       - The footer note with a padlock icon, exactly: `Your data stays on this device. No account needed.`
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
+    - **"What's new" (user decision):**
+      - A repo-root file `release.json` holds `{ "version": "<semver>", "whatsNew": "<one short sentence>" }`, and its `version` must equal `package.json`'s.
+      - A small Vite plugin in `vite.config.ts` writes it to `dist/version.json`. JSON is not in the Workbox `globPatterns`, so the file is never precached.
+      - When `onUpdateAvailable` fires, `src/app/releaseInfo.ts` runs `fetchReleaseInfo(): Promise<{ version: string; whatsNew: string } | null>`. It does `fetch('./version.json', { cache: 'no-store' })` and returns null on any failure or malformed JSON.
+      - `updateBannerText(info: { version: string; whatsNew: string } | null): string` gives `Version <version> — <whatsNew>` when info is present, and otherwise `New version available`. The **Update** button follows the text.
+      - Unit tests: `updateBannerText` both ways, and `fetchReleaseInfo` with a stubbed fetch for ok, 404, network error and malformed JSON.
+      - For this task, `release.json` starts as `{ "version": "0.1.0", "whatsNew": "First version of Masterpiece." }`. Set `package.json` to `0.1.0` too.
     - **Update checks:** besides the check on app start, `swUpdate.ts` calls the service worker registration's `update()` every 60 minutes while `navigator.onLine`, and once on each `online` event. Use the `onRegisteredSW(swUrl, registration)` callback of `registerSW`; when offline, skip the check. The spec decision is to let a phone app that stays open for days still find updates. Unit-test the scheduling with fake timers and a stub registration: it calls `update` after 60 min when online, does not call it when offline, and calls it immediately on `online`.
   - **Visual style "Bridge Console"** (user-chosen; spec §4.9). Reference mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x: artboards "Day mode — Home" and "A · Bridge Console — Night mode".
     - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
@@ -1958,6 +1965,11 @@ Spell out the commented setup with the earlier tasks' labels.
     - Permissions: `contents: read`, `pages: write`, `id-token: write`.
     - Job `build`: `actions/checkout@v4`, `actions/setup-node@v4` (node 22, npm cache), `npm ci`, `npm test`, `npm run build`, `actions/upload-pages-artifact@v3` (path `dist`).
     - Job `deploy` (needs build): `actions/deploy-pages@v4`, environment `github-pages`.
+  - **Release steps** (README section `Releasing a new version`):
+    1. Bump `version` in `package.json` and `release.json`.
+    2. Write the one-sentence `whatsNew`.
+    3. Merge to `main` only after the owner approves the plain-language summary.
+    4. To roll back: revert the merge commit on `main`.
   - **README** sections:
     - What Masterpiece is (2 lines).
     - Install on Android: Chrome → ⋮ → *Install app*.
