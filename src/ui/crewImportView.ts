@@ -8,7 +8,7 @@ import type { Cell, SheetGrid } from '../domain/crewImport/readSpreadsheet';
 import { cellText } from '../domain/crewImport/values';
 import { parseDecimal } from '../domain/numbers';
 import type { CrewDraft, CrewField, CrewImportMapping, FieldError } from '../domain/types';
-import { crewFieldsOf } from './crewForm';
+import { crewFieldsOf, crewFormOf } from './crewForm';
 import type { CrewForm } from './crewForm';
 
 /** The crew fields a column can be mapped to, in the order the select lists them, with the words the wizard uses. */
@@ -145,19 +145,19 @@ export function previewSummary(rows: PreviewRow[]): string {
     .join(', ');
 }
 
-/** What the user did to the preview: skipped rows, and rows with a draft of their own, by row number of the sheet. */
-export interface RowEdit { skip?: boolean; draft?: CrewDraft }
+/** What the user did to the preview, by row number of the sheet: rows skipped, and the fields fixed on a row. */
+export interface RowEdit { skip?: boolean; overrides?: Partial<CrewDraft> }
 export type RowEdits = Readonly<Record<number, RowEdit>>;
 
 /** True when the user has fixed or skipped any row. */
 export function hasEdits(edits: RowEdits): boolean {
-  return Object.values(edits).some(edit => edit.skip === true || edit.draft !== undefined);
+  return Object.values(edits).some(edit => edit.skip === true || Object.keys(edit.overrides ?? {}).length > 0);
 }
 
 export function applyEdits(rows: PreviewRow[], edits: RowEdits): PreviewRow[] {
   return rows.map(row => {
     const edit = edits[row.rowNumber];
-    return edit ? { ...row, skip: edit.skip ?? row.skip, draft: edit.draft ?? row.draft } : row;
+    return edit ? { ...row, skip: edit.skip ?? row.skip, overrides: edit.overrides ?? row.overrides } : row;
   });
 }
 
@@ -167,13 +167,17 @@ export function importCount(rows: PreviewRow[]): number {
 }
 
 /**
- * The draft with what the crew form says. The form leaves out the sign-off, which stays as the draft has it, and a rank
- * text that the chosen rank does not use is dropped. Undefined while no rank is chosen.
+ * What the user fixed in the crew form that was opened on `draft`: the fields whose text is not what it was, as
+ * overrides over what the file says. The form leaves out the sign-off, which cannot be fixed there. Undefined while no
+ * rank is chosen. The rank text is only there for the rank "other"; one that the new rank does not use is not a field.
  */
-export function draftWithForm(draft: CrewDraft, form: CrewForm): CrewDraft | undefined {
+export function overridesFromForm(draft: CrewDraft, form: CrewForm): Partial<CrewDraft> | undefined {
   const fields = crewFieldsOf(form);
   if (!fields) return undefined;
-  const next: CrewDraft = { ...draft, ...fields };
-  if (fields.rankOther === undefined) delete next.rankOther;
-  return next;
+  const before: Partial<CrewDraft> = crewFieldsOf(crewFormOf(draft)) ?? {};
+  const overrides: Partial<CrewDraft> = {};
+  for (const key of Object.keys(fields) as (keyof typeof fields)[]) {
+    if (fields[key] !== before[key]) overrides[key] = fields[key] as never;
+  }
+  return overrides;
 }

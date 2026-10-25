@@ -11,7 +11,12 @@ export interface PreviewChange { field: keyof CrewDraft; from: string; to: strin
 export interface PreviewRow {
   /** 1-based row of the sheet. */
   rowNumber: number;
+  /** What the sheet says, as it was read: nothing of the saved crew in it, and no default. */
+  fileDraft: CrewDraft;
+  /** The fields the user fixed, each over what the file says; only the ones they changed. */
+  overrides: Partial<CrewDraft>;
   status: 'new' | 'update' | 'error';
+  /** The contract the row stands for: the file's values and the overrides, filled in from the saved contract it matches (or the default sign-on date). */
   draft: CrewDraft;
   existingId?: string;
   /** What the draft changes in the existing record; empty for a new row, and for an update that changes nothing. */
@@ -109,17 +114,17 @@ function draftFromRow(row: Cell[], mapping: ColumnMapping, dateFormat: DateForma
 }
 
 /**
- * A row of the file as it would be saved over `match`: an empty cell never overwrites what the record already has, and
- * a passport or book number that only differs in spaces or case keeps the record's formatting. Only for rows read from
- * the file: a draft edited by the user is taken as it is.
+ * A row as it would be saved over `match`: an empty cell never overwrites what the record already has, and a passport
+ * or book number that only differs in spaces or case keeps the record's formatting. What the user fixed (`fixed`) is
+ * theirs and is taken as it is, empty or not.
  */
-function mergeWithExisting(draft: CrewDraft, match: CrewMember): CrewDraft {
+function mergeWithExisting(draft: CrewDraft, match: CrewMember, fixed: ReadonlySet<string>): CrewDraft {
   const merged: CrewDraft = { ...draft };
   for (const field of TEXT_FIELDS) {
     const current = match[field];
-    if (isBlank(draft[field]) && current !== undefined) merged[field] = current;
+    if (!fixed.has(field) && isBlank(draft[field]) && current !== undefined) merged[field] = current;
   }
-  if (draft.rank === 'other' && isBlank(draft.rankOther)) {
+  if (draft.rank === 'other' && isBlank(draft.rankOther) && !fixed.has('rank') && !fixed.has('rankOther')) {
     merged.rank = match.rank;
     if (match.rankOther !== undefined) merged.rankOther = match.rankOther;
   }
@@ -158,8 +163,53 @@ function evaluate(draft: CrewDraft, match: CrewMember | undefined, today: string
 
 export const DUPLICATE_PASSPORT: FieldError = { field: 'passportNo', message: 'Duplicate passport number in this file.', severity: 'error' };
 
+/** What a row is worked out against. */
+export interface ResolveContext {
+  existing: CrewMember[];
+  today: string;
+  /** The sign-on date of a new row that has none (in the file, or fixed by the user). */
+  defaultSignOnDate: string;
+}
+
+/** The file's values with the user's fixes over them. A rank text that the rank does not use is dropped. */
+function withOverrides(fileDraft: CrewDraft, overrides: Partial<CrewDraft>): CrewDraft {
+  const draft: CrewDraft = { ...fileDraft };
+  for (const field of FIELDS) {
+    const value = overrides[field];
+    if (value !== undefined) (draft as unknown as Record<string, string>)[field] = value;
+  }
+  if (draft.rank !== 'other') delete draft.rankOther;
+  return draft;
+}
+
 /**
- * One row per person in the sheet below the header, ready to be shown, edited and confirmed.
+ * A row worked out from what the sheet says and what the user fixed, which are kept apart so that a fix only ever
+ * carries what the user typed:
+ * 1. the file's values, with the fixes over them;
+ * 2. the saved contract that the passport number matches (the latest with that number), if any, which the row updates;
+ * 3. an empty value is filled in from that contract, except what the user fixed; with no contract, an empty sign-on
+ *    date the user did not fix becomes `defaultSignOnDate`;
+ * 4. changes against the contract, and validation.
+ * Fixing the passport number of a row therefore moves it to the contract that number belongs to, and the update writes
+ * the row's own values onto that one, never another contract's. The row number and the skip flag are kept.
+ * Nothing is known of the other rows here, so a duplicate passport number or an overlapping contract is not noticed
+ * (see `recheckRows`).
+ */
+export function resolveRow(
+  row: Pick<PreviewRow, 'rowNumber' | 'fileDraft' | 'overrides' | 'skip'>, { existing, today, defaultSignOnDate }: ResolveContext,
+): PreviewRow {
+  const { rowNumber, fileDraft, overrides, skip } = row;
+  const wanted = withOverrides(fileDraft, overrides);
+  const match = latestContractByPassport(existing, wanted.passportNo);
+  const fixed = new Set(Object.keys(overrides));
+  const draft = match ? mergeWithExisting(wanted, match, fixed)
+    : isBlank(wanted.signOnDate) && !fixed.has('signOnDate') ? { ...wanted, signOnDate: defaultSignOnDate }
+    : wanted;
+  return { rowNumber, fileDraft, overrides, skip, ...evaluate(draft, match, today) };
+}
+
+/**
+ * One row per person in the sheet below the header, ready to be shown, edited and confirmed (see `resolveRow`).
  * A row whose passport number is that of an existing crew member updates their latest contract (empty cells keep
  * what the record has); any other is a new contract, with `defaultSignOnDate` if it has no sign-on date.
  * A passport number that an earlier row of the file already has makes the later row an error.
@@ -171,14 +221,10 @@ export function buildPreview(input: PreviewInput): PreviewRow[] {
   const preview: PreviewRow[] = [];
   for (let i = headerRow + 1; i < rows.length; i++) {
     if (!isCrewRow(rows[i], mapping, columns)) continue;
-    const fromFile = draftFromRow(rows[i], mapping, dateFormat, currentYear);
-    const match = latestContractByPassport(existing, fromFile.passportNo);
-    const draft = match ? mergeWithExisting(fromFile, match)
-      : isBlank(fromFile.signOnDate) ? { ...fromFile, signOnDate: defaultSignOnDate }
-      : fromFile;
-    const row: PreviewRow = { rowNumber: i + 1, skip: false, ...evaluate(draft, match, today) };
+    const fileDraft = draftFromRow(rows[i], mapping, dateFormat, currentYear);
+    const row = resolveRow({ rowNumber: i + 1, fileDraft, overrides: {}, skip: false }, { existing, today, defaultSignOnDate });
 
-    const passport = normalisePassport(draft.passportNo);
+    const passport = normalisePassport(row.draft.passportNo);
     if (passport !== '') {
       if (seenPassports.has(passport)) {
         row.status = 'error';
@@ -189,14 +235,4 @@ export function buildPreview(input: PreviewInput): PreviewRow[] {
     preview.push(row);
   }
   return preview;
-}
-
-/**
- * The row again after its draft was edited: status, errors and changes follow the same rules as `buildPreview`, except
- * that the draft is the user's and is kept exactly as it is, and that a duplicate passport number is not noticed
- * (this function sees one row only).
- */
-export function revalidateRow(row: PreviewRow, existing: CrewMember[], today: string): PreviewRow {
-  const match = latestContractByPassport(existing, row.draft.passportNo);
-  return { rowNumber: row.rowNumber, skip: row.skip, ...evaluate(row.draft, match, today) };
 }

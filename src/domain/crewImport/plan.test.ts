@@ -19,7 +19,7 @@ const DRAFT: CrewDraft = {
 };
 
 function row(over: Partial<PreviewRow> = {}): PreviewRow {
-  return { rowNumber: 5, status: 'new', draft: DRAFT, changes: [], errors: [], skip: false, ...over };
+  return { rowNumber: 5, fileDraft: DRAFT, overrides: {}, status: 'new', draft: DRAFT, changes: [], errors: [], skip: false, ...over };
 }
 
 describe('isImportable', () => {

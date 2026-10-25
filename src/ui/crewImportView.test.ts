@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { PreviewRow } from '../domain/crewImport/preview';
 import type { CrewDraft } from '../domain/types';
-import { blankCrewForm } from './crewForm';
+import { crewFormOf } from './crewForm';
 import {
-  applyEdits, changeText, columnLabel, draftWithForm, errorParts, firstSheetWithData, fullNameIgnored, hasEdits, headerRowMessage,
-  importCount, parseHeaderRow, previewSummary, shownColumns, sheetSettings, statusText, withColumnField,
+  applyEdits, changeText, columnLabel, errorParts, firstSheetWithData, fullNameIgnored, hasEdits, headerRowMessage,
+  importCount, overridesFromForm, parseHeaderRow, previewSummary, shownColumns, sheetSettings, statusText, withColumnField,
 } from './crewImportView';
 
 const DRAFT: CrewDraft = {
@@ -14,7 +14,7 @@ const DRAFT: CrewDraft = {
 };
 
 function row(over: Partial<PreviewRow> = {}): PreviewRow {
-  return { rowNumber: 5, status: 'new', draft: DRAFT, changes: [], errors: [], skip: false, ...over };
+  return { rowNumber: 5, fileDraft: DRAFT, overrides: {}, status: 'new', draft: DRAFT, changes: [], errors: [], skip: false, ...over };
 }
 const update = (over: Partial<PreviewRow> = {}): PreviewRow => row({ status: 'update', existingId: 'crew-1', ...over });
 const error = (over: Partial<PreviewRow> = {}): PreviewRow =>
@@ -208,30 +208,30 @@ describe('importCount', () => {
 describe('hasEdits', () => {
   it('is true once a row is skipped or has a draft of its own', () => {
     expect(hasEdits({ 3: { skip: true } })).toBe(true);
-    expect(hasEdits({ 3: { draft: DRAFT } })).toBe(true);
-    expect(hasEdits({ 3: { skip: false, draft: DRAFT } })).toBe(true);
+    expect(hasEdits({ 3: { overrides: { surname: 'HORVAT' } } })).toBe(true);
+    expect(hasEdits({ 3: { skip: false, overrides: { surname: 'HORVAT' } } })).toBe(true);
   });
 
   it('is false for nothing, and for a skip that was undone', () => {
     expect(hasEdits({})).toBe(false);
     expect(hasEdits({ 3: { skip: false } })).toBe(false);
+    expect(hasEdits({ 3: { overrides: {} } })).toBe(false);
   });
 });
 
 describe('applyEdits', () => {
   const rows = [row({ rowNumber: 3 }), error({ rowNumber: 4 })];
 
-  it('sets the skip flag and the draft of the rows that were edited, by row number', () => {
-    const draft = { ...DRAFT, surname: 'HORVAT' };
-    const result = applyEdits(rows, { 3: { skip: true }, 4: { draft } });
-    expect(result[0]).toMatchObject({ rowNumber: 3, skip: true, draft: DRAFT });
-    expect(result[1]).toMatchObject({ rowNumber: 4, skip: false, draft });
+  it('sets the skip flag and the fixes of the rows that were edited, by row number', () => {
+    const result = applyEdits(rows, { 3: { skip: true }, 4: { overrides: { surname: 'HORVAT' } } });
+    expect(result[0]).toMatchObject({ rowNumber: 3, skip: true, overrides: {}, draft: DRAFT });
+    expect(result[1]).toMatchObject({ rowNumber: 4, skip: false, overrides: { surname: 'HORVAT' } });
   });
 
   it('returns the rows as they are when nothing was edited, and does not change them', () => {
     expect(applyEdits(rows, {})).toEqual(rows);
-    applyEdits(rows, { 3: { skip: true } });
-    expect(rows[0].skip).toBe(false);
+    applyEdits(rows, { 3: { skip: true, overrides: { surname: 'HORVAT' } } });
+    expect(rows[0]).toMatchObject({ skip: false, overrides: {} });
   });
 
   it('lets a skip flag that was undone go back to false', () => {
@@ -239,25 +239,35 @@ describe('applyEdits', () => {
   });
 });
 
-describe('draftWithForm', () => {
-  const form = { ...blankCrewForm(), surname: ' HORVAT ', givenNames: 'Ana', rank: 'ab' as const, signOnDate: '2026-10-25' };
+describe('overridesFromForm', () => {
+  const draft = { ...DRAFT, signOffDate: '2026-12-01', signOffPort: 'Koper' };
 
-  it('is the draft with what the form says, trimmed, and the sign-off the form cannot show kept', () => {
-    const draft = { ...DRAFT, signOffDate: '2026-12-01', signOffPort: 'Koper' };
-    expect(draftWithForm(draft, form)).toEqual({
-      surname: 'HORVAT', givenNames: 'Ana', rank: 'ab', nationality: '', dateOfBirth: '', placeOfBirth: '', passportNo: '',
-      passportExpiry: '', seamansBookNo: '', seamansBookExpiry: '', signOnDate: '2026-10-25', signOnPort: '',
-      signOffDate: '2026-12-01', signOffPort: 'Koper',
-    });
+  it('is nothing for a form that was not changed', () => {
+    expect(overridesFromForm(draft, crewFormOf(draft))).toEqual({});
   });
 
-  it('drops a rank text the new rank does not use, and takes one it does', () => {
-    const pumpman = { ...DRAFT, rank: 'other' as const, rankOther: 'Pumpman' };
-    expect(draftWithForm(pumpman, form)).not.toHaveProperty('rankOther');
-    expect(draftWithForm(pumpman, { ...form, rank: 'other', rankOther: ' Pump man ' })).toMatchObject({ rank: 'other', rankOther: 'Pump man' });
+  it('holds only the fields whose text changed, trimmed, and not the sign-off the form cannot show', () => {
+    const form = { ...crewFormOf(draft), surname: ' HORVAT ', placeOfBirth: 'Zadar', nationality: 'Croatian' };
+    expect(overridesFromForm(draft, form)).toEqual({ surname: 'HORVAT', placeOfBirth: 'Zadar' });   // the nationality was that already
+  });
+
+  it('does not hold a field that was changed and changed back', () => {
+    const touched = { ...crewFormOf(draft), surname: 'HORVAT' };
+    expect(overridesFromForm(draft, { ...touched, surname: 'ŠAŠIĆ' })).toEqual({});
+  });
+
+  it('holds an emptied field, as an empty text', () => {
+    expect(overridesFromForm(draft, { ...crewFormOf(draft), nationality: '' })).toEqual({ nationality: '' });
+  });
+
+  it('holds a new rank, and the rank text only for the rank "other"', () => {
+    const pumpman = { ...draft, rank: 'other' as const, rankOther: 'Pumpman' };
+    expect(overridesFromForm(pumpman, { ...crewFormOf(pumpman), rank: 'ab' })).toEqual({ rank: 'ab' });
+    expect(overridesFromForm(pumpman, { ...crewFormOf(pumpman), rankOther: ' Pump man ' })).toEqual({ rankOther: 'Pump man' });
+    expect(overridesFromForm(draft, { ...crewFormOf(draft), rank: 'other', rankOther: 'Pumpman' })).toEqual({ rank: 'other', rankOther: 'Pumpman' });
   });
 
   it('is undefined while no rank is chosen', () => {
-    expect(draftWithForm(DRAFT, { ...form, rank: '' })).toBeUndefined();
+    expect(overridesFromForm(draft, { ...crewFormOf(draft), rank: '' })).toBeUndefined();
   });
 });

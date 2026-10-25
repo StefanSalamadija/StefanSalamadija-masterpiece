@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CrewMember } from '../types';
 import { guessMapping } from './mapping';
-import { buildPreview, revalidateRow, type PreviewRow } from './preview';
+import { buildPreview, resolveRow, type PreviewRow, type ResolveContext } from './preview';
 import type { Cell } from './readSpreadsheet';
 
 let seq = 0;
@@ -49,7 +49,7 @@ describe('buildPreview', () => {
     expect(rows[1].errors[0]).toMatchObject({ field: 'dateOfBirth', message: 'Enter a valid date.' });
     expect(rows[1].draft).toMatchObject({ surname: "O'BRIEN", givenNames: 'Jean-Luc', rank: 'ab', signOnDate: '2026-10-25' });
     expect(rows[2]).toMatchObject({ status: 'new', draft: { surname: 'ŠAŠIĆ', rank: 'chiefOfficer', passportNo: 'P 77' } });
-    const fixed = revalidateRow({ ...rows[1], draft: { ...rows[1].draft, dateOfBirth: '1990-02-28' } }, existing, '2026-10-25');
+    const fixed = resolveRow({ ...rows[1], overrides: { dateOfBirth: '1990-02-28' } }, { existing, today: '2026-10-25', defaultSignOnDate: '2026-10-25' });
     expect(fixed.status).toBe('new');
   });
 
@@ -328,81 +328,154 @@ describe('buildPreview', () => {
   });
 });
 
-describe('revalidateRow', () => {
+describe('resolveRow', () => {
   const existing = [crewMember()];
+  const context = (over: Partial<ResolveContext> = {}): ResolveContext => ({ existing, today: '2026-10-25', defaultSignOnDate: '2026-10-25', ...over });
+  /** The row with these fixes added to the ones it has, worked out again. */
+  const fix = (row: PreviewRow, overrides: PreviewRow['overrides'], over: Partial<ResolveContext> = {}): PreviewRow =>
+    resolveRow({ ...row, overrides: { ...row.overrides, ...overrides } }, context(over));
 
-  it('recomputes the status, errors and changes for the edited draft, and keeps the row number and skip flag', () => {
-    const [first] = buildBrief(existing);
-    const edited = revalidateRow({ ...first, skip: true, draft: { ...first.draft, rank: 'master', nationality: 'Serbian' } }, existing, '2026-10-25');
-    expect(edited).toMatchObject({ rowNumber: 3, skip: true, status: 'update', existingId: existing[0].id });
-    expect(edited.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }, { field: 'nationality', from: 'Croatian', to: 'Serbian' }]);
-    const reverted = revalidateRow({ ...edited, draft: { ...edited.draft, rank: 'chiefOfficer', nationality: 'Croatian' } }, existing, '2026-10-25');
-    expect(reverted).toMatchObject({ status: 'update', changes: [] });
+  it('keeps what the sheet says apart from the fixes, and starts with none', () => {
+    const rows = buildBrief(existing);
+    expect(rows[2].overrides).toEqual({});
+    expect(rows[2].fileDraft).toMatchObject({ surname: 'ŠAŠIĆ', passportNo: 'P 77', nationality: '', signOnDate: '' });   // no default in it
+    expect(rows[2].draft.signOnDate).toBe('2026-10-25');
+    expect(rows[0].fileDraft).toMatchObject({ nationality: '', dateOfBirth: '1985-01-05' });                              // none of the saved contract in it
+    expect(rows[0].draft.nationality).toBe('Croatian');
+    const fixed = fix(rows[1], { dateOfBirth: '1990-02-28' });
+    expect(fixed.fileDraft).toEqual(rows[1].fileDraft);
+    expect(fixed.overrides).toEqual({ dateOfBirth: '1990-02-28' });
   });
 
-  it('turns a new row into an update when its passport number now matches, and back again, without rewriting the draft', () => {
+  it('works the row out again from the file and the fixes, keeping the row number and skip flag', () => {
+    const [first] = buildBrief(existing);
+    const edited = resolveRow({ ...first, skip: true, overrides: { rank: 'master', nationality: 'Serbian' } }, context());
+    expect(edited).toMatchObject({ rowNumber: 3, skip: true, status: 'update', existingId: existing[0].id });
+    expect(edited.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }, { field: 'nationality', from: 'Croatian', to: 'Serbian' }]);
+    const reverted = resolveRow({ ...edited, overrides: { rank: 'chiefOfficer', nationality: 'Croatian' } }, context());
+    expect(reverted).toMatchObject({ status: 'update', changes: [] });
+    expect(resolveRow({ ...edited, overrides: {} }, context()).changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }]);   // without them, as the file says
+  });
+
+  it('turns a new row into an update when a fixed passport number matches, and back again, with the file filling in the rest', () => {
     const rows = buildBrief(existing);
-    const edited = { ...rows[2], draft: { ...rows[2].draft, passportNo: '012345678' } };
-    const matched = revalidateRow(edited, existing, '2026-10-25');
+    const matched = fix(rows[2], { passportNo: '012345678' });
     expect(matched).toMatchObject({ status: 'update', existingId: existing[0].id });
-    expect(matched.draft).toEqual(edited.draft);
-    expect(matched.changes.map(c => c.field)).toEqual(['surname', 'givenNames', 'nationality', 'dateOfBirth', 'placeOfBirth', 'passportExpiry', 'seamansBookNo', 'seamansBookExpiry', 'signOnDate', 'signOnPort']);
-    expect(matched.changes[2]).toEqual({ field: 'nationality', from: 'Croatian', to: '' });
-    const unmatched = revalidateRow({ ...matched, draft: { ...matched.draft, passportNo: 'ZZ9' } }, existing, '2026-10-25');
+    expect(matched.draft).toMatchObject({ passportNo: '012 345 678', nationality: 'Croatian', dateOfBirth: '1985-01-05', signOnDate: '2026-06-01' });
+    expect(matched.changes.map(c => c.field)).toEqual(['surname', 'givenNames']);   // what the file says; its empty cells keep the contract's values
+    const unmatched = fix(matched, { passportNo: 'ZZ9' });
     expect(unmatched.status).toBe('new');
     expect(unmatched).not.toHaveProperty('existingId');
     expect(unmatched.changes).toEqual([]);
+    expect(unmatched.draft).toMatchObject({ nationality: '', signOnDate: '2026-10-25' });
   });
 
-  it('takes the edited draft as it is on an update row: a cleared field stays cleared and shows as a change', () => {
+  it('takes a fixed field as it is on an update row: a cleared field stays cleared and shows as a change', () => {
     const [first] = buildBrief(existing);
-    const cleared = revalidateRow({ ...first, draft: { ...first.draft, nationality: '', placeOfBirth: '  ' } }, existing, '2026-10-25');
+    const cleared = fix(first, { nationality: '', placeOfBirth: '' });
     expect(cleared.status).toBe('update');
-    expect(cleared.draft).toMatchObject({ nationality: '', placeOfBirth: '  ' });
+    expect(cleared.draft).toMatchObject({ nationality: '', placeOfBirth: '' });
     expect(cleared.changes).toEqual([
       { field: 'rank', from: 'chiefOfficer', to: 'master' },
       { field: 'nationality', from: 'Croatian', to: '' },
-      { field: 'placeOfBirth', from: 'Split', to: '  ' },
+      { field: 'placeOfBirth', from: 'Split', to: '' },
     ]);
   });
 
   it('lets an update row switch to a rank "other": it keeps "other" and asks for the text, then lists the change', () => {
     const [first] = buildBrief(existing);
-    const other = revalidateRow({ ...first, draft: { ...first.draft, rank: 'other', rankOther: '' } }, existing, '2026-10-25');
-    expect(other).toMatchObject({ status: 'error', draft: { rank: 'other', rankOther: '' }, errors: [{ field: 'rank', message: 'Rank is required.' }] });
-    const noKey = revalidateRow({ ...other, draft: { ...other.draft, rankOther: undefined } }, existing, '2026-10-25');
-    expect(noKey).toMatchObject({ status: 'error', draft: { rank: 'other' }, errors: [{ field: 'rank', message: 'Rank is required.' }] });
-    const named = revalidateRow({ ...other, draft: { ...other.draft, rankOther: 'Pumpman' } }, existing, '2026-10-25');
+    const other = fix(first, { rank: 'other' });
+    expect(other).toMatchObject({ status: 'error', draft: { rank: 'other' }, errors: [{ field: 'rank', message: 'Rank is required.' }] });
+    const blank = fix(other, { rankOther: '' });
+    expect(blank).toMatchObject({ status: 'error', draft: { rank: 'other', rankOther: '' }, errors: [{ field: 'rank', message: 'Rank is required.' }] });
+    const named = fix(other, { rankOther: 'Pumpman' });
     expect(named).toMatchObject({ status: 'update', existingId: existing[0].id, draft: { rank: 'other', rankOther: 'Pumpman' }, errors: [] });
     expect(named.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'other' }, { field: 'rankOther', from: '', to: 'Pumpman' }]);
   });
 
-  it('lists no change for a passport or book number that only differs in spaces or case, and leaves the draft alone', () => {
+  it('drops the rank text of a row whose fixed rank does not use it', () => {
+    const [row] = build({ rows: table(['Surname', 'Rank', 'Passport No'], ['A', 'Pumpman', 'P1']) });
+    expect(row.draft).toMatchObject({ rank: 'other', rankOther: 'Pumpman' });
+    expect(fix(row, { rank: 'ab' }).draft).not.toHaveProperty('rankOther');
+  });
+
+  it('lists no change for a passport or book number that only differs in spaces or case, and keeps the record\'s formatting', () => {
     const [first] = buildBrief(existing);
-    const draft = { ...first.draft, rank: 'chiefOfficer' as const, passportNo: '012345678', seamansBookNo: 'SB998' };
-    const row = revalidateRow({ ...first, draft }, existing, '2026-10-25');
-    expect(row).toMatchObject({ status: 'update', changes: [], draft: { passportNo: '012345678', seamansBookNo: 'SB998' } });
+    const row = fix(first, { rank: 'chiefOfficer', passportNo: '012345678', seamansBookNo: 'SB998' });
+    expect(row).toMatchObject({ status: 'update', changes: [], draft: { passportNo: '012 345 678', seamansBookNo: 'sb 998' } });
   });
 
   it('reports the fields the user left empty, rather than replacing them with the default sign-on date', () => {
     const rows = buildBrief();
-    const cleared = revalidateRow({ ...rows[2], draft: { ...rows[2].draft, surname: '  ', signOnDate: '' } }, [], '2026-10-25');
+    const cleared = fix(rows[2], { surname: '  ', signOnDate: '' }, { existing: [] });
     expect(cleared.status).toBe('error');
     expect(cleared.errors.map(e => [e.field, e.message])).toEqual([['surname', 'Surname is required.'], ['signOnDate', 'Sign-on date is required.']]);
   });
 
   it('asks for the rank text when the rank is "other" and the text is empty', () => {
     const rows = buildBrief();
-    const other = revalidateRow({ ...rows[2], draft: { ...rows[2].draft, rank: 'other', rankOther: ' ' } }, [], '2026-10-25');
+    const other = fix(rows[2], { rank: 'other', rankOther: ' ' }, { existing: [] });
     expect(other).toMatchObject({ status: 'error', errors: [{ field: 'rank', message: 'Rank is required.' }] });
-    const named = revalidateRow({ ...other, draft: { ...other.draft, rankOther: 'Pumpman' } }, [], '2026-10-25');
-    expect(named).toMatchObject({ status: 'new', errors: [] });
+    expect(fix(other, { rankOther: 'Pumpman' }, { existing: [] })).toMatchObject({ status: 'new', errors: [] });
   });
 
   it('does not change the row it is given', () => {
     const rows = buildBrief(existing);
     const before = structuredClone(rows[0]);
-    revalidateRow(rows[0], existing, '2026-10-25');
+    fix(rows[0], { rank: 'ab' });
     expect(rows[0]).toEqual(before);
+  });
+
+  describe('the default sign-on date', () => {
+    const [row] = build({ rows: table(['Surname', 'Rank', 'Passport No', 'Date of birth'], ['Šašić', 'Master', 'P1', '31.02.1990']) });
+
+    it('reaches a fixed new row, unless the user fixed the sign-on date too', () => {
+      const fixed = fix(row, { dateOfBirth: '1990-02-28' });
+      expect(fixed).toMatchObject({ status: 'new', draft: { signOnDate: '2026-10-25' } });
+      expect(fix(fixed, {}, { defaultSignOnDate: '2026-11-01' }).draft.signOnDate).toBe('2026-11-01');
+      const own = fix(fixed, { signOnDate: '2026-05-05' });
+      expect(fix(own, {}, { defaultSignOnDate: '2026-11-01' }).draft.signOnDate).toBe('2026-05-05');
+    });
+
+    it('is not given to a row that updates a saved contract, which keeps its own sign-on date', () => {
+      const [first] = buildBrief(existing);
+      expect(fix(first, { nationality: 'Serbian' }, { defaultSignOnDate: '2026-11-01' }).draft.signOnDate).toBe('2026-06-01');
+    });
+  });
+
+  describe('a passport fixed to that of the latest contract of a person who has had two', () => {
+    const old = crewMember({
+      surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', passportExpiry: '2026-03-01', signOnPort: 'Rijeka',
+      signOnDate: '2025-01-01', signOffDate: '2025-06-30', signOffPort: 'Koper', rank: 'master',
+    });
+    const current = crewMember({
+      surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', passportExpiry: '2035-12-31', signOnPort: 'Santos',
+      signOnDate: '2026-06-01', rank: 'master',
+    });
+    const crew = [old, current];
+    const HEADER_WITH_SIGN_OFF = ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No', 'Sign off'];
+    const ana = (...extra: Cell[]): PreviewRow => build({ rows: table(HEADER_WITH_SIGN_OFF, ['HORVAT', 'Ana', 'Master', '07.07.1977', 'P1', ...extra]), existing: crew })[0];
+
+    it('is an update of the latest contract, written with the file\'s and the fixes\' values only, none of the earlier contract\'s', () => {
+      const row = ana('30.09.2026');
+      expect(row).toMatchObject({ status: 'update', existingId: old.id });                       // the file's passport belongs to the earlier contract
+      expect(row.draft).toMatchObject({ passportExpiry: '2026-03-01', signOnPort: 'Rijeka' });   // and so its values fill the draft...
+      const fixed = fix(row, { passportNo: 'P2', signOnDate: '2026-06-01' }, { existing: crew });
+      expect(fixed).toMatchObject({ status: 'update', existingId: current.id, errors: [] });      // ...until the passport is fixed
+      expect(fixed.draft).toMatchObject({ passportNo: 'P2', passportExpiry: '2035-12-31', signOnPort: 'Santos', signOnDate: '2026-06-01', signOffDate: '2026-09-30' });
+      expect(fixed.draft.signOffPort).toBeUndefined();
+      expect(fixed.changes).toEqual([{ field: 'signOffDate', from: '', to: '2026-09-30' }]);     // the sign-off of the file, and nothing of the old contract
+    });
+
+    it('resolves cleanly without a sign-off in the file, though the earlier contract had one', () => {
+      const row = ana();
+      expect(row.draft).toMatchObject({ signOnDate: '2025-01-01', signOffDate: '2025-06-30' });
+      const fixed = fix(row, { passportNo: 'P2' }, { existing: crew });
+      expect(fixed).toMatchObject({ status: 'update', existingId: current.id, errors: [], changes: [] });
+      expect(fixed.draft).toMatchObject({ signOnDate: '2026-06-01', passportExpiry: '2035-12-31' });
+      expect(fixed.draft.signOffDate).toBeUndefined();
+      // The same with the sign-on fixed as well: nothing of the earlier contract's sign-off is left to run into it.
+      expect(fix(row, { passportNo: 'P2', signOnDate: '2026-06-02' }, { existing: crew })).toMatchObject({ status: 'update', errors: [] });
+    });
   });
 });

@@ -57,6 +57,29 @@ async function readFile(file: File): Promise<ReadResult> {
   }
 }
 
+/** The state of the history entry that is made when the fix form opens. */
+const FIX_ENTRY = { fixRow: true };
+
+function isFixEntry(state: unknown): boolean {
+  return typeof state === 'object' && state !== null && (state as { fixRow?: unknown }).fixRow === true;
+}
+
+/**
+ * True from the moment the history is sent back over an entry made for a fix form until it has moved. The wizard that
+ * was just left is cleaned up a moment after the new one is shown, and both see the entry, so that without this the
+ * history would be sent back twice, and the user would land two screens back.
+ */
+let skippingFixEntry = false;
+if (typeof window !== 'undefined') window.addEventListener('popstate', () => { skippingFixEntry = false; });
+
+/** Goes back over the entry of a fix form, once however many ask. */
+function skipFixEntry(): void {
+  if (skippingFixEntry) return;
+  skippingFixEntry = true;
+  window.history.back();
+  window.setTimeout(() => { skippingFixEntry = false; }, 1000); // in case the history had nowhere to go
+}
+
 /** Said when fixes and skips are dropped because the rows they were made on are not the same any more. */
 const CLEARED_MESSAGE = 'Your fixes and skips were cleared because the columns changed.';
 
@@ -107,8 +130,8 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
     });
   }, [grid, loaded?.headerRow, loaded?.mapping, loaded?.dateFormat, loaded?.defaultSignOn, existing, today]);
   const rows = useMemo(
-    () => (existing ? recheckRows(applyEdits(built, edits), existing, today) : []),
-    [built, edits, existing, today],
+    () => (existing ? recheckRows(applyEdits(built, edits), { existing, today, defaultSignOnDate: loaded?.defaultSignOn ?? today }) : []),
+    [built, edits, existing, today, loaded?.defaultSignOn],
   );
   const columns = useMemo(() => (grid && loaded ? shownColumns(grid.rows, loaded.headerRow) : []), [grid, loaded?.headerRow]);
   const contractsById = useMemo(() => new Map((existing ?? []).map((m) => [m.id, m])), [existing]);
@@ -120,17 +143,25 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
     lastFixed.current = undefined;
   }, [fixing]);
 
-  // The fix form has a history entry of its own (same address), so that Back closes the form and does not leave the wizard.
+  // The fix form has a history entry of its own (same address, marked), so that Back closes the form and does not leave the wizard.
+  const fixingNow = useRef<number | undefined>(undefined);
+  fixingNow.current = fixing;
   useEffect(() => {
-    if (fixing === undefined) return;
-    const close = (): void => {
-      lastFixed.current = fixing;
-      leavingFix.current = false;
-      setFixing(undefined);
+    // An entry made for the form is no place to be at without one: the user left the wizard with the form open, and came
+    // back (or reloaded) to it. The entry is skipped, so that Back goes on to where it was going.
+    if (isFixEntry(window.history.state)) skipFixEntry();
+    const onPopState = (event: PopStateEvent): void => {
+      if (fixingNow.current !== undefined) {
+        lastFixed.current = fixingNow.current;
+        leavingFix.current = false;
+        setFixing(undefined);
+      } else if (isFixEntry(event.state)) {
+        skipFixEntry(); // Forward onto the entry that was made for a form, which is closed
+      }
     };
-    window.addEventListener('popstate', close);
-    return () => window.removeEventListener('popstate', close);
-  }, [fixing]);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   if (!existing) return null;
 
@@ -193,7 +224,7 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   }
 
   function openFix(rowNumber: number): void {
-    window.history.pushState(null, '', window.location.href);
+    window.history.pushState(FIX_ENTRY, '', window.location.href);
     leavingFix.current = false;
     setFixing(rowNumber);
   }
@@ -336,8 +367,8 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
       {fixRow && (
         <FixRow
           key={fixRow.rowNumber} row={fixRow} crew={existing} today={today}
-          onDone={(draft) => {
-            edit(fixRow.rowNumber, { draft });
+          onDone={(overrides) => {
+            edit(fixRow.rowNumber, { overrides: { ...fixRow.overrides, ...overrides } });
             lastFixed.current = fixRow.rowNumber;
             closeFix();
           }}

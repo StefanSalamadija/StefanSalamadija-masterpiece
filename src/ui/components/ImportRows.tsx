@@ -5,15 +5,16 @@ import type { PreviewRow } from '../../domain/crewImport/preview';
 import type { CrewDraft, CrewMember, FieldError } from '../../domain/types';
 import { crewFormOf, crewFormProblems, problemsByControl } from '../crewForm';
 import type { CrewControl, CrewForm } from '../crewForm';
-import { changeText, draftWithForm, errorParts, statusText } from '../crewImportView';
+import { changeText, errorParts, overridesFromForm, statusText } from '../crewImportView';
 import { CrewFields } from './CrewFields';
 
-/** The one row being fixed: the crew form with the row's draft. Nothing else of the wizard is on screen meanwhile. */
+/** The one row being fixed: the crew form with the row as it is now. Only what the user changes is a fix. Nothing else of the wizard is on screen meanwhile. */
 export function FixRow({ row, crew, today, onDone, onCancel }: {
   row: PreviewRow;
   crew: CrewMember[];
   today: string;
-  onDone: (draft: CrewDraft) => void;
+  /** What the user changed, as fixes over what the file says. */
+  onDone: (overrides: Partial<CrewDraft>) => void;
   onCancel: () => void;
 }) {
   const problemsOf = (form: CrewForm): Map<CrewControl, FieldError> =>
@@ -34,12 +35,12 @@ export function FixRow({ row, crew, today, onDone, onCancel }: {
 
   function done(event: Event): void {
     event.preventDefault();
-    const draft = draftWithForm(row.draft, form);
-    if (draft) {
-      onDone(draft);
+    const overrides = overridesFromForm(row.draft, form);
+    if (overrides) {
+      onDone(overrides);
       return;
     }
-    // No rank chosen yet: there is no draft to make.
+    // No rank chosen yet: there is nothing to fix the row with.
     setAttempted(true);
     controls.current.rank?.focus();
   }

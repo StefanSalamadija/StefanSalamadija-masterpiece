@@ -1,8 +1,8 @@
 import { fullName, laterContractFinder, normalisePassport, overlapFinder, overlapMessage } from '../crew';
 import type { CrewMember, FieldError } from '../types';
 import { crewPatch, isImportable } from './plan';
-import { DUPLICATE_PASSPORT, revalidateRow } from './preview';
-import type { PreviewRow } from './preview';
+import { DUPLICATE_PASSPORT, resolveRow } from './preview';
+import type { PreviewRow, ResolveContext } from './preview';
 
 function flag(row: PreviewRow, error: FieldError): PreviewRow {
   return { ...row, status: 'error', errors: [...row.errors, error] };
@@ -22,8 +22,10 @@ function flagDuplicatePassports(rows: PreviewRow[]): PreviewRow[] {
 /**
  * A row is matched to a contract by its passport number, and an update changes that contract. When the person has a
  * later contract (after a renewed passport, say) the number is that of an earlier one, and the update would change the
- * wrong contract: the row is an error, for the user to fix (the passport number, usually) or skip. A row that changes
- * nothing, or is skipped, writes nothing and is left alone.
+ * wrong contract: the row is an error. Fixing the passport number to the latest contract's moves the row there
+ * (`resolveRow`), which is the way out when the sheet has an old passport number. When that contract has no passport
+ * number there is nothing to fix it to, and the message says to skip the row or give the contract one. A row that
+ * changes nothing, or is skipped, writes nothing and is left alone.
  */
 function flagEarlierContracts(rows: PreviewRow[], existing: CrewMember[]): PreviewRow[] {
   const byId = new Map(existing.map(m => [m.id, m]));
@@ -32,11 +34,11 @@ function flagEarlierContracts(rows: PreviewRow[], existing: CrewMember[]): Previ
     const match = isImportable(row) && row.existingId !== undefined ? byId.get(row.existingId) : undefined;
     const later = match && laterContract(match);
     if (!later) return row;
-    const passport = later.passportNo.trim() === '' ? 'has no passport number' : `has passport ${later.passportNo}`;
-    return flag(row, {
-      field: 'passportNo', severity: 'error',
-      message: `This passport belongs to an earlier contract. ${fullName(later)}'s latest contract (from ${later.signOnDate}) ${passport}.`,
-    });
+    const which = `This passport belongs to an earlier contract. ${fullName(later)}'s latest contract (from ${later.signOnDate})`;
+    const message = later.passportNo.trim() === ''
+      ? `${which} has no passport number. Skip the row, or add the passport number to that contract on the crew list.`
+      : `${which} has passport ${later.passportNo}.`;
+    return flag(row, { field: 'passportNo', severity: 'error', message });
   });
 }
 
@@ -79,14 +81,15 @@ function flagOverlaps(rows: PreviewRow[], existing: CrewMember[]): PreviewRow[] 
 }
 
 /**
- * The preview again after the user changed something (a fix, a skip): each row is revalidated on its own with
- * `revalidateRow`, and then the checks that need the other rows are made, which `revalidateRow` cannot:
+ * The preview again after the user changed something (a fix, a skip, the default sign-on date): each row is worked out
+ * again on its own from what the file says and what the user fixed (`resolveRow`), and then the checks that need the
+ * other rows are made, which `resolveRow` cannot:
  * - a passport number that another row also has makes every row that has it an error;
  * - an update that would change a contract that the person has since followed with another is an error;
  * - a contract that runs into another contract of the same person, saved or in the file, makes the row an error.
  * Skipped rows take no part in these checks, so skipping one of two rows that clash frees the other.
  */
-export function recheckRows(rows: PreviewRow[], existing: CrewMember[], today: string): PreviewRow[] {
-  const revalidated = rows.map(row => revalidateRow(row, existing, today));
-  return flagOverlaps(flagEarlierContracts(flagDuplicatePassports(revalidated), existing), existing);
+export function recheckRows(rows: PreviewRow[], context: ResolveContext): PreviewRow[] {
+  const resolved = rows.map(row => resolveRow(row, context));
+  return flagOverlaps(flagEarlierContracts(flagDuplicatePassports(resolved), context.existing), context.existing);
 }

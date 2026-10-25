@@ -32,7 +32,10 @@ function stored(page: Page, store: 'crew' | 'ships' | 'snapshots'): Promise<Reco
 }
 
 /** Adds a crew member on the Add form, which leaves the browser on the crew list. */
-async function addMember(page: Page, m: { surname: string; givenNames: string; dateOfBirth: string; passportNo: string; signOn: string }): Promise<void> {
+async function addMember(
+  page: Page,
+  m: { surname: string; givenNames: string; dateOfBirth: string; passportNo: string; signOn: string; passportExpiry?: string; signOnPort?: string },
+): Promise<void> {
   await page.goto('./#/ship/crew/new');
   await page.getByLabel('Surname').fill(m.surname);
   await page.getByLabel('Given names').fill(m.givenNames);
@@ -40,8 +43,25 @@ async function addMember(page: Page, m: { surname: string; givenNames: string; d
   await page.getByLabel('Date of birth').fill(m.dateOfBirth);
   await page.getByLabel('Passport no.').fill(m.passportNo);
   await page.getByLabel('Sign-on date').fill(m.signOn);
+  if (m.passportExpiry) await page.getByLabel('Passport expiry').fill(m.passportExpiry);
+  if (m.signOnPort) await page.getByLabel('Sign-on port').fill(m.signOnPort);
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(/#\/ship\/crew$/);
+}
+
+type PopCounter = { pops: number };
+
+/** From now on counts the `popstate` events of the page, so that a test can wait until the history has finished moving. */
+function countPopStates(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const counter = window as unknown as PopCounter;
+    counter.pops = 0;
+    window.addEventListener('popstate', () => { counter.pops += 1; });
+  });
+}
+
+async function waitForPopStates(page: Page, count: number): Promise<void> {
+  await page.waitForFunction((n) => (window as unknown as PopCounter).pops >= n, count);
 }
 
 /** Signs a member off on the crew list, through the dialog. */
@@ -525,6 +545,110 @@ test('a passport of an earlier contract is an error, and the earlier contract is
   const after = await stored(page, 'crew');
   expect(after).toHaveLength(3);
   for (const m of before) expect(after.find((a) => a.id === m.id)).toEqual(m);   // neither HORVAT contract was touched
+});
+
+test('a passport of an earlier contract, fixed to the latest one, updates that contract with the file\'s values only', async ({ page }, info) => {
+  const rows: CrewSheetRow[] = [
+    ['Surname', 'Given names', 'Rank', 'Date of birth', 'Passport No'],
+    ['HORVAT', 'Ana', 'C/O', '07.07.1977', 'P1'],      // the passport of the contract of 2025
+  ];
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file, 'xlsx', rows);
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', signOn: '2025-01-01', passportExpiry: '2026-03-01', signOnPort: 'Rijeka' });
+  await signOff(page, 'Ana HORVAT', '2025-06-30', 'Koper');
+  await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', signOn: '2026-06-01', passportExpiry: '2035-12-31', signOnPort: 'Santos' });
+  const before = await stored(page, 'crew');
+  const earlier = before.find((m) => m.passportNo === 'P1');
+  const latest = before.find((m) => m.passportNo === 'P2');
+  expect(earlier).toMatchObject({ signOffDate: '2025-06-30', signOffPort: 'Koper', passportExpiry: '2026-03-01', signOnPort: 'Rijeka' });
+  expect(latest).toMatchObject({ passportExpiry: '2035-12-31', signOnPort: 'Santos' });
+
+  await page.goto('./#/ship/crew/import'); await page.getByLabel('Crew list file').setInputFiles(file);
+  const row = previewRow(page, 'Ana HORVAT');
+  await expect(row).toContainText('Error');
+  await row.getByRole('button', { name: 'Fix' }).click();
+  await expect(page.getByLabel('Passport expiry')).toHaveValue('2026-03-01');   // the form shows the row as it is now: the earlier contract
+  await page.getByLabel('Passport no.').fill('P2');
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  await expect(row).toContainText('Update');
+  await expect(row).toContainText('Updates the contract from 2026-06-01');
+  await expect(row).toContainText('Rank: Master → Chief Officer');
+  await expect(row).not.toContainText('Passport expiry');
+  await expect(row).not.toContainText('Sign-on port');
+  await page.getByRole('button', { name: 'Import 1 crew' }).click();
+  await expect(page.getByText('Imported 1 crew.')).toBeVisible();
+
+  const after = await stored(page, 'crew');
+  expect(after).toHaveLength(2);
+  expect(after.find((m) => m.id === earlier?.id)).toEqual(earlier);                                    // the earlier contract was not touched
+  const updated = after.find((m) => m.id === latest?.id);
+  expect(updated).toEqual({ ...latest, rank: 'chiefOfficer', updatedAt: updated?.updatedAt });         // the latest keeps its expiry, ports and dates
+});
+
+test('a fixed row follows the default sign-on date, since it has none of its own', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByRole('button', { name: 'Done' }).click();
+  await expect(previewRow(page, "O'BRIEN")).toContainText('New');
+  await page.getByLabel('Sign-on date for rows without one').fill('2026-11-01');
+  await expect(previewRow(page, "O'BRIEN")).toContainText('New');                                      // and was not dropped by the change
+  await page.getByRole('button', { name: 'Import 3 crew' }).click();
+  await expect(page.getByText('Imported 3 crew.')).toBeVisible();
+  const crew = await stored(page, 'crew');
+  expect(crew.map((m) => [m.surname, m.signOnDate]).sort()).toEqual([["O'BRIEN", '2026-11-01'], ['PETROVIĆ', '2026-11-01'], ['ŠAŠIĆ', '2026-11-01']]);
+  expect(crew.find((m) => m.surname === "O'BRIEN")?.dateOfBirth).toBe('1990-02-28');
+});
+
+test('a sign-on date the user fixed is kept when the default sign-on date changes', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByLabel('Sign-on date').fill('2026-05-05');
+  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByLabel('Sign-on date for rows without one').fill('2026-11-01');
+  await page.getByRole('button', { name: 'Import 3 crew' }).click();
+  await expect(page.getByText('Imported 3 crew.')).toBeVisible();
+  const crew = await stored(page, 'crew');
+  expect(crew.map((m) => [m.surname, m.signOnDate]).sort()).toEqual([["O'BRIEN", '2026-05-05'], ['PETROVIĆ', '2026-11-01'], ['ŠAŠIĆ', '2026-11-01']]);
+});
+
+test('leaving the wizard with the fix form open leaves no dead entry in the history', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Home' }).click();
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
+
+  await countPopStates(page);
+  await page.goBack();                                       // onto the entry of the form, which is skipped: two moves of the history
+  await waitForPopStates(page, 2);
+  await expect(page).toHaveURL(/#\/ship\/crew\/import$/);
+  await expect(page.getByLabel('Crew list file')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toHaveCount(0);
+  await page.goBack();                                       // so that the next Back goes on to where the wizard was opened from
+  await expect(page).toHaveURL('http://localhost:4173/');
+});
+
+test('Forward onto the entry of a closed fix form is skipped too', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
+  await page.goBack();                                       // the form closes
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toHaveCount(0);
+  await countPopStates(page);
+  await page.goForward();                                    // onto the entry of the form: nothing to show there, so back again
+  await waitForPopStates(page, 2);
+  await expect(page.getByRole('heading', { name: 'Fix row 6' })).toHaveCount(0);
+  await expect(previewRow(page, "O'BRIEN")).toContainText('Error');
+  await page.goBack();
+  await expect(page).toHaveURL('http://localhost:4173/');
 });
 
 test.describe('while the file is read', () => {

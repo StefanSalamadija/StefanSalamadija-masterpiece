@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CrewMember } from '../types';
 import { guessMapping } from './mapping';
 import { buildPreview } from './preview';
+import { importPlan } from './plan';
 import type { PreviewRow } from './preview';
 import type { Cell } from './readSpreadsheet';
 import { recheckRows } from './recheck';
@@ -30,7 +31,10 @@ function preview(existing: CrewMember[], ...data: Cell[][]): PreviewRow[] {
     currentYear: 2026, today: TODAY, defaultSignOnDate: TODAY,
   });
 }
-const recheck = (rows: PreviewRow[], existing: CrewMember[] = []): PreviewRow[] => recheckRows(rows, existing, TODAY);
+const recheck = (rows: PreviewRow[], existing: CrewMember[] = [], defaultSignOnDate = TODAY): PreviewRow[] =>
+  recheckRows(rows, { existing, today: TODAY, defaultSignOnDate });
+/** The row with these fixes over the ones it has; `recheck` works it out again from the file and the fixes. */
+const fixed = (row: PreviewRow, overrides: PreviewRow['overrides']): PreviewRow => ({ ...row, overrides: { ...row.overrides, ...overrides } });
 const withSkip = (row: PreviewRow, skip = true): PreviewRow => ({ ...row, skip });
 const statuses = (rows: PreviewRow[]): string[] => rows.map(row => row.status);
 interface FieldErrorLike { field: string; message: string; severity: string }
@@ -43,11 +47,19 @@ describe('recheckRows', () => {
     expect(rows).toEqual(before);
   });
 
-  it('revalidates each row against its edited draft, keeping the row number and the skip flag', () => {
+  it('works each row out again from the file and its fixes, keeping the row number and the skip flag', () => {
     const [bad] = preview([], ["O'BRIEN", 'Jean-Luc', 'A/B', '31.02.1990', 'X1', '']);
     expect(bad.status).toBe('error');
-    const fixed = recheck([withSkip({ ...bad, draft: { ...bad.draft, dateOfBirth: '1990-02-28' } })]);
-    expect(fixed[0]).toMatchObject({ status: 'new', errors: [], rowNumber: bad.rowNumber, skip: true });
+    const result = recheck([withSkip(fixed(bad, { dateOfBirth: '1990-02-28' }))]);
+    expect(result[0]).toMatchObject({ status: 'new', errors: [], rowNumber: bad.rowNumber, skip: true });
+  });
+
+  it('gives the default sign-on date to a fixed row that has none of its own, whenever the default changes', () => {
+    const [bad] = preview([], ["O'BRIEN", 'Jean-Luc', 'A/B', '31.02.1990', 'X1', '']);
+    const row = fixed(bad, { dateOfBirth: '1990-02-28' });
+    expect(recheck([row])[0]).toMatchObject({ status: 'new', draft: { signOnDate: TODAY } });
+    expect(recheck([row], [], '2026-11-01')[0].draft.signOnDate).toBe('2026-11-01');
+    expect(recheck([fixed(row, { signOnDate: '2026-05-05' })], [], '2026-11-01')[0].draft.signOnDate).toBe('2026-05-05');
   });
 
   describe('duplicate passport numbers', () => {
@@ -62,10 +74,9 @@ describe('recheckRows', () => {
 
     it('notices a passport number edited to be another row\'s, and lets go of both when it is edited back', () => {
       const rows = preview([], ['A', 'Ana', 'AB', '', 'P1', ''], ['B', 'Ben', 'AB', '', 'P2', '']);
-      const edited = rows.map((row, i) => (i === 1 ? { ...row, draft: { ...row.draft, passportNo: 'P1' } } : row));
-      const clash = recheck(edited);
+      const clash = recheck(rows.map((row, i) => (i === 1 ? fixed(row, { passportNo: 'P1' }) : row)));
       expect(statuses(clash)).toEqual(['error', 'error']);
-      const back = recheck(clash.map((row, i) => (i === 1 ? { ...row, draft: { ...row.draft, passportNo: 'P2' } } : row)));
+      const back = recheck(clash.map((row, i) => (i === 1 ? fixed(row, { passportNo: 'P2' }) : row)));
       expect(statuses(back)).toEqual(['new', 'new']);
       expect(back.map(row => row.errors)).toEqual([[], []]);
     });
@@ -111,15 +122,42 @@ describe('recheckRows', () => {
       expect(row.errors).toEqual([earlier(current)]);
       const noPassport = { ...current, passportNo: '' };
       const [blank] = recheck(preview([old, noPassport], ana('P1')), [old, noPassport]);
-      expect(blank.errors[0].message).toBe("This passport belongs to an earlier contract. Ana HORVAT's latest contract (from 2026-06-01) has no passport number.");
+      expect(blank.errors[0].message).toBe(
+        "This passport belongs to an earlier contract. Ana HORVAT's latest contract (from 2026-06-01) has no passport number. "
+        + 'Skip the row, or add the passport number to that contract on the crew list.',
+      );
     });
 
-    it('is cleared when the passport is fixed to the latest contract\'s, which the row then updates', () => {
-      const [row] = recheck(preview(crew, ana('P1')), crew);
-      // The row carried the dates of the earlier contract, so the user moves those to the latest one's as well.
-      const { signOffDate: _ended, ...kept } = row.draft;
-      const fixed = recheck([{ ...row, draft: { ...kept, passportNo: 'P2', signOnDate: '2026-06-01' } }], crew);
-      expect(fixed[0]).toMatchObject({ status: 'update', existingId: current.id, errors: [] });
+    it('is cleared when the passport is fixed to the latest contract\'s, and the update then writes the file\'s and the fix\'s values only', () => {
+      // The earlier contract has a passport expiry, ports and a sign-off of its own; the file says a sign-off and nothing else of those.
+      const first = crewMember({
+        surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', passportExpiry: '2026-03-01', signOnPort: 'Rijeka',
+        signOnDate: '2025-01-01', signOffDate: '2025-06-30', signOffPort: 'Koper',
+      });
+      const latest = crewMember({
+        surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', passportExpiry: '2035-12-31', signOnPort: 'Santos', signOnDate: '2026-06-01',
+      });
+      const both = [first, latest];
+      const [row] = recheck(preview(both, ['HORVAT', 'Ana', 'Master', '07.07.1977', 'P1', '', '30.09.2026']), both);
+      expect(row).toMatchObject({ status: 'error', existingId: first.id });
+      expect(importPlan([row], both)).toEqual({ creates: [], updates: [] });                               // an error row writes nothing
+
+      const [moved] = recheck([fixed(row, { passportNo: 'P2' })], both);
+      expect(moved).toMatchObject({ status: 'update', existingId: latest.id, errors: [] });
+      expect(importPlan([moved], both)).toEqual({ creates: [], updates: [{ id: latest.id, patch: { signOffDate: '2026-09-30' } }] });
+    });
+
+    it('is cleared too when the file has no sign-off, though the earlier contract had one, and the update writes nothing it should not', () => {
+      const first = crewMember({
+        surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P1', signOnDate: '2025-01-01', signOffDate: '2025-06-30', signOffPort: 'Koper',
+      });
+      const latest = crewMember({ surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'P2', signOnPort: 'Santos', signOnDate: '2026-06-01' });
+      const both = [first, latest];
+      const [row] = recheck(preview(both, ['HORVAT', 'Ana', 'C/O', '07.07.1977', 'P1', '', '']), both);
+      expect(row.status).toBe('error');
+      const [moved] = recheck([fixed(row, { passportNo: 'P2' })], both);
+      expect(moved).toMatchObject({ status: 'update', existingId: latest.id, errors: [] });
+      expect(importPlan([moved], both).updates).toEqual([{ id: latest.id, patch: { rank: 'chiefOfficer' } }]);   // the rank of the file, and no sign-off, no ports
     });
 
     it('does not apply to a skipped row, or to a row that changes nothing, which writes nothing', () => {
