@@ -7,6 +7,8 @@ export interface FieldProps {
   value: string;
   onInput: (value: string) => void;
   type?: 'text' | 'number' | 'date' | 'datetime-local';
+  /** The on-screen keyboard to offer. Numbers are typed as text with `decimal` or `numeric`, then read with `parseDecimal`. */
+  inputMode?: 'decimal' | 'numeric';
   /** An error is announced (`role="alert"`) and marks the input invalid; a warning is only shown. */
   error?: FieldError;
   /** For moving focus to the input, such as after a failed submit. */
@@ -14,7 +16,7 @@ export interface FieldProps {
 }
 
 /** A labelled input with its validation message underneath. */
-export function Field({ label, value, onInput, type = 'text', error, inputRef }: FieldProps) {
+export function Field({ label, value, onInput, type = 'text', inputMode, error, inputRef }: FieldProps) {
   const id = useId();
   const messageId = `${id}-message`;
   const isError = error?.severity === 'error';
@@ -23,7 +25,7 @@ export function Field({ label, value, onInput, type = 'text', error, inputRef }:
       <label for={id}>{label}</label>
       <input
         // Preact types `<input>` as a union keyed by `type`; all four types here take the same attributes.
-        id={id} ref={inputRef} type={type as 'text'} value={value} autocomplete="off"
+        id={id} ref={inputRef} type={type as 'text'} inputMode={inputMode} value={value} autocomplete="off"
         step={type === 'number' ? 'any' : undefined}
         aria-invalid={isError ? 'true' : undefined} aria-describedby={error ? messageId : undefined}
         onInput={(event) => onInput(event.currentTarget.value)}

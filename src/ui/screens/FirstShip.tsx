@@ -5,6 +5,7 @@ import { createShip } from '../../db/ships';
 import { deviceOffsetMinutes } from '../../domain/shipTime';
 import { LogoMark } from '../components/LogoMark';
 import { OffsetSelect } from '../components/OffsetSelect';
+import { SHIP_NAME_REQUIRED } from '../messages';
 import { logoMode } from '../theme';
 
 /** The welcome screen, shown full screen while there is no ship: create the first ship, or import a backup. */
@@ -25,7 +26,7 @@ export function FirstShip() {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      setNameError('Ship name is required.');
+      setNameError(SHIP_NAME_REQUIRED);
       nameInput.current?.focus();
       return;
     }

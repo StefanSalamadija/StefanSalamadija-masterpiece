@@ -2,16 +2,22 @@ import { useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { updateRecord } from '../../db/records';
+import { parseDecimal } from '../../domain/numbers';
 import { validateParticulars } from '../../domain/validation';
 import type { FieldError, Particulars as ParticularsData, ShipProfile } from '../../domain/types';
 import { Field } from '../components/Field';
+import { SHIP_NAME_REQUIRED } from '../messages';
 
 type TextKey = 'name' | 'imo' | 'callSign' | 'mmsi' | 'flag' | 'portOfRegistry' | 'owners' | 'managers' | 'pandi' | 'classSociety';
-type NumberKey = 'gt' | 'nt' | 'dwt' | 'loa' | 'beam' | 'yearBuilt';
+type DimensionKey = 'gt' | 'nt' | 'dwt' | 'loa' | 'beam';
 /** What is typed in the form: every field as text, numbers included. */
-type Draft = Record<TextKey | NumberKey, string>;
+type Draft = Record<TextKey | DimensionKey | 'yearBuilt', string>;
 
-const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; numeric?: boolean }[] }[] = [
+const NUMBER_ERROR = 'Enter a number, e.g. 229.5.';
+const YEAR_ERROR = 'Enter a year, e.g. 2012.';
+const FIRST_YEAR = 1900;
+
+const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; inputMode?: 'decimal' | 'numeric' }[] }[] = [
   {
     title: 'Identity',
     fields: [
@@ -26,12 +32,12 @@ const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; nume
   {
     title: 'Dimensions',
     fields: [
-      { key: 'gt', label: 'GT', numeric: true },
-      { key: 'nt', label: 'NT', numeric: true },
-      { key: 'dwt', label: 'DWT (summer)', numeric: true },
-      { key: 'loa', label: 'LOA (m)', numeric: true },
-      { key: 'beam', label: 'Beam (m)', numeric: true },
-      { key: 'yearBuilt', label: 'Year built', numeric: true },
+      { key: 'gt', label: 'GT', inputMode: 'decimal' },
+      { key: 'nt', label: 'NT', inputMode: 'decimal' },
+      { key: 'dwt', label: 'DWT (summer)', inputMode: 'decimal' },
+      { key: 'loa', label: 'LOA (m)', inputMode: 'decimal' },
+      { key: 'beam', label: 'Beam (m)', inputMode: 'decimal' },
+      { key: 'yearBuilt', label: 'Year built', inputMode: 'numeric' },
     ],
   },
   {
@@ -45,7 +51,7 @@ const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; nume
   },
 ];
 
-const NUMBER_KEYS: readonly NumberKey[] = ['gt', 'nt', 'dwt', 'loa', 'beam', 'yearBuilt'];
+const DIMENSION_KEYS: readonly DimensionKey[] = ['gt', 'nt', 'dwt', 'loa', 'beam'];
 
 function toDraft(p: ParticularsData): Draft {
   return {
@@ -56,48 +62,59 @@ function toDraft(p: ParticularsData): Draft {
   };
 }
 
+const error = (field: string, message: string): FieldError => ({ field, severity: 'error', message });
+
 /**
- * The stored form of a draft, merged into `base` so that anything else kept in the particulars survives. Text is
- * trimmed. A number is stored as a number; an empty one is left out, and a non-numeric one becomes NaN, which the
- * validation rejects.
+ * The particulars a draft stands for, merged into `base` so that anything else kept in them survives, and the
+ * problems in what was typed. Text is trimmed. A number is stored as a number, an empty one is left out, and an entry
+ * that is not a number or not a year is a problem and is left out too. The caller must not save while there are any.
+ * A minus sign is read, so that the positive-number check of `validateParticulars` is the one to refuse it.
  */
-function applyDraft(base: ParticularsData, draft: Draft): ParticularsData {
+function applyDraft(base: ParticularsData, draft: Draft, lastYear: number): { particulars: ParticularsData; errors: FieldError[] } {
+  const errors: FieldError[] = [];
   const next: ParticularsData = {
     ...base,
     name: draft.name.trim(), imo: draft.imo.trim(), callSign: draft.callSign.trim(), mmsi: draft.mmsi.trim(),
     flag: draft.flag.trim(), portOfRegistry: draft.portOfRegistry.trim(), owners: draft.owners.trim(),
     managers: draft.managers.trim(), pandi: draft.pandi.trim(), classSociety: draft.classSociety.trim(),
   };
-  for (const key of NUMBER_KEYS) {
-    const text = draft[key].trim();
-    if (text === '') delete next[key];
-    else next[key] = Number(text);
+  for (const key of DIMENSION_KEYS) {
+    const value = parseDecimal(draft[key], { signed: true });
+    if (value === 'invalid') errors.push(error(key, NUMBER_ERROR));
+    if (typeof value === 'number') next[key] = value;
+    else delete next[key];
   }
-  return next;
+  const year = parseDecimal(draft.yearBuilt);
+  if (year === 'invalid' || (year !== undefined && !(Number.isInteger(year) && year >= FIRST_YEAR && year <= lastYear))) {
+    errors.push(error('yearBuilt', YEAR_ERROR));
+  }
+  if (typeof year === 'number') next.yearBuilt = year;
+  else delete next.yearBuilt;
+  return { particulars: next, errors };
 }
 
 /** The first problem for each field; an error wins over a warning. */
 function problemsByField(errors: FieldError[]): Map<string, FieldError> {
   const byField = new Map<string, FieldError>();
-  for (const error of errors) {
-    const known = byField.get(error.field);
-    if (!known || (known.severity === 'warning' && error.severity === 'error')) byField.set(error.field, error);
+  for (const problem of errors) {
+    const known = byField.get(problem.field);
+    if (!known || (known.severity === 'warning' && problem.severity === 'error')) byField.set(problem.field, problem);
   }
   return byField;
 }
 
-function ParticularsForm({ ship }: { ship: ShipProfile }) {
+function ParticularsForm({ ship, lastYear }: { ship: ShipProfile; lastYear: number }) {
   const { db } = useAppState();
   const [draft, setDraft] = useState(() => toDraft(ship.particulars));
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const candidate = applyDraft(ship.particulars, draft);
-  // Validation owns the numbers and the IMO/MMSI; a ship must have a name, and that is checked only here.
-  const errors = validateParticulars(candidate);
-  if (candidate.name === '') errors.unshift({ field: 'name', severity: 'error', message: 'Ship name is required.' });
+  const { particulars: candidate, errors } = applyDraft(ship.particulars, draft, lastYear);
+  // Validation owns the numbers' range and the IMO/MMSI; that a ship has a name is checked only here.
+  errors.push(...validateParticulars(candidate));
+  if (candidate.name === '') errors.unshift(error('name', SHIP_NAME_REQUIRED));
   const problems = problemsByField(errors);
-  const blocked = errors.some((error) => error.severity === 'error');
+  const blocked = errors.some((problem) => problem.severity === 'error');
 
   function edit(key: keyof Draft, value: string): void {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -124,9 +141,9 @@ function ParticularsForm({ ship }: { ship: ShipProfile }) {
         <div key={section.title} class="form-section">
           <h3>{section.title}</h3>
           <div class="form-grid">
-            {section.fields.map(({ key, label, numeric }) => (
+            {section.fields.map(({ key, label, inputMode }) => (
               <Field
-                key={key} label={label} type={numeric ? 'number' : 'text'} value={draft[key]}
+                key={key} label={label} inputMode={inputMode} value={draft[key]}
                 error={problems.get(key)} onInput={(value) => edit(key, value)}
               />
             ))}
@@ -143,13 +160,13 @@ function ParticularsForm({ ship }: { ship: ShipProfile }) {
 
 /** The active ship's particulars: edited as a draft, saved with the Save button. */
 export function Particulars() {
-  const { activeShip } = useAppState();
+  const { activeShip, shipToday } = useAppState();
   if (!activeShip) return null;
   // Keyed by ship, so switching ships starts a fresh draft instead of carrying edits across.
   return (
     <section class="screen">
       <h2>Vessel particulars</h2>
-      <ParticularsForm key={activeShip.id} ship={activeShip} />
+      <ParticularsForm key={activeShip.id} ship={activeShip} lastYear={Number(shipToday.slice(0, 4)) + 1} />
     </section>
   );
 }

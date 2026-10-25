@@ -1,18 +1,43 @@
 import type { ComponentChildren } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
-import { reportError } from '../../app/errors';
+import { describeError, reportError } from '../../app/errors';
+import type { ErrorNotice } from '../../app/errors';
 import { updateRecord } from '../../db/records';
 import { updateSettings } from '../../db/settings';
 import { copyShip, createShip, deleteShip, deleteSummary, listShips } from '../../db/ships';
 import { deviceOffsetMinutes } from '../../domain/shipTime';
+import { shipDeleteText } from '../../domain/shipDeleteText';
 import type { FieldError, ShipProfile } from '../../domain/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { OffsetSelect } from '../components/OffsetSelect';
+import { SHIP_NAME_REQUIRED } from '../messages';
 import { useLive } from '../useLive';
 
-const NAME_REQUIRED: FieldError = { field: 'name', severity: 'error', message: 'Ship name is required.' };
+const NAME_REQUIRED: FieldError = { field: 'name', severity: 'error', message: SHIP_NAME_REQUIRED };
+
+/**
+ * Runs a dialog's action. `busy` while it runs. A failure is kept in `failure`, for the dialog to show, and the dialog
+ * stays open with what was typed; on success the action closes the dialog itself.
+ */
+function useDialogAction(): { busy: boolean; failure: ErrorNotice | undefined; run: (action: () => Promise<void>) => Promise<void> } {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<ErrorNotice>();
+
+  async function run(action: () => Promise<void>): Promise<void> {
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      await action();
+    } catch (err) {
+      setFailure(describeError(err));
+      setBusy(false);
+    }
+  }
+
+  return { busy, failure, run };
+}
 
 interface NameDialogProps {
   title: string;
@@ -21,7 +46,7 @@ interface NameDialogProps {
   initialName: string;
   /** More fields below the name, whose values the owner keeps. */
   children?: ComponentChildren;
-  /** Does the work with the trimmed name. The owner closes the dialog when it is done; a failure is reported. */
+  /** Does the work with the trimmed name, and closes the dialog when it is done. A failure is shown in the dialog. */
   onSubmit: (name: string) => Promise<void>;
   onClose: () => void;
 }
@@ -30,29 +55,22 @@ interface NameDialogProps {
 function NameDialog({ title, nameLabel, confirmLabel, initialName, children, onSubmit, onClose }: NameDialogProps) {
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<FieldError>();
-  const [busy, setBusy] = useState(false);
+  const { busy, failure, run } = useDialogAction();
   const input = useRef<HTMLInputElement>(null);
 
-  async function confirm(): Promise<void> {
+  function confirm(): void {
     const trimmed = name.trim();
     if (!trimmed) {
       setError(NAME_REQUIRED);
       input.current?.focus();
       return;
     }
-    setBusy(true);
-    try {
-      await onSubmit(trimmed);
-    } catch (err) {
-      // The error toast sits below an open modal dialog, so close it for the message to be seen.
-      onClose();
-      reportError(err);
-    }
+    void run(() => onSubmit(trimmed));
   }
 
   return (
     <ConfirmDialog
-      title={title} confirmLabel={confirmLabel} busy={busy} onConfirm={confirm} onCancel={onClose}
+      title={title} confirmLabel={confirmLabel} busy={busy} error={failure} onConfirm={confirm} onCancel={onClose}
       body={
         <>
           <Field
@@ -129,30 +147,20 @@ function DeleteShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () =>
   const { db } = useAppState();
   // Live, so the counts are right at the moment of confirming.
   const summary = useLive(() => deleteSummary(db, ship.id), [db, ship.id]);
-  const [busy, setBusy] = useState(false);
+  const { busy, failure, run } = useDialogAction();
 
-  async function confirm(): Promise<void> {
-    setBusy(true);
-    try {
+  function confirm(): void {
+    void run(async () => {
       await deleteShip(db, ship.id);
       onClose();
-    } catch (err) {
-      onClose();
-      reportError(err);
-    }
+    });
   }
 
   return (
     <ConfirmDialog
-      title={`Delete ${ship.particulars.name}?`} confirmLabel="Delete ship" danger busy={busy || !summary}
-      onConfirm={confirm} onCancel={onClose}
-      body={
-        <p>
-          {summary
-            ? `This removes ${summary.crew} crew, ${summary.certificates} certificates and ${summary.voyages} voyages from this device. A backup made earlier still contains them.`
-            : 'Checking what this ship contains…'}
-        </p>
-      }
+      title={`Delete ${ship.particulars.name}?`} confirmLabel="Delete ship" danger
+      busy={busy} confirmDisabled={!summary} error={failure} onConfirm={confirm} onCancel={onClose}
+      body={<p>{summary ? shipDeleteText(summary) : 'Checking what this ship contains…'}</p>}
     />
   );
 }
@@ -178,35 +186,31 @@ export function Profiles() {
 
   return (
     <section class="screen">
-      {/* The browser makes everything behind a modal dialog inert; this also hides it from tools that do not know that,
-          so the dialog's own "Rename" button is not confused with the one in the list. */}
-      <div aria-hidden={dialog ? 'true' : undefined}>
-        <div class="screen-head">
-          <h2>Ship profiles</h2>
-          <button type="button" class="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>New ship</button>
-        </div>
-        <ul class="ship-list" role="list">
-          {ships?.map((ship) => {
-            const active = ship.id === activeShip?.id;
-            return (
-              <li key={ship.id} class="card ship-row">
-                <div class="ship-row-head">
-                  <span class="ship-row-name">{ship.particulars.name}</span>
-                  {active && <span class="badge">Active</span>}
-                </div>
-                <div class="ship-row-actions">
-                  {!active && (
-                    <button type="button" class="btn btn-outline btn-small" onClick={() => makeActive(ship)}>Make active</button>
-                  )}
-                  <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'rename', ship })}>Rename</button>
-                  <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'copy', ship })}>Copy</button>
-                  <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'delete', ship })}>Delete</button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+      <div class="screen-head">
+        <h2>Ship profiles</h2>
+        <button type="button" class="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>New ship</button>
       </div>
+      <ul class="ship-list" role="list" aria-label="Ships">
+        {ships?.map((ship) => {
+          const active = ship.id === activeShip?.id;
+          return (
+            <li key={ship.id} class="card ship-row">
+              <div class="ship-row-head">
+                <span class="ship-row-name">{ship.particulars.name}</span>
+                {active && <span class="badge">Active</span>}
+              </div>
+              <div class="ship-row-actions">
+                {!active && (
+                  <button type="button" class="btn btn-outline btn-small" onClick={() => makeActive(ship)}>Make active</button>
+                )}
+                <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'rename', ship })}>Rename</button>
+                <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'copy', ship })}>Copy</button>
+                <button type="button" class="btn btn-outline btn-small" onClick={() => setDialog({ kind: 'delete', ship })}>Delete</button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
       {dialog?.kind === 'create' && <NewShipDialog onClose={close} />}
       {dialog?.kind === 'rename' && <RenameShipDialog ship={dialog.ship} onClose={close} />}
       {dialog?.kind === 'copy' && <CopyShipDialog ship={dialog.ship} onClose={close} />}

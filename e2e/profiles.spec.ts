@@ -3,7 +3,8 @@ import type { Page } from '@playwright/test';
 import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 
 const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
-const row = (page: Page, name: string) => page.getByRole('listitem').filter({ hasText: name });
+const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
+const row = (page: Page, name: string) => shipList(page).getByRole('listitem').filter({ hasText: name });
 
 async function openParticulars(page: Page): Promise<void> {
   await mainNav(page).getByRole('link', { name: 'Ship', exact: true }).click();
@@ -115,12 +116,12 @@ test('profiles: new, switch, copy, rename, delete', async ({ page }) => {
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByLabel('Ship name').fill('MV SEA BREEZE'); await page.getByRole('button', { name: 'Create ship' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('listitem').filter({ hasText: 'MV SEA BREEZE' }).getByRole('button', { name: 'Make active' }).click();
+  await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Make active' }).click();
   await expect(page.getByRole('banner')).toContainText('MV SEA BREEZE');
   await expect(row(page, 'MV SEA BREEZE')).toContainText('Active');
   await expect(row(page, 'MV OCEAN STAR')).not.toContainText('Active');
 
-  await page.getByRole('listitem').filter({ hasText: 'MV OCEAN STAR' }).getByRole('button', { name: 'Copy' }).click();
+  await row(page, 'MV OCEAN STAR').getByRole('button', { name: 'Copy' }).click();
   await page.getByLabel('New ship name').fill('MV OCEAN PEARL'); await page.getByRole('button', { name: 'Copy ship' }).click();
   await expect(row(page, 'MV OCEAN PEARL')).toHaveCount(1);
   await row(page, 'MV OCEAN PEARL').getByRole('button', { name: 'Make active' }).click();
@@ -132,12 +133,12 @@ test('profiles: new, switch, copy, rename, delete', async ({ page }) => {
   await expect(page.getByLabel('Flag')).toHaveValue('Malta');
 
   await openProfiles(page);
-  await page.getByRole('listitem').filter({ hasText: 'MV SEA BREEZE' }).getByRole('button', { name: 'Delete' }).click();
+  await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 0 certificates and 0 voyages from this device.');
   await expect(page.getByRole('dialog')).toContainText('A backup made earlier still contains them.');
   await expect(page.getByRole('heading', { name: 'Delete MV SEA BREEZE?' })).toBeVisible();
   await page.getByRole('button', { name: 'Delete ship' }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: 'MV SEA BREEZE' })).toHaveCount(0);
+  await expect(row(page, 'MV SEA BREEZE')).toHaveCount(0);
   await expect(page.getByRole('banner')).toContainText('MV OCEAN PEARL'); // the active ship was not the deleted one
   await expectNoHorizontalScroll(page);
 });
@@ -155,14 +156,14 @@ test('profiles: rename, cancel, and the blank-name rule in every dialog', async 
   await expectNoHorizontalScroll(page);
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(shipList(page).getByRole('listitem')).toHaveCount(1);
 
   // Rename: prefilled with the current name; blank is refused; Escape closes without changing anything.
   await row(page, 'MV OCEAN STAR').getByRole('button', { name: 'Rename' }).click();
   await expect(page.getByRole('heading', { name: 'Rename ship' })).toBeVisible();
   await expect(page.getByLabel('Ship name')).toHaveValue('MV OCEAN STAR');
   await page.getByLabel('Ship name').fill('  ');
-  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Rename' }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('Ship name is required.');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -182,7 +183,7 @@ test('profiles: rename, cancel, and the blank-name rule in every dialog', async 
   await page.getByRole('button', { name: 'Copy ship' }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('Ship name is required.');
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByRole('listitem')).toHaveCount(1);
+  await expect(shipList(page).getByRole('listitem')).toHaveCount(1);
 });
 
 test('profiles: the delete dialog starts on Cancel, and Cancel keeps the ship', async ({ page }) => {
@@ -243,4 +244,151 @@ test.describe('in a time zone of its own', () => {
     await page.getByRole('button', { name: 'New ship' }).click();
     await expect(page.getByLabel("Ship's time (UTC offset)")).toHaveValue('330');
   });
+});
+
+test('particulars: a decimal comma is read as a decimal point', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openParticulars(page);
+  // Text inputs with a decimal keypad: `type="number"` would read "229,5" as 2295.
+  for (const label of ['GT', 'NT', 'DWT (summer)', 'LOA (m)', 'Beam (m)']) {
+    await expect(page.getByLabel(label)).toHaveAttribute('type', 'text');
+    await expect(page.getByLabel(label)).toHaveAttribute('inputmode', 'decimal');
+  }
+  await expect(page.getByLabel('Year built')).toHaveAttribute('inputmode', 'numeric');
+
+  await page.getByLabel('LOA (m)').fill('229,5');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  expect((await storedShips(page))[0].particulars.loa).toBe(229.5);
+  await page.reload();
+  await expect(page.getByLabel('LOA (m)')).toHaveValue('229.5');
+});
+
+test('particulars: a malformed number is refused, and never replaces the saved one', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await saveParticulars(page, { 'Beam (m)': '32.2' });
+
+  for (const bad of ['2e', '1,000.5', '1.2.3', '.5', '5.', '12 5']) {
+    await page.getByLabel('Beam (m)').fill(bad);
+    await expect(page.getByRole('alert'), bad).toHaveText('Enter a number, e.g. 229.5.');
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await expect(page.getByText('Saved')).toHaveCount(0);
+  }
+  await page.reload();
+  await expect(page.getByLabel('Beam (m)')).toHaveValue('32.2');
+  expect((await storedShips(page))[0].particulars.beam).toBe(32.2);
+
+  // A number that parses still meets the positive-number check, and blanking the field removes the value.
+  await page.getByLabel('Beam (m)').fill('0');
+  await expect(page.getByRole('alert')).toHaveText('Must be a positive number.');
+  await page.getByLabel('Beam (m)').fill('  ');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  expect('beam' in (await storedShips(page))[0].particulars).toBe(false);
+});
+
+test('particulars: year built is a whole year from 1900 to next year', async ({ page }) => {
+  await freshApp(page); await setupShip(page); // the ship's date is 2026-10-25
+  await openParticulars(page);
+  for (const bad of ['-5.5', '1899', '2028', '2012.5', 'abc', '20 12']) {
+    await page.getByLabel('Year built').fill(bad);
+    await expect(page.getByRole('alert'), bad).toHaveText('Enter a year, e.g. 2012.');
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  }
+  for (const good of ['1900', '2012', '2027']) {
+    await page.getByLabel('Year built').fill(good);
+    await expect(page.getByRole('alert'), good).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled();
+  }
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  expect((await storedShips(page))[0].particulars.yearBuilt).toBe(2027);
+});
+
+test('profiles: closing a dialog returns the focus to the button that opened it', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await expect(page.getByLabel('Ship name')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'New ship' })).toBeFocused();
+
+  await row(page, 'MV OCEAN STAR').getByRole('button', { name: 'Rename' }).click();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(row(page, 'MV OCEAN STAR').getByRole('button', { name: 'Rename' })).toBeFocused();
+});
+
+test('profiles: a failed write keeps the dialog open, with the message and what was typed', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await page.getByLabel('Ship name').fill('MV SEA BREEZE');
+  // Every write now fails the way a full disk does.
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    (window as unknown as { restoreWrites: () => void }).restoreWrites = () => {
+      IDBObjectStore.prototype.put = original;
+    };
+    IDBObjectStore.prototype.put = () => {
+      throw new DOMException('The disk is full.', 'QuotaExceededError');
+    };
+  });
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Create ship' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Storage on this device is full.');
+  await expect(dialog.getByRole('link', { name: 'Export backup' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(1); // the message in the dialog only, not the toast as well
+  await expect(page.getByLabel('Ship name')).toHaveValue('MV SEA BREEZE');
+  await expect(dialog.getByRole('button', { name: 'Create ship' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+  await page.evaluate(() => (window as unknown as { restoreWrites: () => void }).restoreWrites());
+  await dialog.getByRole('button', { name: 'Create ship' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row(page, 'MV SEA BREEZE')).toBeVisible();
+});
+
+test('profiles: while a write is running, Cancel is off and Escape does nothing', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await page.getByLabel('Ship name').fill('MV SEA BREEZE');
+  // A second connection keeps a write transaction on the ship tables open, so the app's own write has to wait.
+  await page.evaluate(
+    () =>
+      new Promise<void>((started, failed) => {
+        const w = window as unknown as { releaseWrites: () => void };
+        let hold = true;
+        w.releaseWrites = () => {
+          hold = false;
+        };
+        const open = indexedDB.open('masterpiece');
+        open.onerror = () => failed(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['ships', 'clockChanges', 'settings'], 'readwrite');
+          tx.oncomplete = () => db.close();
+          const store = tx.objectStore('settings');
+          const keepOpen = (): void => {
+            if (hold) store.get('device').onsuccess = keepOpen;
+          };
+          store.get('device').onsuccess = () => {
+            started();
+            keepOpen();
+          };
+        };
+      }),
+  );
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Create ship' }).click();
+  await expect(dialog.getByRole('button', { name: 'Create ship' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  await page.evaluate(() => (window as unknown as { releaseWrites: () => void }).releaseWrites());
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row(page, 'MV SEA BREEZE')).toBeVisible();
 });
