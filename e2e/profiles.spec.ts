@@ -45,6 +45,57 @@ function storedShips(page: Page): Promise<{ particulars: Record<string, unknown>
   );
 }
 
+type TestHooks = { restoreWrites?: () => void; releaseWrites?: () => void };
+
+/** From now on every write fails the way a full disk does, until `allowWrites`. */
+function failWrites(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    (window as unknown as TestHooks).restoreWrites = () => {
+      IDBObjectStore.prototype.put = original;
+    };
+    IDBObjectStore.prototype.put = () => {
+      throw new DOMException('The disk is full.', 'QuotaExceededError');
+    };
+  });
+}
+
+function allowWrites(page: Page): Promise<void> {
+  return page.evaluate(() => (window as unknown as TestHooks).restoreWrites?.());
+}
+
+/** A second connection keeps a write transaction on the ship tables open, so the app's own writes have to wait for `releaseWrites`. */
+function holdWrites(page: Page): Promise<void> {
+  return page.evaluate(
+    () =>
+      new Promise<void>((started, failed) => {
+        let hold = true;
+        (window as unknown as TestHooks).releaseWrites = () => {
+          hold = false;
+        };
+        const open = indexedDB.open('masterpiece');
+        open.onerror = () => failed(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction(['ships', 'clockChanges', 'settings'], 'readwrite');
+          tx.oncomplete = () => db.close();
+          const store = tx.objectStore('settings');
+          const keepOpen = (): void => {
+            if (hold) store.get('device').onsuccess = keepOpen;
+          };
+          store.get('device').onsuccess = () => {
+            started();
+            keepOpen();
+          };
+        };
+      }),
+  );
+}
+
+function releaseWrites(page: Page): Promise<void> {
+  return page.evaluate(() => (window as unknown as TestHooks).releaseWrites?.());
+}
+
 test('particulars validation and save', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await openParticulars(page);
@@ -325,26 +376,18 @@ test('profiles: a failed write keeps the dialog open, with the message and what 
   await openProfiles(page);
   await page.getByRole('button', { name: 'New ship' }).click();
   await page.getByLabel('Ship name').fill('MV SEA BREEZE');
-  // Every write now fails the way a full disk does.
-  await page.evaluate(() => {
-    const original = IDBObjectStore.prototype.put;
-    (window as unknown as { restoreWrites: () => void }).restoreWrites = () => {
-      IDBObjectStore.prototype.put = original;
-    };
-    IDBObjectStore.prototype.put = () => {
-      throw new DOMException('The disk is full.', 'QuotaExceededError');
-    };
-  });
+  await failWrites(page);
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: 'Create ship' }).click();
+  await page.getByLabel('Ship name').press('Enter'); // submitted from the field, so the focus has to move to the retry button
   await expect(dialog.getByRole('alert')).toContainText('Storage on this device is full.');
   await expect(dialog.getByRole('link', { name: 'Export backup' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(1); // the message in the dialog only, not the toast as well
   await expect(page.getByLabel('Ship name')).toHaveValue('MV SEA BREEZE');
   await expect(dialog.getByRole('button', { name: 'Create ship' })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Create ship' })).toBeFocused(); // the keyboard lands on the retry
 
-  await page.evaluate(() => (window as unknown as { restoreWrites: () => void }).restoreWrites());
+  await allowWrites(page);
   await dialog.getByRole('button', { name: 'Create ship' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(row(page, 'MV SEA BREEZE')).toBeVisible();
@@ -355,32 +398,7 @@ test('profiles: while a write is running, Cancel is off and Escape does nothing'
   await openProfiles(page);
   await page.getByRole('button', { name: 'New ship' }).click();
   await page.getByLabel('Ship name').fill('MV SEA BREEZE');
-  // A second connection keeps a write transaction on the ship tables open, so the app's own write has to wait.
-  await page.evaluate(
-    () =>
-      new Promise<void>((started, failed) => {
-        const w = window as unknown as { releaseWrites: () => void };
-        let hold = true;
-        w.releaseWrites = () => {
-          hold = false;
-        };
-        const open = indexedDB.open('masterpiece');
-        open.onerror = () => failed(open.error);
-        open.onsuccess = () => {
-          const db = open.result;
-          const tx = db.transaction(['ships', 'clockChanges', 'settings'], 'readwrite');
-          tx.oncomplete = () => db.close();
-          const store = tx.objectStore('settings');
-          const keepOpen = (): void => {
-            if (hold) store.get('device').onsuccess = keepOpen;
-          };
-          store.get('device').onsuccess = () => {
-            started();
-            keepOpen();
-          };
-        };
-      }),
-  );
+  await holdWrites(page);
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Create ship' }).click();
   await expect(dialog.getByRole('button', { name: 'Create ship' })).toBeDisabled();
@@ -388,7 +406,108 @@ test('profiles: while a write is running, Cancel is off and Escape does nothing'
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
 
-  await page.evaluate(() => (window as unknown as { releaseWrites: () => void }).releaseWrites());
+  await releaseWrites(page);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(row(page, 'MV SEA BREEZE')).toBeVisible();
+});
+
+test('profiles: Escape pressed twice during a write does not strand the dialog', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await page.getByLabel('Ship name').fill('MV SEA BREEZE');
+  await failWrites(page);
+  await holdWrites(page);
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Create ship' }).click();
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  // The browser lets the first Escape be cancelled, and closes the dialog on the second whatever the page says.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  await releaseWrites(page); // the held write now runs, and fails
+  await expect(dialog.getByRole('alert')).toContainText('Storage on this device is full.');
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel('Ship name')).toHaveValue('MV SEA BREEZE');
+
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByLabel('Ship name')).toHaveValue('');
+});
+
+test('profiles: after a ship is deleted the focus goes to New ship', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await page.getByLabel('Ship name').fill('MV SEA BREEZE'); await page.getByRole('button', { name: 'Create ship' }).click();
+  await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('button', { name: 'Delete ship' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row(page, 'MV SEA BREEZE')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'New ship' })).toBeFocused();
+});
+
+test('profiles: a dialog for a ship deleted in another tab closes, and the focus goes to New ship', async ({ page, context }) => {
+  await freshApp(page); await setupShip(page);
+  await openProfiles(page);
+  await page.getByRole('button', { name: 'New ship' }).click();
+  await page.getByLabel('Ship name').fill('MV SEA BREEZE'); await page.getByRole('button', { name: 'Create ship' }).click();
+  await expect(row(page, 'MV SEA BREEZE')).toBeVisible();
+  await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Rename' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+
+  const other = await context.newPage();
+  await other.goto('./#/profiles');
+  await row(other, 'MV SEA BREEZE').getByRole('button', { name: 'Delete' }).click();
+  await other.getByRole('button', { name: 'Delete ship' }).click();
+  await expect(row(other, 'MV SEA BREEZE')).toHaveCount(0);
+
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(row(page, 'MV SEA BREEZE')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'New ship' })).toBeFocused();
+});
+
+test('particulars: GT, NT and DWT refuse a number that looks like it has a thousands separator', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await saveParticulars(page, { GT: '32500', LOA: '229' });
+
+  const message = 'Enter the number without thousands separators, e.g. 32500.';
+  for (const label of ['GT', 'NT', 'DWT (summer)']) {
+    for (const bad of ['32,500', '32.500', '1,000']) {
+      await page.getByLabel(label).fill(bad);
+      await expect(page.getByRole('alert'), `${label} ${bad}`).toHaveText(message);
+      await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+    }
+    await page.getByLabel(label).fill(label === 'GT' ? '32500' : '');
+  }
+  await page.getByLabel('GT').fill('32,500');
+  await page.reload();
+  await expect(page.getByLabel('GT')).toHaveValue('32500');
+  expect((await storedShips(page))[0].particulars.gt).toBe(32500);
+
+  // Other numbers can have three decimals, and a decimal comma still works.
+  for (const good of ['0.125', '32500.5', '229,5']) {
+    await page.getByLabel('GT').fill(good);
+    await expect(page.getByRole('alert'), good).toHaveCount(0);
+  }
+  await page.getByLabel('LOA (m)').fill('1,025');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved')).toBeVisible();
+  expect((await storedShips(page))[0].particulars).toMatchObject({ gt: 229.5, loa: 1.025 });
+});
+
+test('particulars: Enter does not save while a number is invalid', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await saveParticulars(page, { 'Beam (m)': '32.2' });
+  await page.getByLabel('Beam (m)').fill('2e');
+  await expect(page.getByRole('alert')).toHaveText('Enter a number, e.g. 229.5.');
+  await page.getByLabel('Beam (m)').press('Enter');
+  await page.getByLabel('Ship name').press('Enter');
+  await page.waitForTimeout(300); // a save, if one wrongly started, would be finished by now
+  await expect(page.getByText('Saved')).toHaveCount(0);
+  expect((await storedShips(page))[0].particulars.beam).toBe(32.2);
 });

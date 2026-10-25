@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDecimal } from './numbers';
+import { looksLikeThousands, parseDecimal } from './numbers';
 
 describe('parseDecimal', () => {
   it('reads a plain number, with a dot or a comma as the decimal separator', () => {
@@ -56,5 +56,44 @@ describe('parseDecimal', () => {
 
   it('rejects a number too large to be a number', () => {
     expect(parseDecimal('9'.repeat(400))).toBe('invalid');
+  });
+
+  it('reads three decimals by default: 1,025 is a density of 1.025, not a thousand', () => {
+    expect(parseDecimal('1,025')).toBe(1.025);
+    expect(parseDecimal('12.345')).toBe(12.345);
+    expect(parseDecimal('32.500')).toBe(32.5);
+  });
+
+  describe('with rejectThousandsLike', () => {
+    const strict = { rejectThousandsLike: true };
+
+    it('refuses 1 to 3 digits, one separator and exactly 3 digits, which is probably a thousands separator', () => {
+      for (const text of ['32,500', '32.500', '1,000', '1.025', '999,999', ' 32,500 ']) {
+        expect(parseDecimal(text, strict), text).toBe('invalid');
+      }
+    });
+
+    it('still reads everything else', () => {
+      expect(parseDecimal('0.125', strict)).toBe(0.125);
+      expect(parseDecimal('32500', strict)).toBe(32500);
+      expect(parseDecimal('32500.5', strict)).toBe(32500.5);
+      expect(parseDecimal('229,5', strict)).toBe(229.5);
+      expect(parseDecimal('32,50', strict)).toBe(32.5);
+      expect(parseDecimal('1234.567', strict)).toBe(1234.567);
+      expect(parseDecimal('32,5000', strict)).toBe(32.5);
+      expect(parseDecimal('', strict)).toBeUndefined();
+    });
+
+    it('also refuses it after a minus when signed', () => {
+      expect(parseDecimal('-32,500', { ...strict, signed: true })).toBe('invalid');
+      expect(parseDecimal('-32,5', { ...strict, signed: true })).toBe(-32.5);
+    });
+  });
+});
+
+describe('looksLikeThousands', () => {
+  it('says whether an entry has the shape of a whole number written with a thousands separator', () => {
+    for (const text of ['32,500', '32.500', ' 1,000 ', '-32,500']) expect(looksLikeThousands(text), text).toBe(true);
+    for (const text of ['', '0.125', '32500', '229,5', '1234.567', '32,5000', '2e', '1,000.5']) expect(looksLikeThousands(text), text).toBe(false);
   });
 });

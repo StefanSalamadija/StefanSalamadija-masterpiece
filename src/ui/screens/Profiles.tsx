@@ -1,4 +1,4 @@
-import type { ComponentChildren } from 'preact';
+import type { ComponentChildren, RefObject } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { describeError, reportError } from '../../app/errors';
@@ -39,7 +39,14 @@ function useDialogAction(): { busy: boolean; failure: ErrorNotice | undefined; r
   return { busy, failure, run };
 }
 
-interface NameDialogProps {
+/** What every dialog of this screen is given. */
+interface DialogProps {
+  onClose: () => void;
+  /** Where the focus goes when the button that opened the dialog is gone. */
+  focusFallback: RefObject<HTMLElement | null>;
+}
+
+interface NameDialogProps extends DialogProps {
   title: string;
   nameLabel: string;
   confirmLabel: string;
@@ -48,11 +55,10 @@ interface NameDialogProps {
   children?: ComponentChildren;
   /** Does the work with the trimmed name, and closes the dialog when it is done. A failure is shown in the dialog. */
   onSubmit: (name: string) => Promise<void>;
-  onClose: () => void;
 }
 
 /** A dialog that asks for a ship name (never blank) and maybe a little more. */
-function NameDialog({ title, nameLabel, confirmLabel, initialName, children, onSubmit, onClose }: NameDialogProps) {
+function NameDialog({ title, nameLabel, confirmLabel, initialName, children, onSubmit, onClose, focusFallback }: NameDialogProps) {
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<FieldError>();
   const { busy, failure, run } = useDialogAction();
@@ -70,7 +76,8 @@ function NameDialog({ title, nameLabel, confirmLabel, initialName, children, onS
 
   return (
     <ConfirmDialog
-      title={title} confirmLabel={confirmLabel} busy={busy} error={failure} onConfirm={confirm} onCancel={onClose}
+      title={title} confirmLabel={confirmLabel} busy={busy} error={failure} focusFallback={focusFallback}
+      onConfirm={confirm} onCancel={onClose}
       body={
         <>
           <Field
@@ -87,12 +94,13 @@ function NameDialog({ title, nameLabel, confirmLabel, initialName, children, onS
   );
 }
 
-function NewShipDialog({ onClose }: { onClose: () => void }) {
+function NewShipDialog({ onClose, focusFallback }: DialogProps) {
   const { db } = useAppState();
   const [offset, setOffset] = useState(() => deviceOffsetMinutes());
   return (
     <NameDialog
-      title="New ship" nameLabel="Ship name" confirmLabel="Create ship" initialName="" onClose={onClose}
+      title="New ship" nameLabel="Ship name" confirmLabel="Create ship" initialName=""
+      onClose={onClose} focusFallback={focusFallback}
       onSubmit={async (name) => {
         await createShip(db, name, offset);
         onClose();
@@ -103,11 +111,12 @@ function NewShipDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RenameShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () => void }) {
+function RenameShipDialog({ ship, onClose, focusFallback }: DialogProps & { ship: ShipProfile }) {
   const { db } = useAppState();
   return (
     <NameDialog
-      title="Rename ship" nameLabel="Ship name" confirmLabel="Rename" initialName={ship.particulars.name} onClose={onClose}
+      title="Rename ship" nameLabel="Ship name" confirmLabel="Rename" initialName={ship.particulars.name}
+      onClose={onClose} focusFallback={focusFallback}
       onSubmit={async (name) => {
         if (name !== ship.particulars.name) {
           await updateRecord<ShipProfile>(db, 'ships', ship.id, { particulars: { ...ship.particulars, name } });
@@ -118,12 +127,13 @@ function RenameShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () =>
   );
 }
 
-function CopyShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () => void }) {
+function CopyShipDialog({ ship, onClose, focusFallback }: DialogProps & { ship: ShipProfile }) {
   const { db } = useAppState();
   const [includeCertificates, setIncludeCertificates] = useState(false);
   return (
     <NameDialog
-      title={`Copy ${ship.particulars.name}`} nameLabel="New ship name" confirmLabel="Copy ship" initialName="" onClose={onClose}
+      title={`Copy ${ship.particulars.name}`} nameLabel="New ship name" confirmLabel="Copy ship" initialName=""
+      onClose={onClose} focusFallback={focusFallback}
       onSubmit={async (name) => {
         await copyShip(db, ship.id, name, { includeCertificates });
         onClose();
@@ -143,23 +153,23 @@ function CopyShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () => v
   );
 }
 
-function DeleteShipDialog({ ship, onClose }: { ship: ShipProfile; onClose: () => void }) {
+function DeleteShipDialog({ ship, onClose, focusFallback }: DialogProps & { ship: ShipProfile }) {
   const { db } = useAppState();
   // Live, so the counts are right at the moment of confirming.
   const summary = useLive(() => deleteSummary(db, ship.id), [db, ship.id]);
   const { busy, failure, run } = useDialogAction();
 
   function confirm(): void {
-    void run(async () => {
-      await deleteShip(db, ship.id);
-      onClose();
-    });
+    // The screen closes this dialog when the ship leaves the list, which is after its row is gone, so the focus can
+    // go to the fallback and not to a button that is about to disappear.
+    void run(() => deleteShip(db, ship.id));
   }
 
   return (
     <ConfirmDialog
       title={`Delete ${ship.particulars.name}?`} confirmLabel="Delete ship" danger
-      busy={busy} confirmDisabled={!summary} error={failure} onConfirm={confirm} onCancel={onClose}
+      busy={busy} confirmDisabled={!summary} error={failure} focusFallback={focusFallback}
+      onConfirm={confirm} onCancel={onClose}
       body={<p>{summary ? shipDeleteText(summary) : 'Checking what this ship contains…'}</p>}
     />
   );
@@ -173,8 +183,12 @@ type DialogState =
 export function Profiles() {
   const { db, activeShip } = useAppState();
   const ships = useLive(() => listShips(db), [db]);
-  const [dialog, setDialog] = useState<DialogState>();
+  const [requested, setDialog] = useState<DialogState>();
+  const newShipButton = useRef<HTMLButtonElement>(null);
   const close = (): void => setDialog(undefined);
+  // A dialog about a ship that is no longer in the list (deleted here, or in another tab) is closed.
+  const dialog = requested?.kind === 'create' || ships?.some((ship) => ship.id === requested?.ship.id) ? requested : undefined;
+  const dialogProps = { onClose: close, focusFallback: newShipButton };
 
   async function makeActive(ship: ShipProfile): Promise<void> {
     try {
@@ -188,7 +202,7 @@ export function Profiles() {
     <section class="screen">
       <div class="screen-head">
         <h2>Ship profiles</h2>
-        <button type="button" class="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>New ship</button>
+        <button ref={newShipButton} type="button" class="btn btn-primary" onClick={() => setDialog({ kind: 'create' })}>New ship</button>
       </div>
       <ul class="ship-list" role="list" aria-label="Ships">
         {ships?.map((ship) => {
@@ -211,10 +225,10 @@ export function Profiles() {
           );
         })}
       </ul>
-      {dialog?.kind === 'create' && <NewShipDialog onClose={close} />}
-      {dialog?.kind === 'rename' && <RenameShipDialog ship={dialog.ship} onClose={close} />}
-      {dialog?.kind === 'copy' && <CopyShipDialog ship={dialog.ship} onClose={close} />}
-      {dialog?.kind === 'delete' && <DeleteShipDialog ship={dialog.ship} onClose={close} />}
+      {dialog?.kind === 'create' && <NewShipDialog {...dialogProps} />}
+      {dialog?.kind === 'rename' && <RenameShipDialog ship={dialog.ship} {...dialogProps} />}
+      {dialog?.kind === 'copy' && <CopyShipDialog ship={dialog.ship} {...dialogProps} />}
+      {dialog?.kind === 'delete' && <DeleteShipDialog ship={dialog.ship} {...dialogProps} />}
     </section>
   );
 }

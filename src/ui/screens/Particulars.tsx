@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { updateRecord } from '../../db/records';
-import { parseDecimal } from '../../domain/numbers';
+import { looksLikeThousands, parseDecimal } from '../../domain/numbers';
 import { validateParticulars } from '../../domain/validation';
 import type { FieldError, Particulars as ParticularsData, ShipProfile } from '../../domain/types';
 import { Field } from '../components/Field';
@@ -14,6 +14,7 @@ type DimensionKey = 'gt' | 'nt' | 'dwt' | 'loa' | 'beam';
 type Draft = Record<TextKey | DimensionKey | 'yearBuilt', string>;
 
 const NUMBER_ERROR = 'Enter a number, e.g. 229.5.';
+const THOUSANDS_ERROR = 'Enter the number without thousands separators, e.g. 32500.';
 const YEAR_ERROR = 'Enter a year, e.g. 2012.';
 const FIRST_YEAR = 1900;
 
@@ -52,6 +53,8 @@ const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; inpu
 ];
 
 const DIMENSION_KEYS: readonly DimensionKey[] = ['gt', 'nt', 'dwt', 'loa', 'beam'];
+/** Tonnages are written in whole units or with one or two decimals, so `32,500` is a thousands separator, not 32.5. */
+const TONNAGE_KEYS: readonly DimensionKey[] = ['gt', 'nt', 'dwt'];
 
 function toDraft(p: ParticularsData): Draft {
   return {
@@ -79,8 +82,9 @@ function applyDraft(base: ParticularsData, draft: Draft, lastYear: number): { pa
     managers: draft.managers.trim(), pandi: draft.pandi.trim(), classSociety: draft.classSociety.trim(),
   };
   for (const key of DIMENSION_KEYS) {
-    const value = parseDecimal(draft[key], { signed: true });
-    if (value === 'invalid') errors.push(error(key, NUMBER_ERROR));
+    const tonnage = TONNAGE_KEYS.includes(key);
+    const value = parseDecimal(draft[key], { signed: true, rejectThousandsLike: tonnage });
+    if (value === 'invalid') errors.push(error(key, tonnage && looksLikeThousands(draft[key]) ? THOUSANDS_ERROR : NUMBER_ERROR));
     if (typeof value === 'number') next[key] = value;
     else delete next[key];
   }
