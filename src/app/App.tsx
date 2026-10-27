@@ -11,8 +11,10 @@ import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
+import { ImportBackup } from '../ui/screens/ImportBackup';
 import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
+import { Settings } from '../ui/screens/Settings';
 import { ShipTime } from '../ui/screens/ShipTime';
 import { Voyage } from '../ui/screens/Voyage';
 import { AppStateProvider, useAppState } from './AppState';
@@ -34,18 +36,9 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
   '/profiles': Profiles,
+  '/settings': Settings,
+  '/settings/import': ImportBackup,
 };
-
-/** A placeholder for the import screen, which comes later. It is reachable before any ship exists. */
-function ImportBackup() {
-  return (
-    <main class="container page">
-      <h1>Import backup</h1>
-      <p>Importing a backup is not available yet.</p>
-      <p><a href="#/">Back</a></p>
-    </main>
-  );
-}
 
 function Shell() {
   const { activeShip } = useAppState();
@@ -59,7 +52,7 @@ function Shell() {
     return (
       <>
         <UpdateBanner />
-        {route.path === '/settings/import' ? <ImportBackup /> : <FirstShip />}
+        {route.path === '/settings/import' ? <main class="container page"><ImportBackup /></main> : <FirstShip />}
       </>
     );
   }

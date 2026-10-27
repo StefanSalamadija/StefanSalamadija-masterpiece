@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, addMonths, isValidIsoDate, isValidLocalDateTime } from './dates';
+import { addDays, addMonths, formatUtcMinute, isValidIsoDate, isValidLocalDateTime } from './dates';
 
 describe('isValidIsoDate', () => {
   it('accepts real calendar dates', () => {
@@ -69,5 +69,24 @@ describe('addDays', () => {
 
   it('subtracts with a negative count', () => {
     expect(addDays('2027-01-01', -1)).toBe('2026-12-31');
+  });
+});
+
+describe('formatUtcMinute', () => {
+  it('writes an instant as its UTC date and time to the minute', () => {
+    expect(formatUtcMinute('2026-10-25T09:05:59.123Z')).toBe('2026-10-25 09:05 UTC');
+    expect(formatUtcMinute('2026-01-02T00:00:00.000Z')).toBe('2026-01-02 00:00 UTC');
+  });
+
+  it('converts an instant given with another offset to UTC', () => {
+    expect(formatUtcMinute('2026-10-25T23:30:00+03:00')).toBe('2026-10-25 20:30 UTC');
+  });
+
+  it('is undefined for text that is not an instant, so that a damaged file cannot make the screen throw', () => {
+    for (const bad of ['', 'soon', 'not a date at all', '2026-13-45T99:99:99Z']) expect(formatUtcMinute(bad)).toBeUndefined();
+  });
+
+  it('is undefined for a year that has no four-digit form', () => {
+    expect(formatUtcMinute('+275760-09-13T00:00:00.000Z')).toBeUndefined();
   });
 });

@@ -6,7 +6,7 @@ export interface FieldProps {
   label: string;
   value: string;
   onInput: (value: string) => void;
-  type?: 'text' | 'number' | 'date' | 'datetime-local';
+  type?: 'text' | 'number' | 'date' | 'datetime-local' | 'password';
   /** The on-screen keyboard to offer. Numbers are typed as text with `decimal` or `numeric`, then read with `parseDecimal`. */
   inputMode?: 'decimal' | 'numeric';
   /** An error is announced (`role="alert"`) and marks the input invalid; a warning is only shown. */
@@ -37,7 +37,7 @@ export function Field({ label, value, onInput, type = 'text', inputMode, error, 
         />
       ) : (
         <input
-          // Preact types `<input>` as a union keyed by `type`; all four types here take the same attributes.
+          // Preact types `<input>` as a union keyed by `type`; all the types here take the same attributes.
           id={id} ref={inputRef} type={type as 'text'} inputMode={inputMode} value={value} autocomplete="off"
           step={type === 'number' ? 'any' : undefined}
           aria-invalid={isError ? 'true' : undefined} aria-describedby={describedBy}

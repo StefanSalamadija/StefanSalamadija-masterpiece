@@ -636,6 +636,7 @@ textarea {
 
 /* ---- Screens: headings, cards, forms ---- */
 
+.screen > h1,
 .screen > h2 {
   margin: 0 0 16px;
   font-size: 22px;
@@ -1228,5 +1229,153 @@ textarea {
   flex: 1 1 auto;
   min-width: 0;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Settings and backup ---- */
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.settings-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-section p {
+  margin: 0;
+}
+
+.snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.snapshot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.snapshot-text {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.snapshot-reason {
+  font-weight: 600;
+}
+
+.snapshot-date,
+.snapshot-counts {
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Import backup ---- */
+
+.import-from {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.import-open {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/*
+ * The one place that says what went wrong. It stays on the page and only its text changes, so that it is announced;
+ * while it is empty it takes no room (hidden the way `.live` is, which keeps it in the accessibility tree).
+ */
+.import-form > .field-error {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.import-form > .field-error:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.import-summary {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.conflict {
+  min-width: 0;
+  margin: 0;
+}
+
+.conflict legend {
+  padding: 0 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.conflict-table {
+  width: 100%;
+  margin-bottom: 8px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 14px;
+}
+
+.conflict-table th,
+.conflict-table td {
+  padding: 6px 6px 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.conflict-table thead th:first-child {
+  width: 32%;
+}
+
+.conflict-table thead th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.conflict-table tbody th {
+  font-weight: 500;
+}
+
+.import-deletions {
+  margin: 0;
+  padding-left: 20px;
   overflow-wrap: anywhere;
 }

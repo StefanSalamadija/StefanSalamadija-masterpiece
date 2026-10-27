@@ -35,6 +35,18 @@ export function isValidLocalDateTime(s: string): boolean {
   return rest.length === 0 && time !== undefined && isValidIsoDate(date) && LOCAL_TIME.test(time);
 }
 
+/**
+ * An instant as `YYYY-MM-DD HH:mm UTC`, or `undefined` for text that is not an instant (or whose year has no four digits).
+ * For text that comes from a file or a database that may be damaged, which the screens must still be able to show.
+ */
+export function formatUtcMinute(instant: string): string | undefined {
+  const time = Date.parse(instant);
+  if (Number.isNaN(time)) return undefined;
+  const iso = new Date(time).toISOString();
+  if (iso.length !== 24) return undefined; // years beyond 9999 are written with a sign and six digits
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
 /** Adds (or, if negative, subtracts) calendar months, clamping to the end of a shorter month. Throws on an invalid date. */
 export function addMonths(date: string, n: number): string {
   const [y, m, d] = parts(date);
