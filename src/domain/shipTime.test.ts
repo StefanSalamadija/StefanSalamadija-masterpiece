@@ -6,6 +6,7 @@ import {
   isValidOffset,
   liveChanges,
   nextScheduledChange,
+  resolveShipLocal,
   shipLocalToInstant,
   shipOffsetAt,
   stepOffset,
@@ -162,6 +163,108 @@ describe('shipLocalToInstant', () => {
   it('round-trips with toShipLocal', () => {
     const instant = new Date('2026-03-01T04:45:00.000Z');
     expect(shipLocalToInstant(toShipLocal(instant, 345).dateTime, 345).toISOString()).toBe(instant.toISOString());
+  });
+});
+
+describe('resolveShipLocal', () => {
+  const at = (dateTime: string, changes: ClockChange[]) => {
+    const found = resolveShipLocal(changes, dateTime);
+    if (found.kind !== 'at') throw new Error(`expected a time on board, got ${JSON.stringify(found)}`);
+    return { instant: found.instant.toISOString(), offsetMinutes: found.offsetMinutes };
+  };
+  // The ship went to +03:00 at 08:00Z on the 25th.
+  const first = () => cc('2026-10-25T08:00:00.000Z', 180);
+
+  describe('with nothing scheduled', () => {
+    it('reads the time with the offset the ship is on, like shipLocalToInstant', () => {
+      const changes = [first()];
+      expect(at('2026-10-26T02:00', changes)).toEqual({ instant: '2026-10-25T23:00:00.000Z', offsetMinutes: 180 });
+      expect(at('2026-10-26T02:00', changes).instant).toBe(shipLocalToInstant('2026-10-26T02:00', 180).toISOString());
+    });
+    it('reads the time with the offset of the last change, however many there are', () => {
+      const changes = [first(), cc('2026-10-25T09:00:00.000Z', 240), cc('2026-10-25T10:00:00.000Z', 300)];
+      expect(at('2026-10-26T02:00', changes)).toEqual({ instant: '2026-10-25T21:00:00.000Z', offsetMinutes: 300 });
+    });
+    it('is UTC for a ship that has no changes at all', () => {
+      expect(at('2026-10-26T02:00', [])).toEqual({ instant: '2026-10-26T02:00:00.000Z', offsetMinutes: 0 });
+    });
+    it("reads a time before the first change with the first change's offset, as shipOffsetAt does", () => {
+      expect(at('2026-10-20T12:00', [first()])).toEqual({ instant: '2026-10-20T09:00:00.000Z', offsetMinutes: 180 });
+    });
+  });
+
+  describe('with changes scheduled', () => {
+    // At 21:00Z on the 25th the clocks go from 00:00 (+03:00) to 01:00 (+04:00).
+    const advance = () => cc('2026-10-25T21:00:00.000Z', 240);
+
+    it('reads a time after the scheduled change with the offset that will be in effect then', () => {
+      // 02:00 on the 26th comes at 22:00Z, an hour after the clocks moved: not at 23:00Z, which is 03:00 on board.
+      const found = at('2026-10-26T02:00', [first(), advance()]);
+      expect(found).toEqual({ instant: '2026-10-25T22:00:00.000Z', offsetMinutes: 240 });
+      expect(toShipLocal(new Date(found.instant), 240).dateTime).toBe('2026-10-26T02:00');
+    });
+    it('reads a time before the scheduled change with the offset in effect until then', () => {
+      expect(at('2026-10-25T23:59', [first(), advance()])).toEqual({ instant: '2026-10-25T20:59:00.000Z', offsetMinutes: 180 });
+    });
+    it('is the first time shown after the clocks move, 01:00, in the new offset', () => {
+      expect(at('2026-10-26T01:00', [first(), advance()])).toEqual({ instant: '2026-10-25T21:00:00.000Z', offsetMinutes: 240 });
+    });
+    it('does not depend on the order of the changes', () => {
+      expect(at('2026-10-26T02:00', [advance(), first()]).instant).toBe('2026-10-25T22:00:00.000Z');
+    });
+    it('follows several scheduled changes one after the other', () => {
+      // +03:00 → +04:00 at 21:00Z, → +05:00 at 22:00Z (clocks 02:00 → 03:00).
+      const changes = [first(), advance(), cc('2026-10-25T22:00:00.000Z', 300)];
+      expect(at('2026-10-26T03:00', changes)).toEqual({ instant: '2026-10-25T22:00:00.000Z', offsetMinutes: 300 });
+      expect(at('2026-10-26T04:00', changes)).toEqual({ instant: '2026-10-25T23:00:00.000Z', offsetMinutes: 300 });
+      expect(at('2026-10-26T01:30', changes)).toEqual({ instant: '2026-10-25T21:30:00.000Z', offsetMinutes: 240 });
+    });
+    it('ignores a cancelled change', () => {
+      expect(at('2026-10-26T02:00', [first(), { ...advance(), deleted: true }]).instant).toBe('2026-10-25T23:00:00.000Z');
+    });
+    it('lets the change made later win when two take effect at the same instant', () => {
+      const a = cc('2026-10-25T21:00:00.000Z', 240, '2026-10-25T09:00:00.100Z');
+      const b = cc('2026-10-25T21:00:00.000Z', 300, '2026-10-25T09:00:00.200Z');
+      expect(at('2026-10-26T03:00', [first(), b, a])).toEqual({ instant: '2026-10-25T22:00:00.000Z', offsetMinutes: 300 });
+      expect(at('2026-10-26T03:00', [first(), a, b])).toEqual({ instant: '2026-10-25T22:00:00.000Z', offsetMinutes: 300 });
+    });
+  });
+
+  describe('a time the clocks skip (an advance)', () => {
+    const advance = () => cc('2026-10-25T21:00:00.000Z', 240);   // 00:00 → 01:00 on the 26th
+
+    it('does not exist on board, and says when the clocks go forward', () => {
+      for (const skipped of ['2026-10-26T00:00', '2026-10-26T00:30', '2026-10-26T00:59']) {
+        expect(resolveShipLocal([first(), advance()], skipped)).toEqual({ kind: 'skipped', clocksForwardAt: '00:00', offsetMinutes: 180 });
+      }
+    });
+    it('is only the hour that is skipped: the minute before, and 01:00 itself, are fine', () => {
+      expect(resolveShipLocal([first(), advance()], '2026-10-25T23:59').kind).toBe('at');
+      expect(resolveShipLocal([first(), advance()], '2026-10-26T01:00').kind).toBe('at');
+    });
+    it('names the time on the clocks when they were moved, in the offset before the move', () => {
+      // A two hour advance at 21:30Z (00:30 at +03:00) to +05:00: 00:30 to 02:30 never shows.
+      const changes = [first(), cc('2026-10-25T21:30:00.000Z', 300)];
+      expect(resolveShipLocal(changes, '2026-10-26T01:45')).toEqual({ kind: 'skipped', clocksForwardAt: '00:30', offsetMinutes: 180 });
+      expect(resolveShipLocal(changes, '2026-10-26T02:30').kind).toBe('at');
+    });
+  });
+
+  describe('a time the clocks repeat (a retard)', () => {
+    const start = () => cc('2026-10-25T08:00:00.000Z', 240);
+    const retard = () => cc('2026-10-25T21:00:00.000Z', 180);   // 01:00 → 00:00 on the 26th, from +04:00 to +03:00
+
+    it('takes the first time it shows', () => {
+      // 00:30 shows at 20:30Z (+04:00) and again at 21:30Z (+03:00).
+      expect(at('2026-10-26T00:30', [start(), retard()])).toEqual({ instant: '2026-10-25T20:30:00.000Z', offsetMinutes: 240 });
+    });
+    it('takes the first time for the whole repeated hour, 00:00 up to 00:59', () => {
+      expect(at('2026-10-26T00:00', [start(), retard()]).instant).toBe('2026-10-25T20:00:00.000Z');
+      expect(at('2026-10-26T00:59', [start(), retard()]).instant).toBe('2026-10-25T20:59:00.000Z');
+    });
+    it('reads a time after the repeated hour only once, at the new offset', () => {
+      expect(at('2026-10-26T01:00', [start(), retard()])).toEqual({ instant: '2026-10-25T22:00:00.000Z', offsetMinutes: 180 });
+    });
   });
 });
 

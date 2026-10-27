@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shipOffsetAt } from '../domain/shipTime';
+import { DUPLICATE_CLOCK_CHANGE, shipOffsetAt } from '../domain/shipTime';
 import type { ClockChange } from '../domain/types';
-import { addClockChange, cancelScheduledChange, stepClock } from './clockChanges';
+import { addClockChange, cancelScheduledChange, setClockOffset, stepClock } from './clockChanges';
 import { listForShip } from './records';
 import { openDb } from './schema';
 import { getSettings } from './settings';
@@ -12,6 +12,7 @@ const START = new Date('2026-10-25T08:00:00.000Z');
 const NOW = new Date('2026-10-25T09:00:00.000Z');
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -41,6 +42,24 @@ describe('addClockChange', () => {
     }
     expect(await changesOf(db, shipId)).toHaveLength(1);
   });
+  it('refuses a second change at the very instant of one the ship already has, and writes nothing', async () => {
+    const { db, shipId } = await shipAt3();
+    await addClockChange(db, shipId, 300, new Date('2026-10-25T22:00:00.000Z'));
+    await expect(addClockChange(db, shipId, 240, new Date('2026-10-25T22:00:00.000Z'))).rejects.toThrow(DUPLICATE_CLOCK_CHANGE);
+    // Also for the ship's first change.
+    await expect(addClockChange(db, shipId, 240, START)).rejects.toThrow('A clock change is already set for that time.');
+    expect(await changesOf(db, shipId)).toHaveLength(2);
+  });
+  it('allows that instant when the change there was cancelled, or is another ship\'s', async () => {
+    const { db, shipId } = await shipAt3();
+    const other = await createShip(db, 'MV OTHER', 540, START);
+    const at = new Date('2026-10-25T22:00:00.000Z');
+    const cancelled = await addClockChange(db, shipId, 300, at);
+    await cancelScheduledChange(db, cancelled.id, NOW);
+    await addClockChange(db, shipId, 240, at);
+    await addClockChange(db, other.id, 240, at);
+    expect((await listForShip(db, 'clockChanges', shipId)).map((c) => (c as ClockChange).toOffsetMinutes).sort()).toEqual([180, 240]);
+  });
 });
 
 describe('stepClock', () => {
@@ -61,6 +80,32 @@ describe('stepClock', () => {
     const changes = await listForShip<ClockChange>(db, 'clockChanges', shipId);
     expect(changes.map((c) => c.toOffsetMinutes).sort()).toEqual([180, 240, 300]);
     expect(shipOffsetAt(changes, at(1))).toBe(300);
+  });
+  it('stacks when the clock has not moved between two steps: the second takes effect a millisecond after the first', async () => {
+    const { db, shipId } = await shipAt3();
+    const first = await stepClock(db, shipId, 60, NOW);
+    const second = await stepClock(db, shipId, 60, NOW);
+    const third = await stepClock(db, shipId, -60, NOW);
+    expect([first, second, third].map((c) => [c.effectiveAt, c.toOffsetMinutes])).toEqual([
+      ['2026-10-25T09:00:00.000Z', 240], ['2026-10-25T09:00:00.001Z', 300], ['2026-10-25T09:00:00.002Z', 240],
+    ]);
+    const changes = await listForShip<ClockChange>(db, 'clockChanges', shipId);
+    expect(shipOffsetAt(changes, new Date('2026-10-25T09:00:00.002Z'))).toBe(240);
+    expect(shipOffsetAt(changes, new Date('2026-10-25T09:00:00.001Z'))).toBe(300);
+  });
+  it('takes the instant when the write begins, not when it was asked for', async () => {
+    const { db, shipId } = await shipAt3();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-25T09:00:00.000Z'));
+    // A write that holds the table while the clock moves on: the step, asked for at 09:00:00, waits behind it.
+    const hold = db.transaction('rw', db.clockChanges, async () => {
+      await db.clockChanges.get('none');
+      vi.setSystemTime(new Date('2026-10-25T09:00:05.000Z'));
+      await db.clockChanges.get('none');
+    });
+    const step = stepClock(db, shipId, 60);
+    await hold;
+    expect((await step).effectiveAt).toBe('2026-10-25T09:00:05.000Z');
   });
   it('stacks over a few steps in a row, advance and retard alike', async () => {
     const { db, shipId } = await shipAt3();
@@ -101,6 +146,34 @@ describe('stepClock', () => {
     const { db, shipId } = await shipAt3();
     vi.spyOn(db.clockChanges, 'put').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
     await expect(stepClock(db, shipId, 60, NOW)).rejects.toBeInstanceOf(StorageFullError);
+    expect(await changesOf(db, shipId)).toHaveLength(1);
+  });
+});
+
+describe('setClockOffset', () => {
+  it('sets the clock to any offset, taking effect at the moment given', async () => {
+    const { db, shipId } = await shipAt3();
+    const change = await setClockOffset(db, shipId, 330, NOW);
+    expect(change).toMatchObject({ shipId, toOffsetMinutes: 330, effectiveAt: NOW.toISOString() });
+    expect(shipOffsetAt(await listForShip<ClockChange>(db, 'clockChanges', shipId), NOW)).toBe(330);
+  });
+  it('takes the instant when the write begins when none is given', async () => {
+    const { db, shipId } = await shipAt3();
+    const before = Date.now();
+    const change = await setClockOffset(db, shipId, 330);
+    expect(Date.parse(change.effectiveAt)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(change.effectiveAt)).toBeLessThanOrEqual(Date.now());
+  });
+  it('takes effect a millisecond after a change that is at the same instant, and wins over it', async () => {
+    const { db, shipId } = await shipAt3();
+    await setClockOffset(db, shipId, 240, NOW);
+    const second = await setClockOffset(db, shipId, 330, NOW);
+    expect(second.effectiveAt).toBe('2026-10-25T09:00:00.001Z');
+    expect(shipOffsetAt(await listForShip<ClockChange>(db, 'clockChanges', shipId), new Date('2026-10-25T09:00:00.001Z'))).toBe(330);
+  });
+  it('refuses an offset a ship cannot have, and writes nothing', async () => {
+    const { db, shipId } = await shipAt3();
+    await expect(setClockOffset(db, shipId, 845, NOW)).rejects.toThrow('UTC offset');
     expect(await changesOf(db, shipId)).toHaveLength(1);
   });
 });

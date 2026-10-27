@@ -154,7 +154,8 @@ test('ship time: a scheduled change can be cancelled, a change that has happened
   await expect(items.nth(1)).not.toContainText('Scheduled');
   await expect(items.nth(1).getByRole('button')).toHaveCount(0);
 
-  await items.nth(0).getByRole('button', { name: 'Cancel' }).click();
+  // Each Cancel says which change it is for.
+  await items.nth(0).getByRole('button', { name: 'Cancel change at 2026-10-26 02:00', exact: true }).click();
   await expect(items).toHaveCount(1);
   await expect(history(page).getByRole('button', { name: 'Cancel' })).toHaveCount(0);
   const records = await stored(page, 'clockChanges');
@@ -253,6 +254,7 @@ test('voyage: saving again updates the voyage; an ETA can be cleared', async ({ 
   await page.getByLabel('Voyage no.').fill('  V-1A  '); await page.getByLabel('ETA (local)').fill('');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+  await expect(page.getByLabel('Voyage no.')).toHaveValue('V-1A');         // the form shows what was kept
   const voyages = await stored(page, 'voyages');
   expect(voyages).toHaveLength(1);
   expect(voyages[0]).toMatchObject({ voyageNo: 'V-1A', etaLocal: '', active: true });
@@ -330,4 +332,177 @@ test('voyage: the ship nav leads to the screen', async ({ page }) => {
   await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Voyage' }).click();
   await expect(page).toHaveURL(/#\/ship\/voyage$/);
   await expect(page.getByLabel('Voyage no.')).toBeVisible();
+});
+
+/** Schedules a change of the clock to `offset` at `when` (the ship's time) and waits until it is in the history. */
+async function schedule(page: Page, when: string, offset: string, historyCount: number): Promise<void> {
+  await page.getByLabel("Change at (ship's time)").fill(when);
+  await page.getByLabel('New offset').selectOption({ label: offset });
+  await page.getByRole('button', { name: 'Schedule' }).click();
+  await expect(historyItems(page)).toHaveCount(historyCount);
+}
+
+test('ship time: a time is read with the offset in effect when it comes, scheduled changes included', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/time');
+  const when = page.getByLabel("Change at (ship's time)");
+  await expect(page.getByText('Read at UTC+03:00.')).toBeVisible();      // nothing typed: the offset now
+
+  // At 21:00Z (00:00 on board) the clocks go forward an hour, to 01:00 at +04:00.
+  await schedule(page, '2026-10-26T00:00', 'UTC+04:00', 2);
+  await expect(when).toHaveValue('');
+  await expect(page.getByText('Read at UTC+03:00.')).toBeVisible();
+
+  // So 02:00 on board comes at 22:00Z, an hour after, and not at 23:00Z, when the clocks will read 03:00.
+  await when.fill('2026-10-26T02:00');
+  await expect(page.getByText('Read at UTC+04:00.')).toBeVisible();
+  await expect(page.getByText('Read at UTC+03:00.')).toHaveCount(0);
+  await page.getByLabel('New offset').selectOption({ label: 'UTC+05:00' });
+  await page.getByRole('button', { name: 'Schedule' }).click();
+  await expect(historyItems(page)).toHaveCount(3);
+  const records = (await stored(page, 'clockChanges')).slice(1);          // the first is the ship's own
+  expect(records.map((c) => [c.effectiveAt, c.toOffsetMinutes])).toEqual([
+    ['2026-10-25T21:00:00.000Z', 240], ['2026-10-25T22:00:00.000Z', 300],
+  ]);
+  // The history shows the time that was typed.
+  await expect(historyItems(page).nth(0)).toContainText('2026-10-26 02:00 → UTC+05:00');
+  await expect(historyItems(page).nth(1)).toContainText('2026-10-26 00:00 → UTC+04:00');
+});
+
+test('ship time: a time that the clocks skip over cannot be scheduled', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/time');
+  const when = page.getByLabel("Change at (ship's time)");
+  await schedule(page, '2026-10-26T00:00', 'UTC+04:00', 2);                // 00:00 → 01:00
+  await when.fill('2026-10-26T00:30');
+  await page.getByRole('button', { name: 'Schedule' }).click();
+  await expect(page.getByRole('alert')).toHaveText("That time doesn't exist on board — clocks go forward at 00:00.");
+  await expect(when).toBeFocused();
+  await expect(historyItems(page)).toHaveCount(2);
+  await when.fill('2026-10-26T01:30');                                      // shown by the clocks
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Schedule' }).click();
+  await expect(historyItems(page)).toHaveCount(3);
+});
+
+test('ship time: a second change at the instant of one that is already set is refused', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/time');
+  await schedule(page, '2026-10-26T02:00', 'UTC+05:00', 2);                // 23:00Z: the clocks go from 02:00 to 04:00
+  // 04:00 is the time on the clocks at that very instant.
+  await page.getByLabel("Change at (ship's time)").fill('2026-10-26T04:00');
+  await page.getByLabel('New offset').selectOption({ label: 'UTC+06:00' });
+  await page.getByRole('button', { name: 'Schedule' }).click();
+  await expect(page.getByRole('alert')).toHaveText('A clock change is already set for that time.');
+  await expect(historyItems(page)).toHaveCount(2);
+  expect(await stored(page, 'clockChanges')).toHaveLength(2);
+});
+
+test('ship time: the focus stays on the button used with the keyboard, or moves to the select Apply applied', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/time');
+  const advance = page.getByRole('button', { name: 'Advance 1 h' });
+  await advance.focus();
+  await page.keyboard.press('Enter');
+  await expect(clock(page)).toContainText('(UTC+04:00)');
+  await expect(historyItems(page)).toHaveCount(2);
+  await expect(advance).toBeFocused();
+
+  // Apply has nothing left to do afterwards, so the focus goes to the select it applied.
+  const setOffset = page.getByLabel('Set offset');
+  await setOffset.selectOption({ label: 'UTC+13:00' });
+  const apply = page.getByRole('button', { name: 'Apply' });
+  await apply.focus();
+  await page.keyboard.press('Enter');
+  await expect(clock(page)).toContainText('(UTC+13:00)');
+  await expect(setOffset).toBeFocused();
+
+  // At the end of the range the button is off, and it keeps the focus it had.
+  await advance.focus();
+  await page.keyboard.press('Enter');
+  await expect(clock(page)).toContainText('(UTC+14:00)');
+  await expect(advance).toBeDisabled();
+  await expect(advance).toBeFocused();
+
+  await page.getByLabel("Change at (ship's time)").fill('2026-10-27T02:00');
+  const scheduleButton = page.getByRole('button', { name: 'Schedule' });
+  await scheduleButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(historyItems(page)).toHaveCount(5);
+  await expect(scheduleButton).toBeFocused();
+});
+
+test('ship time: Cancel moves the focus to the History heading', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/time');
+  await schedule(page, '2026-10-26T02:00', 'UTC+05:00', 2);
+  const cancel = page.getByRole('button', { name: 'Cancel change at 2026-10-26 02:00' });
+  await cancel.focus();
+  await page.keyboard.press('Enter');
+  await expect(historyItems(page)).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'History' })).toBeFocused();
+});
+
+test('voyage: the focus stays on Save, and goes to the first field of the new form after Start new voyage', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/voyage');
+  const saved = page.getByRole('status').filter({ hasText: 'Saved' });
+  const save = page.getByRole('button', { name: 'Save' });
+  await page.getByLabel('Voyage no.').fill('V-1');
+  await save.focus();
+  await page.keyboard.press('Enter');                                       // the first save makes the voyage
+  await expect(saved).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start new voyage' })).toBeVisible();
+  await expect(save).toBeFocused();
+
+  await page.getByLabel('Voyage no.').fill('V-1A');
+  await expect(saved).toHaveCount(0);
+  await save.focus();
+  await page.keyboard.press('Enter');
+  await expect(saved).toBeVisible();
+  await expect(save).toBeFocused();
+
+  const start = page.getByRole('button', { name: 'Start new voyage' });
+  await start.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect(start).toBeFocused();                                        // back where it was
+
+  await start.focus();
+  await page.keyboard.press('Enter');
+  await dialog.getByRole('button', { name: 'Start new voyage' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('Voyage no.')).toHaveValue('');
+  await expect(page.getByLabel('Voyage no.')).toBeFocused();
+  await expect(previousVoyages(page).getByRole('listitem')).toHaveText('V-1A');
+});
+
+test('voyage: Start new voyage warns about changes that have not been saved', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/ship/voyage');
+  const warning = 'Changes you have not saved will be lost.';
+  const dialog = page.getByRole('dialog');
+  await page.getByLabel('Voyage no.').fill('V-1');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('button', { name: 'Start new voyage' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).not.toContainText(warning);                          // everything is saved
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.getByLabel('Cargo').fill('Soybeans');
+  await page.getByRole('button', { name: 'Start new voyage' }).click();
+  await expect(dialog).toContainText(warning);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByLabel('Cargo')).toHaveValue('Soybeans');           // nothing was lost by looking
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start new voyage' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).not.toContainText(warning);                          // saved again
+  await dialog.getByRole('button', { name: 'Start new voyage' }).click();
+  await expect(page.getByLabel('Cargo')).toHaveValue('');
+
+  // The new voyage's blank form has nothing unsaved either.
+  await page.getByRole('button', { name: 'Start new voyage' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).not.toContainText(warning);
 });

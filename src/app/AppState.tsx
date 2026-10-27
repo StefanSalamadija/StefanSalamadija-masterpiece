@@ -28,6 +28,11 @@ export interface AppState {
    * whenever the stored data changes, so that a change just written (a clock change) is seen at once.
    */
   nowUtc: Date;
+  /**
+   * The active ship's live clock changes, scheduled ones included (none without a ship). Read in the same go as
+   * `nowUtc` and `offsetMinutes`, so a change just made is never seen as scheduled for a moment.
+   */
+  clockChanges: ClockChange[];
   /** Today's date on the ship, `YYYY-MM-DD`. */
   shipToday: string;
   /** Whether the browser agreed to keep this app's data when the device runs low on space. */
@@ -112,6 +117,7 @@ export function AppStateProvider({ children }: { children: ComponentChildren }) 
       activeShip: data.activeShip,
       offsetMinutes,
       nowUtc,
+      clockChanges: data.clockChanges,
       shipToday: toShipLocal(nowUtc, offsetMinutes).date,
       persistence,
     };

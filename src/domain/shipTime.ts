@@ -79,6 +79,60 @@ export function shipLocalToInstant(dateTime: string, offsetMin: number): Date {
   return new Date(Date.parse(`${dateTime}:00.000Z`) - offsetMin * MS_PER_MINUTE);
 }
 
+/** Why a second clock change at the instant of an existing one is refused. */
+export const DUPLICATE_CLOCK_CHANGE = 'A clock change is already set for that time.';
+
+/** Where a time read off the ship's clocks falls on the timeline of clock changes. */
+export type ShipLocalResolution =
+  /** The clocks read that time at `instant`, on `offsetMinutes`. */
+  | { kind: 'at'; instant: Date; offsetMinutes: number }
+  /**
+   * An advance skips that time: the clocks never show it. `clocksForwardAt` is the time (`HH:mm`) the clocks read
+   * when they are moved forward over it, and `offsetMinutes` is the offset up to then.
+   */
+  | { kind: 'skipped'; clocksForwardAt: string; offsetMinutes: number };
+
+/**
+ * Finds the instant at which the ship's clocks read `dateTime` (`YYYY-MM-DDTHH:mm`), on the timeline of all its live
+ * clock changes, scheduled ones included: the time is read with the offset that is in effect at that time, not the one
+ * in effect now. A time that a retard makes the clocks show twice is taken at the first showing. A time that an
+ * advance skips has no instant. With no changes the clocks are on UTC; before the first change they are on its offset,
+ * as in `shipOffsetAt`.
+ */
+export function resolveShipLocal(changes: ClockChange[], dateTime: string): ShipLocalResolution {
+  const wall = Date.parse(`${dateTime}:00.000Z`);   // what the clocks read, as if they were on UTC
+  // Each stretch of the timeline with the offset it runs on; changes at one instant collapse into the last of them.
+  const stretches: { start: number; offset: number }[] = [];
+  for (const change of liveChanges(changes)) {
+    const start = Date.parse(change.effectiveAt);
+    if (!Number.isFinite(start)) continue;
+    const last = stretches[stretches.length - 1];
+    if (last?.start === start) last.offset = change.toOffsetMinutes;
+    else stretches.push({ start, offset: change.toOffsetMinutes });
+  }
+  if (stretches.length === 0) return { kind: 'at', instant: new Date(wall), offsetMinutes: 0 };
+
+  // Earliest first, so a repeated time is found at its first showing. The first stretch reaches back for ever.
+  for (const [i, { offset }] of stretches.entries()) {
+    const instant = wall - offset * MS_PER_MINUTE;
+    const from = i === 0 ? -Infinity : stretches[i].start;
+    const until = i + 1 < stretches.length ? stretches[i + 1].start : Infinity;
+    if (instant >= from && instant < until) return { kind: 'at', instant: new Date(instant), offsetMinutes: offset };
+  }
+
+  // No stretch shows it: it lies in the hour(s) skipped where the clocks were moved forward.
+  for (let i = 1; i < stretches.length; i++) {
+    const { start } = stretches[i];
+    const before = stretches[i - 1].offset;
+    if (wall >= start + before * MS_PER_MINUTE && wall < start + stretches[i].offset * MS_PER_MINUTE) {
+      return { kind: 'skipped', clocksForwardAt: toShipLocal(new Date(start), before).time, offsetMinutes: before };
+    }
+  }
+  // Not reached for a well-formed time; read it with the offset of the last stretch rather than fail.
+  const { offset } = stretches[stretches.length - 1];
+  return { kind: 'at', instant: new Date(wall - offset * MS_PER_MINUTE), offsetMinutes: offset };
+}
+
 /** The earliest non-deleted change taking effect strictly after `now`, if any. */
 export function nextScheduledChange(changes: ClockChange[], now: Date): ClockChange | undefined {
   return liveChanges(changes).find((c) => Date.parse(c.effectiveAt) > now.getTime());
