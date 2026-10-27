@@ -1,9 +1,10 @@
+import { contractBand, contractEndDate, onboardLimitBand, onboardLimitDate } from './contracts';
 import { fullName, onboardAt } from './crew';
 import { certificateExpiryBand, crewDocExpiryBand } from './expiry';
 import type { Band, Certificate, CrewMember } from './types';
 
 /** What an alert is about. A new source of dates adds its kind here and a collector below. */
-export type AlertKind = 'crewDoc' | 'certificate';
+export type AlertKind = 'crewDoc' | 'certificate' | 'contract' | 'onboardLimit';
 
 /** The two bands that warn; a date that is ok, or that is not there, makes no alert. */
 type Warning = 'amber' | 'red';
@@ -14,9 +15,9 @@ export interface Alert {
   band: Warning;
   /** Who or what: a person's full name, a certificate's name. */
   title: string;
-  /** What is wrong and when: `Passport expires 2027-01-10`, `Survey overdue 2026-10-02`. */
+  /** What is wrong and when: `Passport expires 2027-01-10`, `Survey overdue 2026-10-02`, `Contract ends 2026-12-01`. */
   detail: string;
-  /** The screen that edits the record. */
+  /** The screen that edits the record; for a contract or an onboard limit, the reliefs, where the crew to relieve are listed. */
   href: string;
 }
 
@@ -40,6 +41,9 @@ const PASSPORT: Words = { amber: 'Passport expires', red: 'Passport expired' };
 const SEAMANS_BOOK: Words = { amber: "Seaman's book expires", red: "Seaman's book expired" };
 const CERTIFICATE_EXPIRY: Words = { amber: 'Expires', red: 'Expired' };
 const CERTIFICATE_SURVEY: Words = { amber: 'Survey due', red: 'Survey overdue' };
+const CONTRACT: Words = { amber: 'Contract ends', red: 'Contract ended' };
+const RELIEF_OVERDUE = ' — relief overdue';
+const RELIEFS = '#/ship/reliefs';
 
 /** Red before amber. */
 const WORSE_FIRST: Record<Warning, number> = { red: 0, amber: 1 };
@@ -104,23 +108,61 @@ function certificateAlerts(certificates: Certificate[], today: string): Dated[] 
     );
 }
 
-/** Red first, then the earlier date; alerts alike in both are told apart by title and then by link, so the order is always the same. */
+/**
+ * Contracts of the crew onboard on `today` that end within 30 days or have ended: one alert for each, which says the
+ * relief is overdue once the end is past. A contract with no length has no end and makes none.
+ */
+function contractAlerts(crew: CrewMember[], today: string): Dated[] {
+  return onboardAt(crew, today).flatMap((m) => {
+    const end = contractEndDate(m);
+    const found = flag(end, contractBand(m, today), CONTRACT);
+    const worst = found && (found.band === 'red' ? { ...found, detail: `${found.detail}${RELIEF_OVERDUE}` } : found);
+    return alertFrom(worst, { kind: 'contract', title: fullName(m), href: RELIEFS });
+  });
+}
+
+/**
+ * The limit on the months onboard (`maxMonths`, the ship's) for the crew onboard on `today`: one alert for each who
+ * reaches it within 30 days or has reached it, whether or not their contract has a length.
+ */
+function onboardLimitAlerts(crew: CrewMember[], today: string, maxMonths: number): Dated[] {
+  const words: Words = { amber: `Reaches ${maxMonths}-month onboard limit`, red: `Over ${maxMonths}-month onboard limit since` };
+  return onboardAt(crew, today).flatMap((m) => {
+    const band = onboardLimitBand(m, today, maxMonths);
+    // The date is only worked out for a band that warns: the sign-on of a damaged record may not be a date.
+    const date = band === 'amber' || band === 'red' ? onboardLimitDate(m, maxMonths) : undefined;
+    return alertFrom(flag(date, band, words), { kind: 'onboardLimit', title: fullName(m), href: RELIEFS });
+  });
+}
+
+/**
+ * Red first, then the earlier date; alerts alike in both are told apart by title, then by link, then by detail, so the
+ * order is always the same.
+ */
 function compareDated(a: Dated, b: Dated): number {
   return (
     WORSE_FIRST[a.alert.band] - WORSE_FIRST[b.alert.band] ||
     compareText(a.date, b.date) ||
     a.alert.title.localeCompare(b.alert.title) ||
-    compareText(a.alert.href, b.alert.href)
+    compareText(a.alert.href, b.alert.href) ||
+    compareText(a.alert.detail, b.alert.detail)
   );
 }
 
 /**
  * What needs looking at on `today` (the ship's date, `YYYY-MM-DD`), worst first: red before amber, and by date inside
- * each. A record with two dates that warn makes one alert, for the worse band, or the earlier date of the same band.
+ * each. A record with two dates that warn makes one alert, for the worse band, or the earlier date of the same band;
+ * the exception is a crew member's contract end and onboard limit (`maxMonthsOnboard`, the ship's), which are two alerts.
  * Crew who are not onboard on `today`, and deleted records, make none.
  */
-export function collectAlerts(input: { crew: CrewMember[]; certificates: Certificate[]; today: string }): Alert[] {
-  return [...crewDocAlerts(input.crew, input.today), ...certificateAlerts(input.certificates, input.today)]
+export function collectAlerts(input: { crew: CrewMember[]; certificates: Certificate[]; today: string; maxMonthsOnboard: number }): Alert[] {
+  const { crew, certificates, today, maxMonthsOnboard } = input;
+  return [
+    ...crewDocAlerts(crew, today),
+    ...certificateAlerts(certificates, today),
+    ...contractAlerts(crew, today),
+    ...onboardLimitAlerts(crew, today, maxMonthsOnboard),
+  ]
     .sort(compareDated)
     .map(({ alert }) => alert);
 }

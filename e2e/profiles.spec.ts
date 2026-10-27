@@ -64,7 +64,7 @@ test('particulars lists the fields in order, and keeps numbers as numbers', asyn
   await openParticulars(page);
   const labels = [
     'Ship name', 'IMO number', 'Call sign', 'MMSI', 'Flag', 'Port of registry', 'GT', 'NT', 'DWT (summer)', 'LOA (m)',
-    'Beam (m)', 'Year built', 'Owners', 'Managers (ISM company)', 'P&I club', 'Classification society',
+    'Beam (m)', 'Year built', 'Owners', 'Managers (ISM company)', 'P&I club', 'Classification society', 'Maximum months onboard',
   ];
   const shown = await page.locator('form .field label').allTextContents();
   expect(shown).toEqual(labels);
@@ -250,9 +250,10 @@ test('particulars: a decimal comma is read as a decimal point', async ({ page })
   await freshApp(page); await setupShip(page);
   await openParticulars(page);
   // Text inputs with a decimal keypad: `type="number"` would read "229,5" as 2295.
+  // Exact, since a label is otherwise matched as a part of the text: "NT" is in "Maximum months onboard".
   for (const label of ['GT', 'NT', 'DWT (summer)', 'LOA (m)', 'Beam (m)']) {
-    await expect(page.getByLabel(label)).toHaveAttribute('type', 'text');
-    await expect(page.getByLabel(label)).toHaveAttribute('inputmode', 'decimal');
+    await expect(page.getByLabel(label, { exact: true })).toHaveAttribute('type', 'text');
+    await expect(page.getByLabel(label, { exact: true })).toHaveAttribute('inputmode', 'decimal');
   }
   await expect(page.getByLabel('Year built')).toHaveAttribute('inputmode', 'numeric');
 
@@ -426,11 +427,11 @@ test('particulars: GT, NT and DWT refuse a number that looks like it has a thous
   const message = 'Enter the number without thousands separators, e.g. 32500.';
   for (const label of ['GT', 'NT', 'DWT (summer)']) {
     for (const bad of ['32,500', '32.500', '1,000']) {
-      await page.getByLabel(label).fill(bad);
+      await page.getByLabel(label, { exact: true }).fill(bad);
       await expect(page.getByRole('alert'), `${label} ${bad}`).toHaveText(message);
       await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
     }
-    await page.getByLabel(label).fill(label === 'GT' ? '32500' : '');
+    await page.getByLabel(label, { exact: true }).fill(label === 'GT' ? '32500' : '');
   }
   await page.getByLabel('GT').fill('32,500');
   await page.reload();

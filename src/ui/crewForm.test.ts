@@ -48,6 +48,41 @@ describe('the crew form', () => {
     expect(crewFieldsOf(form({ rank: '' }))).toBeUndefined();
   });
 
+  describe('the contract length and the planned relief', () => {
+    const planned = member({ contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' });
+    const fieldsOf = (f: CrewForm) => crewFieldsOf(f)!;
+
+    it('are filled from a member as text, and empty boxes when there are none', () => {
+      expect(crewFormOf(planned)).toMatchObject({ contractMonths: '9', reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' });
+      expect(crewFormOf(member())).toMatchObject({ contractMonths: '', reliefPlannedDate: '', reliefPlannedPort: '' });
+    });
+    it('are read back as a number and trimmed text', () => {
+      expect(crewFieldsOf(form({ contractMonths: ' 9 ', reliefPlannedDate: '2026-11-05', reliefPlannedPort: ' Santos ' })))
+        .toMatchObject({ contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' });
+    });
+    it('are left out of the fields when empty, not kept as empty text', () => {
+      const fields = crewFieldsOf(form({ contractMonths: '  ', reliefPlannedDate: '', reliefPlannedPort: '   ' }))!;
+      for (const key of ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort']) expect(key in fields).toBe(false);
+    });
+    it('give text that is not a number as NaN, and a fraction as it is, for validation to refuse', () => {
+      for (const text of ['abc', '-3', '1e1']) expect(crewFieldsOf(form({ contractMonths: text }))?.contractMonths).toBeNaN();
+      expect(crewFieldsOf(form({ contractMonths: '6.5' }))?.contractMonths).toBe(6.5);
+    });
+    it('are cleared in the saved member when the boxes are emptied', () => {
+      const patch = crewPatchOf(fieldsOf(form({ contractMonths: '', reliefPlannedDate: '', reliefPlannedPort: '' })), planned);
+      expect(patch).toMatchObject({ contractMonths: undefined, reliefPlannedDate: undefined, reliefPlannedPort: undefined });
+      for (const key of ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort']) expect(key in patch).toBe(true);
+    });
+    it('are changed in the saved member when the boxes are changed', () => {
+      const patch = crewPatchOf(fieldsOf(form({ contractMonths: '6', reliefPlannedDate: '2026-12-01', reliefPlannedPort: 'Rotterdam' })), planned);
+      expect(patch).toMatchObject({ contractMonths: 6, reliefPlannedDate: '2026-12-01', reliefPlannedPort: 'Rotterdam' });
+    });
+    it('are not added to the change of a member that never had them', () => {
+      const patch = crewPatchOf(fieldsOf(form()), member());
+      for (const key of ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort']) expect(key in patch).toBe(false);
+    });
+  });
+
   describe('as a change to a saved member', () => {
     const fieldsOf = (f: CrewForm) => crewFieldsOf(f)!;
 
@@ -92,6 +127,31 @@ describe('crewFormProblems', () => {
   it('checks a sign-off date that the form does not show against the new sign-on', () => {
     expect(crewFormProblems(form({ signOnDate: '2026-11-01' }), TODAY, { signOffDate: '2026-10-10' }).map((p) => p.field)).toEqual(['signOffDate']);
     expect(crewFormProblems(form({ signOnDate: '2026-10-10' }), TODAY, { signOffDate: '2026-10-10' })).toEqual([]);
+  });
+
+  describe('the contract length', () => {
+    it('is fine when empty or from 1 to 24 whole months', () => {
+      for (const text of ['', '1', '6', ' 24 ', '06']) expect(crewFormProblems(form({ contractMonths: text }), TODAY)).toEqual([]);
+    });
+    it('gives the same message as validation for anything else, typed as text', () => {
+      for (const text of ['0', '25', '6.5', '6,5', 'abc', '-3', '1e1', '6 months']) {
+        expect(crewFormProblems(form({ contractMonths: text }), TODAY)).toEqual([
+          { field: 'contractMonths', severity: 'error', message: 'Enter whole months between 1 and 24.' },
+        ]);
+      }
+    });
+  });
+  describe('the planned relief', () => {
+    it("can't be before the sign-on, and is shown at the planned relief date", () => {
+      const f = form({ signOnDate: '2026-06-01', reliefPlannedDate: '2026-05-31' });
+      const problems = crewFormProblems(f, TODAY);
+      expect(problems).toEqual([{ field: 'reliefPlannedDate', severity: 'error', message: "Planned relief can't be before sign-on." }]);
+      expect(problemsByControl(problems, f).get('reliefPlannedDate')?.message).toBe("Planned relief can't be before sign-on.");
+    });
+    it('needs a real date when filled in, and is fine empty', () => {
+      expect(crewFormProblems(form({ reliefPlannedDate: '2026-02-30' }), TODAY).map((p) => p.message)).toEqual(['Enter a valid date.']);
+      expect(crewFormProblems(form({ reliefPlannedDate: '', reliefPlannedPort: 'Santos' }), TODAY)).toEqual([]);
+    });
   });
 
   describe('against the other contracts of the ship', () => {
@@ -170,6 +230,7 @@ describe('the order of the controls', () => {
     expect(CONTROL_ORDER).toEqual([
       'surname', 'givenNames', 'rank', 'rankOther', 'nationality', 'dateOfBirth', 'placeOfBirth', 'passportNo',
       'passportExpiry', 'seamansBookNo', 'seamansBookExpiry', 'signOnDate', 'signOnPort',
+      'contractMonths', 'reliefPlannedDate', 'reliefPlannedPort',
     ]);
   });
 });

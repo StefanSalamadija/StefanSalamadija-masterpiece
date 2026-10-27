@@ -58,7 +58,10 @@ export function latestContractByPassport(crew: CrewMember[], passportNo: string)
   return latest;
 }
 
-/** A new contract for a returning crew member: their details carried over, a new sign-on, and no sign-off. */
+/**
+ * A new contract for a returning crew member: their details carried over, a new sign-on, and no sign-off. The contract
+ * length is carried over too; the planned relief is not, since it was planned for the contract that ended.
+ */
 export function rejoinDraft(m: CrewMember, signOnDate: string, signOnPort: string): CrewDraft {
   return {
     surname: m.surname,
@@ -74,6 +77,7 @@ export function rejoinDraft(m: CrewMember, signOnDate: string, signOnPort: strin
     seamansBookExpiry: m.seamansBookExpiry,
     signOnDate,
     signOnPort,
+    ...(m.contractMonths !== undefined && { contractMonths: m.contractMonths }),
   };
 }
 

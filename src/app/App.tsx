@@ -17,6 +17,7 @@ import { LockScreen } from '../ui/screens/LockScreen';
 import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
 import { ProtectApp } from '../ui/screens/ProtectApp';
+import { Reliefs } from '../ui/screens/Reliefs';
 import { Settings } from '../ui/screens/Settings';
 import { ShipTime } from '../ui/screens/ShipTime';
 import { Voyage } from '../ui/screens/Voyage';
@@ -38,6 +39,7 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/certificates': Certificates,
   '/ship/certificates/new': CertificateEdit,
   '/ship/certificates/:id': CertificateEdit,
+  '/ship/reliefs': Reliefs,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
   '/profiles': Profiles,

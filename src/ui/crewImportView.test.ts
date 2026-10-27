@@ -267,6 +267,12 @@ describe('overridesFromForm', () => {
     expect(overridesFromForm(draft, { ...crewFormOf(draft), rank: 'other', rankOther: 'Pumpman' })).toEqual({ rank: 'other', rankOther: 'Pumpman' });
   });
 
+  it('does not hold the contract length and planned relief of an updated contract, which the fix form cannot change', () => {
+    const planned = { ...draft, contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };
+    expect(overridesFromForm(planned, crewFormOf(planned))).toEqual({});
+    expect(overridesFromForm(planned, { ...crewFormOf(planned), surname: 'HORVAT' })).toEqual({ surname: 'HORVAT' });
+  });
+
   it('is undefined while no rank is chosen', () => {
     expect(overridesFromForm(draft, { ...crewFormOf(draft), rank: '' })).toBeUndefined();
   });

@@ -682,6 +682,7 @@ textarea {
 .ship-list,
 .crew-list,
 .cert-list,
+.relief-list,
 .voyage-list,
 .history-list {
   display: flex;
@@ -863,12 +864,14 @@ textarea {
 
 /* ---- Certificates ---- */
 
-.cert-row {
+.cert-row,
+.relief-row {
   padding: 0;
 }
 
-/* The whole card is the link to the certificate. */
-.cert-link {
+/* The whole card is the link to the certificate, or to the crew member. */
+.cert-link,
+.relief-link {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -879,7 +882,8 @@ textarea {
   text-decoration: none;
 }
 
-.cert-details {
+.cert-details,
+.relief-details {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 16px;
@@ -887,9 +891,27 @@ textarea {
   color: var(--muted);
 }
 
-.cert-details > span {
+.cert-details > span,
+.relief-details > span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* ---- Reliefs ---- */
+
+/* The name on the left, the warnings (a contract near its end, the onboard limit) on the right, wrapping under it on a phone. */
+.relief-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.relief-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .crew-signed-off {

@@ -37,3 +37,12 @@ export function parseDecimal(text: string, options: ParseDecimalOptions = {}): n
   const value = Number(trimmed.replace(',', '.'));
   return Number.isFinite(value) ? value : 'invalid'; // hundreds of digits overflow to Infinity
 }
+
+/**
+ * `parseDecimal` for a field whose own range check takes the number: an entry that is not a number is `NaN`, which
+ * any such check refuses (it is no whole number and is in no range). An empty entry has no value: `undefined`.
+ */
+export function parseNumberOrNaN(text: string, options: ParseDecimalOptions = {}): number | undefined {
+  const value = parseDecimal(text, options);
+  return value === 'invalid' ? Number.NaN : value;
+}

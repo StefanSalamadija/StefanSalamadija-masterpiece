@@ -9,7 +9,7 @@ describe('matchRoute', () => {
   it('matches every fixed route', () => {
     const fixed = [
       '/ship/particulars', '/ship/crew', '/ship/crew/new', '/ship/crew/import', '/ship/certificates',
-      '/ship/certificates/new', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
+      '/ship/certificates/new', '/ship/reliefs', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
     ];
     for (const path of fixed) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
   });

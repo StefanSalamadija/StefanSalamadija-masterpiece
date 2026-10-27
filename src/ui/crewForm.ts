@@ -1,4 +1,5 @@
 import { overlapMessage, overlappingContract, rejoinDraft } from '../domain/crew';
+import { parseNumberOrNaN } from '../domain/numbers';
 import { validateCrewMember } from '../domain/validation';
 import type { CrewDraft, CrewMember, FieldError, RankKey } from '../domain/types';
 
@@ -18,6 +19,10 @@ export interface CrewForm {
   seamansBookExpiry: string;
   signOnDate: string;
   signOnPort: string;
+  /** The contract length in months, as typed. */
+  contractMonths: string;
+  reliefPlannedDate: string;
+  reliefPlannedPort: string;
 }
 
 export type CrewControl = keyof CrewForm;
@@ -25,7 +30,8 @@ export type CrewControl = keyof CrewForm;
 /** The controls of the form, top to bottom: the first one with a problem gets the focus. */
 export const CONTROL_ORDER: readonly CrewControl[] = [
   'surname', 'givenNames', 'rank', 'rankOther', 'nationality', 'dateOfBirth', 'placeOfBirth', 'passportNo',
-  'passportExpiry', 'seamansBookNo', 'seamansBookExpiry', 'signOnDate', 'signOnPort',
+  'passportExpiry', 'seamansBookNo', 'seamansBookExpiry', 'signOnDate', 'signOnPort', 'contractMonths', 'reliefPlannedDate',
+  'reliefPlannedPort',
 ];
 
 /** What the form can say about a contract; the sign-off is made with its own dialog. */
@@ -40,6 +46,7 @@ export function blankCrewForm(): CrewForm {
   return {
     surname: '', givenNames: '', rank: '', rankOther: '', nationality: '', dateOfBirth: '', placeOfBirth: '',
     passportNo: '', passportExpiry: '', seamansBookNo: '', seamansBookExpiry: '', signOnDate: '', signOnPort: '',
+    contractMonths: '', reliefPlannedDate: '', reliefPlannedPort: '',
   };
 }
 
@@ -49,9 +56,13 @@ export function crewFormOf(m: CrewDraft): CrewForm {
     surname: m.surname, givenNames: m.givenNames, rank: m.rank, rankOther: m.rankOther ?? '',
     nationality: m.nationality, dateOfBirth: m.dateOfBirth, placeOfBirth: m.placeOfBirth, passportNo: m.passportNo,
     passportExpiry: m.passportExpiry, seamansBookNo: m.seamansBookNo, seamansBookExpiry: m.seamansBookExpiry,
-    signOnDate: m.signOnDate, signOnPort: m.signOnPort,
+    signOnDate: m.signOnDate, signOnPort: m.signOnPort, contractMonths: m.contractMonths === undefined ? '' : String(m.contractMonths),
+    reliefPlannedDate: m.reliefPlannedDate ?? '', reliefPlannedPort: m.reliefPlannedPort ?? '',
   };
 }
+
+/** The contract fields that are optional: a box left empty leaves the field out. */
+const CONTRACT_KEYS = ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort'] as const;
 
 function fieldsWith(form: CrewForm, rank: RankKey): CrewFormFields {
   const fields: CrewFormFields = {
@@ -61,6 +72,11 @@ function fieldsWith(form: CrewForm, rank: RankKey): CrewFormFields {
     signOnDate: form.signOnDate, signOnPort: form.signOnPort.trim(),
   };
   if (rank === 'other') fields.rankOther = form.rankOther.trim();
+  // Text that is not a number is NaN, which `validateCrewMember` refuses like any other length that is not whole months from 1 to 24.
+  const months = parseNumberOrNaN(form.contractMonths);
+  if (months !== undefined) fields.contractMonths = months;
+  if (form.reliefPlannedDate !== '') fields.reliefPlannedDate = form.reliefPlannedDate;
+  if (form.reliefPlannedPort.trim() !== '') fields.reliefPlannedPort = form.reliefPlannedPort.trim();
   return fields;
 }
 
@@ -71,10 +87,13 @@ export function crewFieldsOf(form: CrewForm): CrewFormFields | undefined {
 
 /**
  * The change that saves `fields` over `saved`. Whatever else is kept in the record (the sign-off) is not in it, and a
- * rank text the rank no longer needs is cleared.
+ * rank text the rank no longer needs is cleared, as is a contract length or planned relief whose box was emptied.
  */
 export function crewPatchOf(fields: CrewFormFields, saved: CrewMember): Partial<CrewMember> {
-  return fields.rank !== 'other' && saved.rankOther !== undefined ? { ...fields, rankOther: undefined } : fields;
+  const patch: Partial<CrewMember> = { ...fields };
+  if (fields.rank !== 'other' && saved.rankOther !== undefined) patch.rankOther = undefined;
+  for (const key of CONTRACT_KEYS) if (!(key in fields) && saved[key] !== undefined) patch[key] = undefined;
+  return patch;
 }
 
 /** The problem of a contract that runs into another contract of the same person, naming that contract and its dates. */

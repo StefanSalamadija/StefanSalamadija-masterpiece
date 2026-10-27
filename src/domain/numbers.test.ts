@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeThousands, parseDecimal } from './numbers';
+import { looksLikeThousands, parseDecimal, parseNumberOrNaN } from './numbers';
 
 describe('parseDecimal', () => {
   it('reads a plain number, with a dot or a comma as the decimal separator', () => {
@@ -95,5 +95,18 @@ describe('looksLikeThousands', () => {
   it('says whether an entry has the shape of a whole number written with a thousands separator', () => {
     for (const text of ['32,500', '32.500', ' 1,000 ', '-32,500']) expect(looksLikeThousands(text), text).toBe(true);
     for (const text of ['', '0.125', '32500', '229,5', '1234.567', '32,5000', '2e', '1,000.5']) expect(looksLikeThousands(text), text).toBe(false);
+  });
+});
+
+describe('parseNumberOrNaN', () => {
+  it('reads a number as parseDecimal does, and an empty entry as no value', () => {
+    expect(parseNumberOrNaN('9')).toBe(9);
+    expect(parseNumberOrNaN(' 6,5 ')).toBe(6.5);
+    expect(parseNumberOrNaN('')).toBeUndefined();
+    expect(parseNumberOrNaN('   ')).toBeUndefined();
+  });
+  it('makes an entry that is not a number NaN, for the range check of the field to refuse', () => {
+    for (const text of ['abc', '1e1', '1,000.5', '-3', '5.']) expect(parseNumberOrNaN(text), text).toBeNaN();
+    expect(parseNumberOrNaN('-3', { signed: true })).toBe(-3);
   });
 });

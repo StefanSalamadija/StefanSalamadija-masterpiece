@@ -14,6 +14,7 @@ const ROUTES = [
   '/ship/certificates',
   '/ship/certificates/new',
   '/ship/certificates/:id',
+  '/ship/reliefs',
   '/ship/voyage',
   '/ship/time',
   '/profiles',

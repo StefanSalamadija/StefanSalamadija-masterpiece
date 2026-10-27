@@ -60,7 +60,7 @@ function CrewForm({ shipId, member, crew }: { shipId: string; member?: CrewMembe
 
   return (
     <form class="crew-form" onSubmit={save} noValidate>
-      <CrewFields form={form} shown={shown} refFor={refFor} onChange={change} />
+      <CrewFields form={form} shown={shown} refFor={refFor} onChange={change} withContract />
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" disabled={busy}>Save</button>
       </div>

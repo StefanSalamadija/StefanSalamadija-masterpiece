@@ -127,6 +127,17 @@ describe('rejoinDraft', () => {
     expect(r.signOffDate).toBeUndefined();
     expect(r.signOffPort).toBeUndefined();
   });
+  it('carries the contract length over, as the next contract is usually as long', () => {
+    expect(rejoinDraft({ ...off, contractMonths: 6 }, '2027-02-01', 'Rotterdam').contractMonths).toBe(6);
+  });
+  it('has no contract length when the contract it follows had none', () => {
+    expect('contractMonths' in rejoinDraft(off, '2027-02-01', 'Rotterdam')).toBe(false);
+  });
+  it('never carries the planned relief over: that relief was for the contract that ended', () => {
+    const r = rejoinDraft({ ...off, contractMonths: 6, reliefPlannedDate: '2026-10-12', reliefPlannedPort: 'Santos' }, '2027-02-01', 'Rotterdam');
+    expect('reliefPlannedDate' in r).toBe(false);
+    expect('reliefPlannedPort' in r).toBe(false);
+  });
   it('carries no record metadata into the draft', () => {
     const r = rejoinDraft(off, '2027-02-01', 'Rotterdam') as Record<string, unknown>;
     for (const key of ['id', 'createdAt', 'updatedAt', 'updatedBy', 'deleted', 'scope', 'shipId']) {

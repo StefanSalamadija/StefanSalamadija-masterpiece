@@ -105,6 +105,38 @@ describe('resolveField: crew', () => {
   });
 });
 
+describe('resolveField: contract length, end and days onboard', () => {
+  const chief = crew({
+    rank: 'chiefOfficer', surname: 'Bos', givenNames: 'Ana', signOnDate: '2026-06-01', contractMonths: 6,
+    reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos',
+  });
+  const withContract: FieldContext = { ...ctx, crew: [oldMaster, newMaster, chief] };
+
+  it('gives the contract end date: the sign-on date plus the months', () => {
+    expect(resolveField('crew.byRank.chiefOfficer.contractEndDate', withContract)).toBe('2026-12-01');
+  });
+  it('gives the days onboard as at the reference date', () => {
+    expect(resolveField('crew.byRank.chiefOfficer.daysOnboard', withContract, { asAt: '2026-10-25' })).toBe(147);
+    expect(resolveField('crew.byRank.chiefOfficer.daysOnboard', withContract, { asAt: '2026-06-01' })).toBe(1);
+  });
+  it("counts up to the ship's today when no date is given", () => {
+    expect(resolveField('crew.byRank.chiefOfficer.daysOnboard', withContract)).toBe(148); // the ship's today is 2026-10-26
+  });
+  it('reads the length and the planned relief as stored', () => {
+    expect(resolveField('crew.byRank.chiefOfficer.contractMonths', withContract)).toBe(6);
+    expect(resolveField('crew.byRank.chiefOfficer.reliefPlannedDate', withContract)).toBe('2026-11-05');
+    expect(resolveField('crew.byRank.chiefOfficer.reliefPlannedPort', withContract)).toBe('Santos');
+  });
+  it('has no end date without a contract length, but still counts the days', () => {
+    expect(resolveField('crew.byRank.master.contractEndDate', withContract)).toBeUndefined();
+    expect(resolveField('crew.byRank.master.daysOnboard', withContract, { asAt: '2026-09-02' })).toBe(2);
+  });
+  it('is undefined when nobody of that rank is onboard on the date', () => {
+    expect(resolveField('crew.byRank.chiefOfficer.contractEndDate', withContract, { asAt: '2026-05-31' })).toBeUndefined();
+    expect(resolveField('crew.byRank.chiefOfficer.daysOnboard', withContract, { asAt: '2026-05-31' })).toBeUndefined();
+  });
+});
+
 describe('resolveField: certificates', () => {
   it('reads the certificate with that key', () => {
     expect(resolveField('cert.loadLine.expiryDate', ctx)).toBe('2029-03-14');

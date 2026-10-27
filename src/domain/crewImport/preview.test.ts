@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { CrewMember } from '../types';
 import { guessMapping } from './mapping';
+import { importPlan } from './plan';
 import { buildPreview, resolveRow, type PreviewRow, type ResolveContext } from './preview';
 import type { Cell } from './readSpreadsheet';
+import { recheckRows } from './recheck';
 
 let seq = 0;
 function crewMember(over: Partial<CrewMember> = {}): CrewMember {
@@ -477,5 +479,54 @@ describe('resolveRow', () => {
       // The same with the sign-on fixed as well: nothing of the earlier contract's sign-off is left to run into it.
       expect(fix(row, { passportNo: 'P2', signOnDate: '2026-06-02' }, { existing: crew })).toMatchObject({ status: 'update', errors: [] });
     });
+  });
+});
+
+describe('the contract length and planned relief of a matched contract', () => {
+  // The sheet has no column for them: they are set on the crew form, and an import must leave them as they are.
+  const planned = { contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };
+  const saved = crewMember({ ...planned });
+  const context: ResolveContext = { existing: [saved], today: '2026-10-25', defaultSignOnDate: '2026-10-25' };
+  const sheet = (...data: Cell[][]): PreviewRow[] => build({ rows: table(['Surname', 'Given names', 'Rank', 'Passport No'], ...data), existing: [saved] });
+
+  it('are kept on the draft, and are not a change, when the row changes nothing about them', () => {
+    const [row] = sheet(['PETROVIĆ', 'Ivan', 'C/O', '012345678']);
+    expect(row).toMatchObject({ status: 'update', changes: [], draft: planned });
+    expect(importPlan([row], [saved]).updates).toEqual([]);
+  });
+
+  it('are left out of the patch of an update that changes something else', () => {
+    const [row] = sheet(['PETROVIĆ', 'Ivan', 'Master', '012345678']);
+    expect(row.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }]);
+    expect(row.draft).toMatchObject(planned);
+    expect(importPlan([row], [saved]).updates).toEqual([{ id: saved.id, patch: { rank: 'master' } }]);
+  });
+
+  it('are kept when the row is worked out again with a fix or after the other rows are checked', () => {
+    const [row] = sheet(['PETROVIĆ', 'Ivan', 'Master', '012345678']);
+    const fixed = resolveRow({ ...row, overrides: { nationality: 'Serbian' } }, context);
+    expect(fixed.changes.map(c => c.field)).toEqual(['rank', 'nationality']);
+    expect(fixed.draft).toMatchObject(planned);
+    const [rechecked] = recheckRows([fixed], context);
+    expect(rechecked.changes.map(c => c.field)).toEqual(['rank', 'nationality']);
+    expect(importPlan([rechecked], [saved]).updates[0].patch).toEqual({ rank: 'master', nationality: 'Serbian' });
+  });
+
+  it('are kept when a fix moves a new row onto the contract', () => {
+    const [row] = sheet(['ŠAŠIĆ', 'Marko', 'C/O', 'P 77']);
+    expect(row.status).toBe('new');
+    expect(row.draft).not.toHaveProperty('contractMonths');
+    const matched = resolveRow({ ...row, overrides: { passportNo: '012345678' } }, context);
+    expect(matched).toMatchObject({ status: 'update', existingId: saved.id, draft: planned });
+    expect(matched.changes.map(c => c.field)).toEqual(['surname', 'givenNames']);
+  });
+
+  it('are not added to a contract that has none', () => {
+    const plain = crewMember();
+    const [row] = build({ rows: table(['Surname', 'Given names', 'Rank', 'Passport No'], ['PETROVIĆ', 'Ivan', 'Master', '012345678']), existing: [plain] });
+    expect(row.draft).not.toHaveProperty('contractMonths');
+    expect(row.draft).not.toHaveProperty('reliefPlannedDate');
+    expect(row.draft).not.toHaveProperty('reliefPlannedPort');
+    expect(row.changes).toEqual([{ field: 'rank', from: 'chiefOfficer', to: 'master' }]);
   });
 });

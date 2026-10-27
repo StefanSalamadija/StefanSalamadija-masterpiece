@@ -2,6 +2,7 @@ import { isBackupDue } from '../backup/reminder';
 import type { AlertKind } from '../domain/alerts';
 import { formatOffset, nextScheduledChange } from '../domain/shipTime';
 import type { ClockChange, Settings } from '../domain/types';
+import type { BadgeKind } from './components/BandBadge';
 import { historyRows } from './shipTimeView';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -44,9 +45,12 @@ export function clockChangeText(changes: ClockChange[], now: Date): string | und
   return `Clock change ${day} ${MONTHS[Number(month) - 1]} ${time} → ${formatOffset(next.toOffsetMinutes)}`;
 }
 
-const BADGE_KIND: Record<AlertKind, 'crew' | 'certificate'> = { crewDoc: 'crew', certificate: 'certificate' };
+const BADGE_KIND: Record<AlertKind, BadgeKind> = { crewDoc: 'crew', certificate: 'certificate', contract: 'contract', onboardLimit: 'limit' };
 
-/** Which words the badge of an alert uses: `Expires soon` and `Expired` for crew, `Due soon` and `Overdue` for certificates. */
-export function alertBadgeKind(kind: AlertKind): 'crew' | 'certificate' {
+/**
+ * Which words the badge of an alert uses: `Expires soon` and `Expired` for crew, `Due soon` and `Overdue` for
+ * certificates, `Relief due soon` and `Relief overdue` for a contract, `Near onboard limit` and `Onboard limit reached`.
+ */
+export function alertBadgeKind(kind: AlertKind): BadgeKind {
   return BADGE_KIND[kind];
 }

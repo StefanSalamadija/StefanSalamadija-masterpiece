@@ -1,3 +1,4 @@
+import { contractEndDate, daysOnboard } from './contracts';
 import { fullName, onboardAt } from './crew';
 import { formatOffset, shipOffsetAt, toShipLocal } from './shipTime';
 import type { Certificate, ClockChange, CrewMember, Particulars, ShipProfile, Voyage } from './types';
@@ -48,8 +49,11 @@ function has(list: readonly string[], key: string): boolean {
   return list.includes(key);
 }
 
-function crewField(m: CrewMember, field: string): FieldValue {
+/** A field of a crew member as at `asAt`: the stored ones, the full name, and the contract end and days onboard worked out from them. */
+function crewField(m: CrewMember, field: string, asAt: string): FieldValue {
   if (field === 'fullName') return fullName(m);
+  if (field === 'contractEndDate') return contractEndDate(m);
+  if (field === 'daysOnboard') return daysOnboard(m, asAt);
   return Object.hasOwn(m, field) ? scalar(m[field as keyof CrewMember]) : undefined;
 }
 
@@ -85,7 +89,7 @@ export function resolveField(name: string, ctx: FieldContext, opts?: { asAt?: st
 
   if (parts.length === 4 && parts[0] === 'crew' && parts[1] === 'byRank') {
     const member = onboardAt(ctx.crew, asAt).find((m) => m.rank === parts[2]);
-    return member && crewField(member, parts[3]);
+    return member && crewField(member, parts[3], asAt);
   }
 
   if (parts.length === 3 && parts[0] === 'cert') {

@@ -154,4 +154,8 @@ describe('alertBadgeKind', () => {
     expect(alertBadgeKind('crewDoc')).toBe('crew');
     expect(alertBadgeKind('certificate')).toBe('certificate');
   });
+  it('words a contract end as a relief, and the months onboard as the onboard limit', () => {
+    expect(alertBadgeKind('contract')).toBe('contract');
+    expect(alertBadgeKind('onboardLimit')).toBe('limit');
+  });
 });

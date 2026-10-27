@@ -75,12 +75,13 @@ function isObject(value: unknown): value is Values {
 const CREW_LABELS: Record<string, string> = {
   ...Object.fromEntries(MAPPING_FIELDS.filter(({ field }) => field !== 'fullName').map(({ field, label }) => [field, label])),
   rankOther: 'Rank (other)',
+  contractMonths: 'Contract length (months)', reliefPlannedDate: 'Planned relief date', reliefPlannedPort: 'Planned relief port',
 };
 const PARTICULARS_LABELS: Record<string, string> = {
   name: 'Ship name', imo: 'IMO number', callSign: 'Call sign', mmsi: 'MMSI', flag: 'Flag', portOfRegistry: 'Port of registry',
   gt: 'GT', nt: 'NT', dwt: 'DWT (summer)', loa: 'LOA (m)', beam: 'Beam (m)', yearBuilt: 'Year built',
   owners: 'Owners', managers: 'Managers (ISM company)', pandi: 'P&I club', classSociety: 'Classification society',
-  crewImportMapping: 'Crew import settings',
+  maxMonthsOnboard: 'Maximum months onboard', crewImportMapping: 'Crew import settings',
 };
 const CERTIFICATE_LABELS: Record<string, string> = {
   name: 'Certificate name', number: 'Number', issuedBy: 'Issued by', issueDate: 'Issue date', expiryDate: 'Expiry date',
@@ -101,11 +102,11 @@ const LABELS: Record<TableName, Record<string, string>> = {
 const BOOKKEEPING: ReadonlySet<string> = new Set(['id', 'createdAt', 'updatedAt', 'updatedBy', 'scope', 'shipId', 'deleted']);
 const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = { certificates: new Set(['key']) };
 
-/** The fields of a record that the review compares, by the name they have in the file. A ship's particulars are at the top level. */
+/** The fields of a record that the review compares, by the name they have in the file. A ship's particulars are at the top level, with its other settings. */
 function valuesOf(table: TableName, record: SyncRecord): Values {
   const raw = record as unknown as Values;
   const source: Values = table === 'ships'
-    ? { ...(isObject(raw.particulars) ? raw.particulars : {}), crewImportMapping: raw.crewImportMapping }
+    ? { ...(isObject(raw.particulars) ? raw.particulars : {}), maxMonthsOnboard: raw.maxMonthsOnboard, crewImportMapping: raw.crewImportMapping }
     : raw;
   const out: Values = {};
   for (const [key, value] of Object.entries(source)) {

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { importPlan } from '../domain/crewImport/plan';
 import type { ImportPlan } from '../domain/crewImport/plan';
+import { resolveRow } from '../domain/crewImport/preview';
 import type { CrewDraft, CrewImportMapping, CrewMember, ShipProfile } from '../domain/types';
 import { importCrew } from './crewImport';
 import { createRecord, listForShip } from './records';
@@ -57,6 +59,25 @@ describe('importCrew', () => {
     expect(saved).not.toHaveProperty('signOffDate');
     expect(saved?.signOffPort).toBe('Koper');
     expect(saved?.updatedAt).not.toBe(ivan.updatedAt);
+  });
+
+  it('keeps the contract length and the planned relief of a contract the sheet updates', async () => {
+    const { db, ship } = await setup();
+    const planned = { contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };
+    const sasic = await createRecord<CrewMember>(db, 'crew', { shipId: ship.id, ...draft, surname: 'Šašić', passportNo: 'P77', ...planned });
+    // A row as the sheet gives it: it says the new rank and nothing about the contract length or the relief.
+    const fileDraft: CrewDraft = {
+      surname: 'Šašić', givenNames: '', rank: 'ab', nationality: '', dateOfBirth: '', placeOfBirth: '', passportNo: 'P77',
+      passportExpiry: '', seamansBookNo: '', seamansBookExpiry: '', signOnDate: '', signOnPort: '',
+    };
+    const row = resolveRow(
+      { rowNumber: 2, fileDraft, overrides: {}, skip: false },
+      { existing: await listForShip<CrewMember>(db, 'crew', ship.id), today: '2026-10-25', defaultSignOnDate: '2026-10-25' },
+    );
+    expect(row.changes).toEqual([{ field: 'rank', from: 'master', to: 'ab' }]);
+
+    await importCrew(db, ship, importPlan([row], [sasic]), mapping, 'crew.xlsx');
+    expect(await db.crew.get(sasic.id)).toMatchObject({ rank: 'ab', ...planned });
   });
 
   it('saves the mapping with the ship, keeping the rest of the ship record', async () => {

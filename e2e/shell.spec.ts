@@ -54,7 +54,8 @@ test('navigation links, the ship chips, and unknown routes falling back to Home'
   await main.getByRole('link', { name: 'Ship' }).click();
   await expect(page).toHaveURL(/#\/ship\/particulars$/);
   const chips = page.getByRole('navigation', { name: 'Ship sections' });
-  for (const name of ['Particulars', 'Crew', 'Certificates', 'Voyage', "Ship's time"]) await expect(chips.getByRole('link', { name })).toBeVisible();
+  await expect(chips.getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Certificates', 'Voyage', "Ship's time"]);
+  for (const name of ['Particulars', 'Crew', 'Reliefs', 'Certificates', 'Voyage', "Ship's time"]) await expect(chips.getByRole('link', { name })).toBeVisible();
   await expect(chips.getByRole('link', { name: 'Particulars' })).toHaveAttribute('aria-current', 'page');
   await expectNoHorizontalScroll(page);
 

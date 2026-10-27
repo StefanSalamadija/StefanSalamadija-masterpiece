@@ -3,16 +3,18 @@ import { useAppState } from '../../app/AppState';
 import { takeFlash } from '../../app/flash';
 import { listForShip } from '../../db/records';
 import { collectAlerts } from '../../domain/alerts';
+import { maxMonthsOnboardOf } from '../../domain/contracts';
 import type { Certificate, CrewMember } from '../../domain/types';
 import { BandBadge } from '../components/BandBadge';
 import { alertBadgeKind, backupReminder, clockChangeText, PERSISTENCE_DENIED_NOTICE } from '../homeView';
 import { useLive } from '../useLive';
 
 /**
- * What needs looking at on the ship's date: crew documents and certificates that are about to run out or have. The
- * status is a badge in words as well as colour, so that a printout, which has no colour, carries it too.
+ * What needs looking at on the ship's date: crew documents and certificates that are about to run out or have, and
+ * contracts that are about to end or have, and crew who are near the limit of months onboard or past it. The status is a
+ * badge in words as well as colour, so that a printout, which has no colour, carries it too.
  */
-function Alerts({ shipId }: { shipId: string }) {
+function Alerts({ shipId, maxMonthsOnboard }: { shipId: string; maxMonthsOnboard: number }) {
   const { db, shipToday } = useAppState();
   const records = useLive(
     async () => {
@@ -25,7 +27,10 @@ function Alerts({ shipId }: { shipId: string }) {
     [db, shipId],
   );
   // Worked out when the records or the ship's date change, not on every render.
-  const alerts = useMemo(() => records && collectAlerts({ ...records, today: shipToday }), [records, shipToday]);
+  const alerts = useMemo(
+    () => records && collectAlerts({ ...records, today: shipToday, maxMonthsOnboard }),
+    [records, shipToday, maxMonthsOnboard],
+  );
 
   return (
     <section class="alerts" aria-label="Alerts">
@@ -34,7 +39,8 @@ function Alerts({ shipId }: { shipId: string }) {
       {alerts && alerts.length > 0 && (
         <ul class="alert-list" role="list">
           {alerts.map((alert) => (
-            <li key={`${alert.kind}:${alert.href}`} class="card alert-row">
+            // Contracts and limits all link to the reliefs, so the link does not tell two people's alerts apart.
+            <li key={`${alert.kind}:${alert.href}:${alert.title}:${alert.detail}`} class="card alert-row">
               <a class="alert-link" href={alert.href}>
                 <span class="alert-head">
                   <span class="alert-title">{alert.title}</span>
@@ -75,7 +81,7 @@ export function Home() {
           <p>{PERSISTENCE_DENIED_NOTICE}</p>
         </div>
       )}
-      {activeShip && <Alerts key={activeShip.id} shipId={activeShip.id} />}
+      {activeShip && <Alerts key={activeShip.id} shipId={activeShip.id} maxMonthsOnboard={maxMonthsOnboardOf(activeShip)} />}
       {clockChange && <p class="clock-change">{clockChange}</p>}
       <p>
         <a href="#/ship/particulars">Ship's data</a>

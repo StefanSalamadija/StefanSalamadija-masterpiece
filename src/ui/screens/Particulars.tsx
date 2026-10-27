@@ -2,8 +2,9 @@ import { useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { updateRecord } from '../../db/records';
-import { looksLikeThousands, parseDecimal } from '../../domain/numbers';
-import { validateParticulars } from '../../domain/validation';
+import { DEFAULT_MAX_MONTHS_ONBOARD } from '../../domain/contracts';
+import { looksLikeThousands, parseDecimal, parseNumberOrNaN } from '../../domain/numbers';
+import { validateMaxMonthsOnboard, validateParticulars } from '../../domain/validation';
 import type { FieldError, Particulars as ParticularsData, ShipProfile } from '../../domain/types';
 import { Field } from '../components/Field';
 import { SHIP_NAME_REQUIRED } from '../messages';
@@ -11,14 +12,14 @@ import { SHIP_NAME_REQUIRED } from '../messages';
 type TextKey = 'name' | 'imo' | 'callSign' | 'mmsi' | 'flag' | 'portOfRegistry' | 'owners' | 'managers' | 'pandi' | 'classSociety';
 type DimensionKey = 'gt' | 'nt' | 'dwt' | 'loa' | 'beam';
 /** What is typed in the form: every field as text, numbers included. */
-type Draft = Record<TextKey | DimensionKey | 'yearBuilt', string>;
+type Draft = Record<TextKey | DimensionKey | 'yearBuilt' | 'maxMonthsOnboard', string>;
 
 const NUMBER_ERROR = 'Enter a number, e.g. 229.5.';
 const THOUSANDS_ERROR = 'Enter the number without thousands separators, e.g. 32500.';
 const YEAR_ERROR = 'Enter a year, e.g. 2012.';
 const FIRST_YEAR = 1900;
 
-const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; inputMode?: 'decimal' | 'numeric' }[] }[] = [
+const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; inputMode?: 'decimal' | 'numeric'; hint?: string }[] }[] = [
   {
     title: 'Identity',
     fields: [
@@ -50,18 +51,25 @@ const SECTIONS: { title: string; fields: { key: keyof Draft; label: string; inpu
       { key: 'classSociety', label: 'Classification society' },
     ],
   },
+  {
+    title: 'Crew policy',
+    fields: [
+      { key: 'maxMonthsOnboard', label: 'Maximum months onboard', inputMode: 'numeric', hint: `Leave blank for ${DEFAULT_MAX_MONTHS_ONBOARD} months.` },
+    ],
+  },
 ];
 
 const DIMENSION_KEYS: readonly DimensionKey[] = ['gt', 'nt', 'dwt', 'loa', 'beam'];
 /** Tonnages are written in whole units or with one or two decimals, so `32,500` is a thousands separator, not 32.5. */
 const TONNAGE_KEYS: readonly DimensionKey[] = ['gt', 'nt', 'dwt'];
 
-function toDraft(p: ParticularsData): Draft {
+function toDraft({ particulars: p, maxMonthsOnboard }: ShipProfile): Draft {
   return {
     name: p.name, imo: p.imo, callSign: p.callSign, mmsi: p.mmsi, flag: p.flag, portOfRegistry: p.portOfRegistry,
     gt: String(p.gt ?? ''), nt: String(p.nt ?? ''), dwt: String(p.dwt ?? ''), loa: String(p.loa ?? ''),
     beam: String(p.beam ?? ''), yearBuilt: String(p.yearBuilt ?? ''),
     owners: p.owners, managers: p.managers, pandi: p.pandi, classSociety: p.classSociety,
+    maxMonthsOnboard: String(maxMonthsOnboard ?? ''),
   };
 }
 
@@ -109,7 +117,7 @@ function problemsByField(errors: FieldError[]): Map<string, FieldError> {
 
 function ParticularsForm({ ship, lastYear }: { ship: ShipProfile; lastYear: number }) {
   const { db } = useAppState();
-  const [draft, setDraft] = useState(() => toDraft(ship.particulars));
+  const [draft, setDraft] = useState(() => toDraft(ship));
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -117,6 +125,10 @@ function ParticularsForm({ ship, lastYear }: { ship: ShipProfile; lastYear: numb
   // Validation owns the numbers' range and the IMO/MMSI; that a ship has a name is checked only here.
   errors.push(...validateParticulars(candidate));
   if (candidate.name === '') errors.unshift(error('name', SHIP_NAME_REQUIRED));
+  // None when blank (the default applies); text that is not a number is NaN, which `validateMaxMonthsOnboard` refuses.
+  const maxMonths = parseNumberOrNaN(draft.maxMonthsOnboard);
+  const maxMonthsProblem = validateMaxMonthsOnboard(maxMonths);
+  if (maxMonthsProblem) errors.push(maxMonthsProblem);
   const problems = problemsByField(errors);
   const blocked = errors.some((problem) => problem.severity === 'error');
 
@@ -130,7 +142,8 @@ function ParticularsForm({ ship, lastYear }: { ship: ShipProfile; lastYear: numb
     if (blocked || busy) return;
     setBusy(true);
     try {
-      await updateRecord<ShipProfile>(db, 'ships', ship.id, { particulars: candidate });
+      // A blank limit is `undefined`, which removes it from the ship, so that the default applies.
+      await updateRecord<ShipProfile>(db, 'ships', ship.id, { particulars: candidate, maxMonthsOnboard: maxMonths });
       setSaved(true);
     } catch (err) {
       reportError(err);
@@ -145,9 +158,9 @@ function ParticularsForm({ ship, lastYear }: { ship: ShipProfile; lastYear: numb
         <div key={section.title} class="form-section">
           <h3>{section.title}</h3>
           <div class="form-grid">
-            {section.fields.map(({ key, label, inputMode }) => (
+            {section.fields.map(({ key, label, inputMode, hint }) => (
               <Field
-                key={key} label={label} inputMode={inputMode} value={draft[key]}
+                key={key} label={label} inputMode={inputMode} hint={hint} value={draft[key]}
                 error={problems.get(key)} onInput={(value) => edit(key, value)}
               />
             ))}

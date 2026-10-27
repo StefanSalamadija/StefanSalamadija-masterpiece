@@ -179,6 +179,23 @@ describe('changedFields', () => {
       ]);
   });
 
+  it('names the contract length and the planned relief of a crew contract by the words of the crew form', () => {
+    expect(changedFields('crew', crew(), crew({ contractMonths: 9, reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' })))
+      .toEqual([
+        { label: 'Contract length (months)', local: EMPTY_VALUE, incoming: '9' },
+        { label: 'Planned relief date', local: EMPTY_VALUE, incoming: '2026-11-05' },
+        { label: 'Planned relief port', local: EMPTY_VALUE, incoming: 'Santos' },
+      ]);
+  });
+
+  it("shows a ship's maximum months onboard, which is kept beside its particulars, after them", () => {
+    const ship = (extra: object): SyncRecord => rec({ particulars: { name: 'S', classSociety: 'DNV' }, ...extra });
+    expect(changedFields('ships', ship({}), ship({ maxMonthsOnboard: 9 })))
+      .toEqual([{ label: 'Maximum months onboard', local: EMPTY_VALUE, incoming: '9' }]);
+    expect(changedFields('ships', ship({ maxMonthsOnboard: 9 }), ship({ maxMonthsOnboard: 11 })))
+      .toEqual([{ label: 'Maximum months onboard', local: '9', incoming: '11' }]);
+  });
+
   it('summarises the saved crew import settings of a ship instead of dumping them', () => {
     const ship = (mapping?: object): SyncRecord => rec({ particulars: { name: 'S' }, ...(mapping && { crewImportMapping: mapping }) });
     expect(changedFields('ships', ship(), ship({ byHeader: { a: 'surname', b: 'rank' }, dateFormat: 'day-first' })))

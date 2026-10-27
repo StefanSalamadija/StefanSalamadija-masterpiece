@@ -27,13 +27,14 @@ function cert(over: Partial<Certificate> = {}): Certificate {
   };
 }
 
-const alerts = (crewList: CrewMember[], certificates: Certificate[] = []) =>
-  collectAlerts({ crew: crewList, certificates, today: TODAY });
+const alerts = (crewList: CrewMember[], certificates: Certificate[] = [], maxMonthsOnboard = 11) =>
+  collectAlerts({ crew: crewList, certificates, today: TODAY, maxMonthsOnboard });
 
 describe('collectAlerts', () => {
   it('lists the red alerts first, then the amber ones, each by date', () => {
     const a = collectAlerts({
       today: TODAY,
+      maxMonthsOnboard: 11,
       crew: [
         crew({ givenNames: 'Ivan', surname: 'PETROVIĆ', passportExpiry: '2027-01-10', signOnDate: '2026-06-01' }),
         crew({ givenNames: 'Old', surname: 'GONE', passportExpiry: '2026-01-01', signOnDate: '2026-01-01', signOffDate: '2026-05-01' }),
@@ -194,6 +195,90 @@ describe('collectAlerts', () => {
 
     it('does not warn about a certificate with no dates', () => {
       expect(alerts([], [cert({})])).toEqual([]);
+    });
+  });
+
+  describe('contracts', () => {
+    const on = (today: string, over: Partial<CrewMember> = {}, maxMonthsOnboard = 11) =>
+      collectAlerts({ today, maxMonthsOnboard, certificates: [], crew: [crew({ signOnDate: '2026-06-01', contractMonths: 6, ...over })] });
+
+    it('says Contract ends when the end is within 30 days, and links to the reliefs', () => {
+      expect(on('2026-11-15')).toEqual([
+        { kind: 'contract', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Contract ends 2026-12-01', href: '#/ship/reliefs' },
+      ]);
+    });
+    it('is amber from 30 days before the end, up to and including the last day', () => {
+      expect(on('2026-11-01').map((x) => x.band)).toEqual(['amber']);
+      expect(on('2026-12-01').map((x) => [x.band, x.detail])).toEqual([['amber', 'Contract ends 2026-12-01']]);
+      expect(on('2026-10-31')).toEqual([]);
+    });
+    it('says the relief is overdue once the contract has ended', () => {
+      expect(on('2026-12-02')).toEqual([
+        { kind: 'contract', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Contract ended 2026-12-01 — relief overdue', href: '#/ship/reliefs' },
+      ]);
+    });
+    it('has nothing to say about a contract with no length', () => {
+      expect(on('2026-12-02', { contractMonths: undefined })).toEqual([]);
+    });
+    it('leaves out crew who are not onboard on the day', () => {
+      const ended = { contractMonths: 1 };
+      const a = alerts([
+        crew({ ...ended, surname: 'SIGNED-OFF', signOnDate: '2026-06-01', signOffDate: '2026-10-24' }),
+        crew({ ...ended, surname: 'JOINS-TOMORROW', signOnDate: '2026-10-26' }),
+        crew({ ...ended, surname: 'DELETED', signOnDate: '2026-06-01', deleted: true }),
+        crew({ ...ended, surname: 'ONBOARD', signOnDate: '2026-06-01' }),
+      ]);
+      expect(a.map((x) => [x.kind, x.title])).toEqual([['contract', 'Ivan ONBOARD']]);
+    });
+  });
+
+  describe('the onboard limit', () => {
+    const on = (today: string, maxMonthsOnboard: number, over: Partial<CrewMember> = {}) =>
+      collectAlerts({ today, maxMonthsOnboard, certificates: [], crew: [crew({ signOnDate: '2026-01-01', ...over })] });
+
+    it('says when the limit will be reached, from 30 days before', () => {
+      expect(on('2026-11-01', 11)).toEqual([
+        { kind: 'onboardLimit', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Reaches 11-month onboard limit 2026-12-01', href: '#/ship/reliefs' },
+      ]);
+      expect(on('2026-10-31', 11)).toEqual([]);
+    });
+    it('says since when the limit has been passed, from the day it is reached', () => {
+      expect(on('2026-12-01', 11)).toEqual([
+        { kind: 'onboardLimit', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Over 11-month onboard limit since 2026-12-01', href: '#/ship/reliefs' },
+      ]);
+      expect(on('2027-02-01', 11)[0].detail).toBe('Over 11-month onboard limit since 2026-12-01');
+    });
+    it("uses the ship's own limit, and names it", () => {
+      expect(on('2026-10-25', 9).map((x) => [x.band, x.detail])).toEqual([['red', 'Over 9-month onboard limit since 2026-10-01']]);
+      expect(on('2026-09-15', 9).map((x) => [x.band, x.detail])).toEqual([['amber', 'Reaches 9-month onboard limit 2026-10-01']]);
+      expect(on('2026-10-25', 11)).toEqual([]);
+    });
+    it('counts the months of a person with no contract length too', () => {
+      expect(on('2026-12-01', 11, { contractMonths: undefined })).toHaveLength(1);
+    });
+    it('leaves out crew who are not onboard on the day', () => {
+      const a = alerts([
+        crew({ surname: 'SIGNED-OFF', signOnDate: '2025-01-01', signOffDate: '2026-10-24' }),
+        crew({ surname: 'DELETED', signOnDate: '2025-01-01', deleted: true }),
+        crew({ surname: 'ONBOARD', signOnDate: '2025-01-01' }),
+      ]);
+      expect(a.map((x) => [x.kind, x.title])).toEqual([['onboardLimit', 'Ivan ONBOARD']]);
+    });
+    it('is a second alert of the same person when the contract is near its end too', () => {
+      const a = on('2026-11-15', 11, { contractMonths: 11 }); // both fall on 2026-12-01
+      expect(a.map((x) => [x.kind, x.band, x.detail])).toEqual([
+        ['contract', 'amber', 'Contract ends 2026-12-01'],
+        ['onboardLimit', 'amber', 'Reaches 11-month onboard limit 2026-12-01'],
+      ]);
+    });
+    it('is in the list with the other alerts, red before amber', () => {
+      const a = alerts(
+        [crew({ surname: 'AMBER', signOnDate: '2026-01-01', passportExpiry: '2026-11-01' }), crew({ surname: 'LIMIT', signOnDate: '2025-10-01' })],
+        [cert({ name: 'Late', expiryDate: '2026-10-20' })],
+      );
+      expect(a.map((x) => [x.band, x.kind, x.title])).toEqual([
+        ['red', 'onboardLimit', 'Ivan LIMIT'], ['red', 'certificate', 'Late'], ['amber', 'crewDoc', 'Ivan AMBER'],
+      ]);
     });
   });
 

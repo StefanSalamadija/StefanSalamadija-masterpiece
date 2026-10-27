@@ -36,13 +36,15 @@ export interface CrewFieldsProps {
   /** A ref callback for a control, for moving the focus to it. */
   refFor: (control: CrewControl) => (element: HTMLElement | null) => void;
   onChange: (control: CrewControl, value: string) => void;
+  /** Also the contract length and the planned relief: the crew form has them, the import's fix form does not (a sheet cannot carry them). */
+  withContract?: boolean;
 }
 
 /** The fields of a crew contract, as the crew form and the import's fix form have them. The caller keeps the state. */
-export function CrewFields({ form, shown, refFor, onChange }: CrewFieldsProps) {
-  const textField = (control: TextControl, label: string, type?: 'date') => (
+export function CrewFields({ form, shown, refFor, onChange, withContract }: CrewFieldsProps) {
+  const textField = (control: TextControl, label: string, type?: 'date', inputMode?: 'numeric') => (
     <Field
-      label={label} type={type} value={form[control]} error={shown(control)} inputRef={refFor(control)}
+      label={label} type={type} inputMode={inputMode} value={form[control]} error={shown(control)} inputRef={refFor(control)}
       onInput={(value) => onChange(control, value)}
     />
   );
@@ -64,6 +66,13 @@ export function CrewFields({ form, shown, refFor, onChange }: CrewFieldsProps) {
       {textField('seamansBookExpiry', "Seaman's book expiry", 'date')}
       {textField('signOnDate', 'Sign-on date', 'date')}
       {textField('signOnPort', 'Sign-on port')}
+      {withContract && (
+        <>
+          {textField('contractMonths', 'Contract length (months)', undefined, 'numeric')}
+          {textField('reliefPlannedDate', 'Planned relief date', 'date')}
+          {textField('reliefPlannedPort', 'Planned relief port')}
+        </>
+      )}
     </div>
   );
 }

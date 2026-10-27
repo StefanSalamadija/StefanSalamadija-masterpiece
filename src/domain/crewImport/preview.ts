@@ -44,10 +44,18 @@ export interface PreviewInput {
 const DRAFT_FIELDS: Record<keyof CrewDraft, true> = {
   surname: true, givenNames: true, rank: true, rankOther: true, nationality: true, dateOfBirth: true, placeOfBirth: true,
   passportNo: true, passportExpiry: true, seamansBookNo: true, seamansBookExpiry: true, signOnDate: true, signOnPort: true,
-  signOffDate: true, signOffPort: true,
+  signOffDate: true, signOffPort: true, contractMonths: true, reliefPlannedDate: true, reliefPlannedPort: true,
 };
-const FIELDS = Object.keys(DRAFT_FIELDS) as (keyof CrewDraft)[];
-type TextField = Exclude<keyof CrewDraft, 'rank' | 'rankOther'>;
+/**
+ * The fields of a contract that are set on the crew form. The sheet has no column for them, so an import neither reads
+ * nor changes them: a contract it updates keeps them (see `keepContract`).
+ */
+const KEPT_FIELDS = ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort'] as const;
+type KeptField = (typeof KEPT_FIELDS)[number];
+/** The fields the sheet can carry: all but the kept ones. */
+type FileField = Exclude<keyof CrewDraft, KeptField>;
+const FIELDS = (Object.keys(DRAFT_FIELDS) as (keyof CrewDraft)[]).filter((f): f is FileField => !KEPT_FIELDS.includes(f as KeptField));
+type TextField = Exclude<FileField, 'rank' | 'rankOther'>;
 const TEXT_FIELDS = FIELDS.filter((f): f is TextField => f !== 'rank' && f !== 'rankOther');
 /** Numbers that are the same once spaces and case are ignored (R3). */
 const NUMBER_FIELDS: readonly (keyof CrewDraft)[] = ['passportNo', 'seamansBookNo'];
@@ -146,15 +154,24 @@ function changesFrom(match: CrewMember, draft: CrewDraft): PreviewChange[] {
   return changes;
 }
 
+/** The draft as it is saved over `match`: with the kept fields (the contract length and the planned relief) of the record, if it has them. */
+function keepContract(draft: CrewDraft, match: CrewMember): CrewDraft {
+  const kept = KEPT_FIELDS.filter(field => match[field] !== undefined).map(field => [field, match[field]]);
+  return { ...draft, ...Object.fromEntries(kept) };
+}
+
 type Evaluation = Pick<PreviewRow, 'status' | 'draft' | 'existingId' | 'changes' | 'errors'>;
 
-/** Status, errors and changes of a draft, taken as it is, against the existing record it updates (if any). */
+/**
+ * Status, errors and changes of a draft, taken as it is, against the existing record it updates (if any). The draft is
+ * checked as the sheet and the fixes make it: what the sheet cannot carry is not part of the checks, and is not a change.
+ */
 function evaluate(draft: CrewDraft, match: CrewMember | undefined, today: string): Evaluation {
   const errors = validateCrewMember(draft, today);
   const status = errors.some(e => e.severity === 'error') ? 'error' : match ? 'update' : 'new';
   return {
     status,
-    draft,
+    draft: match ? keepContract(draft, match) : draft,
     ...(match && { existingId: match.id }),
     changes: match ? changesFrom(match, draft) : [],
     errors,

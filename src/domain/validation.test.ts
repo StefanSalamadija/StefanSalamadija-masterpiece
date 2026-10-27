@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isValidImo, isValidMmsi, normaliseImo, validateCertificate, validateCrewMember, validateParticulars,
+  isValidImo, isValidMmsi, normaliseImo, validateCertificate, validateCrewMember, validateMaxMonthsOnboard,
+  validateParticulars,
 } from './validation';
 import type { CrewDraft, Particulars } from './types';
 
@@ -158,11 +159,62 @@ describe('validateCrewMember', () => {
   it('lists findings in the field order of CrewDraft', () => {
     const found = validateCrewMember({
       ...draft, signOffDate: 'x', signOnDate: '', seamansBookExpiry: 'x', passportExpiry: 'x',
-      dateOfBirth: '2999-01-01', rank: 'other', surname: '',
+      dateOfBirth: '2999-01-01', rank: 'other', surname: '', contractMonths: 25, reliefPlannedDate: 'x',
     }, TODAY);
     expect(found.map(f => f.field)).toEqual([
       'surname', 'rank', 'dateOfBirth', 'passportExpiry', 'seamansBookExpiry', 'signOnDate', 'signOffDate',
+      'contractMonths', 'reliefPlannedDate',
     ]);
+  });
+
+  describe('the contract length', () => {
+    it('is optional, and takes whole months from 1 to 24', () => {
+      expect(validateCrewMember({ ...draft, contractMonths: undefined }, TODAY)).toEqual([]);
+      for (const months of [1, 6, 9, 24]) expect(validateCrewMember({ ...draft, contractMonths: months }, TODAY)).toEqual([]);
+    });
+    it('refuses anything else, with one message', () => {
+      for (const months of [0, 25, -1, 6.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(validateCrewMember({ ...draft, contractMonths: months }, TODAY)).toEqual([
+          { field: 'contractMonths', severity: 'error', message: 'Enter whole months between 1 and 24.' },
+        ]);
+      }
+    });
+  });
+
+  describe('the planned relief', () => {
+    it('is optional, and its date must be a real one', () => {
+      expect(validateCrewMember({ ...draft, reliefPlannedDate: undefined, reliefPlannedPort: undefined }, TODAY)).toEqual([]);
+      expect(validateCrewMember({ ...draft, reliefPlannedDate: '', reliefPlannedPort: '' }, TODAY)).toEqual([]);
+      expect(validateCrewMember({ ...draft, reliefPlannedDate: '2026-02-30' }, TODAY))
+        .toEqual([{ field: 'reliefPlannedDate', severity: 'error', message: 'Enter a valid date.' }]);
+      expect(validateCrewMember({ ...draft, reliefPlannedDate: 'soon' }, TODAY)[0]).toMatchObject({ field: 'reliefPlannedDate' });
+    });
+    it("can't be before the sign-on, and can be on the same day", () => {
+      expect(validateCrewMember({ ...draft, signOnDate: '2026-06-01', reliefPlannedDate: '2026-05-31' }, TODAY))
+        .toEqual([{ field: 'reliefPlannedDate', severity: 'error', message: "Planned relief can't be before sign-on." }]);
+      expect(validateCrewMember({ ...draft, signOnDate: '2026-06-01', reliefPlannedDate: '2026-06-01' }, TODAY)).toEqual([]);
+      expect(validateCrewMember({ ...draft, signOnDate: '2026-06-01', reliefPlannedDate: '2026-11-05' }, TODAY)).toEqual([]);
+    });
+    it('skips the comparison when the sign-on is missing or not a date', () => {
+      const found = validateCrewMember({ ...draft, signOnDate: '', reliefPlannedDate: '2026-05-31' }, TODAY);
+      expect(found.map(f => f.field)).toEqual(['signOnDate']);
+    });
+  });
+});
+
+describe('validateMaxMonthsOnboard', () => {
+  it('has nothing to say about a blank limit, which means the default', () => {
+    expect(validateMaxMonthsOnboard(undefined)).toBeUndefined();
+  });
+  it('takes whole months from 1 to 11', () => {
+    for (const months of [1, 9, 11]) expect(validateMaxMonthsOnboard(months)).toBeUndefined();
+  });
+  it('refuses anything else, with one message', () => {
+    for (const months of [0, 12, -1, 6.5, Number.NaN]) {
+      expect(validateMaxMonthsOnboard(months)).toEqual({
+        field: 'maxMonthsOnboard', severity: 'error', message: 'Enter a number from 1 to 11.',
+      });
+    }
   });
 });
 

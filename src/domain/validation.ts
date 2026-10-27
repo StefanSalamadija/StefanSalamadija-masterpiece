@@ -1,8 +1,12 @@
+import { DEFAULT_MAX_MONTHS_ONBOARD } from './contracts';
 import { isValidIsoDate } from './dates';
 import type { Certificate, CrewDraft, FieldError, Particulars } from './types';
 
 const MSG_DATE = 'Enter a valid date.';
 const MSG_POSITIVE = 'Must be a positive number.';
+const MSG_CONTRACT_MONTHS = 'Enter whole months between 1 and 24.';
+const MSG_MAX_MONTHS_ONBOARD = `Enter a number from 1 to ${DEFAULT_MAX_MONTHS_ONBOARD}.`;
+const MAX_CONTRACT_MONTHS = 24;
 
 /** Strips whitespace and a leading `IMO` prefix. */
 export function normaliseImo(s: string): string {
@@ -60,7 +64,23 @@ export function validateCrewMember(m: CrewDraft, today: string): FieldError[] {
   if (!m.signOnDate) out.push(error('signOnDate', 'Sign-on date is required.'));
   const signOff = checkDate('signOffDate', m.signOffDate, out);
   if (signOn && signOff && signOff < signOn) out.push(error('signOffDate', "Sign-off can't be before sign-on."));
+  const months = m.contractMonths;
+  if (months !== undefined && !(Number.isInteger(months) && months >= 1 && months <= MAX_CONTRACT_MONTHS)) {
+    out.push(error('contractMonths', MSG_CONTRACT_MONTHS));
+  }
+  const relief = checkDate('reliefPlannedDate', m.reliefPlannedDate, out);
+  if (signOn && relief && relief < signOn) out.push(error('reliefPlannedDate', "Planned relief can't be before sign-on."));
   return out;
+}
+
+/**
+ * The ship's limit on the months a crew member stays onboard: blank (undefined) means the default; otherwise whole
+ * months from 1 to 11, the most the Maritime Labour Convention allows. Text that is not a number is given as NaN.
+ */
+export function validateMaxMonthsOnboard(months: number | undefined): FieldError | undefined {
+  if (months === undefined) return undefined;
+  const ok = Number.isInteger(months) && months >= 1 && months <= DEFAULT_MAX_MONTHS_ONBOARD;
+  return ok ? undefined : error('maxMonthsOnboard', MSG_MAX_MONTHS_ONBOARD);
 }
 
 /** The name is required; dates are optional but must be real, and expiry can't precede issue. */

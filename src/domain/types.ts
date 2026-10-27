@@ -9,13 +9,21 @@ export type DateFormat = 'day-first' | 'year-first';
 /** How a crew list is read, saved with the ship; headers are normalised (see `normaliseHeader`). `ignored` lists the headers the
  *  user left out although they would be mapped by their name, so that they stay out on the next import. */
 export interface CrewImportMapping { byHeader: Record<string, CrewField>; dateFormat: DateFormat; ignored?: string[] }
-export interface ShipProfile extends BaseRecord { particulars: Particulars; crewImportMapping?: CrewImportMapping }
+export interface ShipProfile extends BaseRecord {
+  particulars: Particulars; crewImportMapping?: CrewImportMapping;
+  /** The most months a crew member may stay onboard (1 to 11); absent means the default of 11. */
+  maxMonthsOnboard?: number;
+}
 export type RankKey = 'master' | 'chiefOfficer' | 'secondOfficer' | 'thirdOfficer' | 'deckCadet' | 'bosun' | 'ab' | 'os'
   | 'chiefEngineer' | 'secondEngineer' | 'thirdEngineer' | 'fourthEngineer' | 'eto' | 'engineCadet' | 'fitter' | 'oiler'
   | 'wiper' | 'chiefCook' | 'messman' | 'other';
 export interface CrewMember extends BaseRecord { shipId: string; surname: string; givenNames: string; rank: RankKey; rankOther?: string;
   nationality: string; dateOfBirth: string; placeOfBirth: string; passportNo: string; passportExpiry: string;
-  seamansBookNo: string; seamansBookExpiry: string; signOnDate: string; signOnPort: string; signOffDate?: string; signOffPort?: string }
+  seamansBookNo: string; seamansBookExpiry: string; signOnDate: string; signOnPort: string; signOffDate?: string; signOffPort?: string;
+  /** The agreed length of the contract in whole months (1 to 24), counted from the sign-on date. */
+  contractMonths?: number;
+  /** The relief planned for this contract: the day and the port. */
+  reliefPlannedDate?: string; reliefPlannedPort?: string }
 export interface Voyage extends BaseRecord { shipId: string; active: boolean; voyageNo: string; lastPort: string; nextPort: string;
   etaLocal: string; etaOffsetMinutes: number; cargo: string; charterers: string; agents: string }
 export interface Certificate extends BaseRecord { shipId: string; key: string; name: string; number: string; issuedBy: string;
