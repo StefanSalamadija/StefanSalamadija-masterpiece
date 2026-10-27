@@ -60,6 +60,32 @@ function stored(page: Page, store: Store): Promise<Record<string, unknown>[]> {
   );
 }
 
+/** Writes `value` as the maximum months onboard of every ship straight into IndexedDB, as a damaged backup or a hand edit could; the app has to be reloaded to see it. */
+function storeMaxMonths(page: Page, value: unknown): Promise<void> {
+  return page.evaluate(
+    (months) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('masterpiece');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction('ships', 'readwrite');
+          const store = tx.objectStore('ships');
+          const all = store.getAll();
+          all.onsuccess = () => {
+            for (const ship of all.result) store.put({ ...ship, maxMonthsOnboard: months });
+          };
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+    value,
+  );
+}
+
 /** Types the ship's limit on the months onboard on the Particulars screen and saves it. */
 async function saveMaxMonths(page: Page, text: string): Promise<void> {
   await page.goto('./#/ship/particulars');
@@ -339,4 +365,37 @@ test('long names and port names do not push the screens past 360 px', async ({ p
   await page.goto('./#/ship/particulars');
   await expect(page.getByLabel('Maximum months onboard')).toBeVisible();
   await expectNoHorizontalScroll(page);
+});
+
+test('a damaged maximum months onboard in the ship record is not used: 11 months apply, and no alert or crew member goes missing', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'PETROVIĆ', givenNames: 'Ivan', signOn: '2025-09-01', contractMonths: '12' });   // limit 2026-08-01, contract ended 2026-09-01
+  await addMember(page, { surname: 'OTHER', givenNames: 'Ana', signOn: '2026-06-01' });                             // nothing to warn about
+
+  for (const damaged of [6.5, '9', 0, 12]) {
+    await storeMaxMonths(page, damaged);
+    await page.reload();
+    await page.goto('./#/');
+    await expect(alertItems(page), `Home with ${JSON.stringify(damaged)}`).toHaveCount(2);
+    await expect(alertItems(page)).toContainText([
+      'Over 11-month onboard limit since 2026-08-01',
+      'Contract ended 2026-09-01 — relief overdue',
+    ]);
+    await page.goto('./#/ship/reliefs');
+    await expect(reliefList(page).getByRole('listitem'), `Reliefs with ${JSON.stringify(damaged)}`).toHaveCount(2);
+    await expect(reliefRow(page, 'Ivan PETROVIĆ').getByText('Onboard limit reached')).toBeVisible();
+    await expect(reliefRow(page, 'Ana OTHER').locator('[data-band]')).toHaveCount(0);
+  }
+
+  // The Particulars screen shows what is stored, with the message, so that it can be put right.
+  await storeMaxMonths(page, 6.5);
+  await page.reload();
+  await page.goto('./#/ship/particulars');
+  await expect(page.getByLabel('Maximum months onboard')).toHaveValue('6.5');
+  await expect(page.getByRole('alert')).toHaveText('Enter a number from 1 to 11.');
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await page.getByLabel('Maximum months onboard').fill('9');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  expect((await stored(page, 'ships'))[0]).toMatchObject({ maxMonthsOnboard: 9 });
 });

@@ -1,5 +1,5 @@
 import { shipOffsetAt } from '../domain/shipTime';
-import { certificateShell, copyParticulars } from '../domain/profileCopy';
+import { certificateShell, copyCrewPolicy, copyParticulars } from '../domain/profileCopy';
 import { TABLE_NAMES } from '../domain/types';
 import type { Certificate, ClockChange, Particulars, ShipProfile } from '../domain/types';
 import { createRecord, listForShip } from './records';
@@ -41,8 +41,10 @@ async function isLiveShip(db: MasterpieceDB, id: string | undefined): Promise<bo
  * Adds a ship and its first clock change, and makes it the active ship if there is no live active ship.
  * Must run inside a read-write transaction on `ships`, `clockChanges` and `settings`.
  */
-async function addShip(db: MasterpieceDB, particulars: Particulars, offsetMinutes: number, now: Date): Promise<ShipProfile> {
-  const ship = await createRecord<ShipProfile>(db, 'ships', { particulars });
+async function addShip(
+  db: MasterpieceDB, particulars: Particulars, offsetMinutes: number, now: Date, policy: Pick<ShipProfile, 'maxMonthsOnboard'> = {},
+): Promise<ShipProfile> {
+  const ship = await createRecord<ShipProfile>(db, 'ships', { particulars, ...policy });
   await createRecord<ClockChange>(db, 'clockChanges', {
     shipId: ship.id, effectiveAt: now.toISOString(), toOffsetMinutes: offsetMinutes,
   });
@@ -94,9 +96,9 @@ export async function deleteShip(db: MasterpieceDB, shipId: string): Promise<voi
 }
 
 /**
- * A sister ship: the source's particulars without its identity (IMO, call sign, MMSI) under `newName`, a first clock
- * change at the source's offset now, and optionally its certificates as empty shells. Crew, voyages, clock history and
- * the crew import mapping are never copied.
+ * A sister ship: the source's particulars without its identity (IMO, call sign, MMSI) under `newName`, its crew policy
+ * (the limit on the months onboard), a first clock change at the source's offset now, and optionally its certificates
+ * as empty shells. Crew, voyages, clock history and the crew import mapping are never copied.
  */
 export function copyShip(
   db: MasterpieceDB, sourceId: string, newName: string, opts: { includeCertificates: boolean },
@@ -107,7 +109,7 @@ export function copyShip(
       if (!source || source.deleted) throw new Error(`There is no ship with id ${sourceId} to copy.`);
       const now = new Date();
       const offset = shipOffsetAt(await listForShip<ClockChange>(db, 'clockChanges', sourceId), now);
-      const ship = await addShip(db, copyParticulars(source.particulars, newName), offset, now);
+      const ship = await addShip(db, copyParticulars(source.particulars, newName), offset, now, copyCrewPolicy(source));
       if (opts.includeCertificates) {
         for (const certificate of await listForShip<Certificate>(db, 'certificates', sourceId)) {
           await createRecord<Certificate>(db, 'certificates', { shipId: ship.id, ...certificateShell(certificate) });

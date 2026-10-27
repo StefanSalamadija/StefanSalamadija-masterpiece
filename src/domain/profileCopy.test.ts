@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { certificateShell, copyParticulars } from './profileCopy';
+import { certificateShell, copyCrewPolicy, copyParticulars } from './profileCopy';
 import type { Certificate, Particulars } from './types';
 
 const particulars: Particulars = {
@@ -25,6 +25,23 @@ describe('copyParticulars', () => {
     const before = structuredClone(particulars);
     copyParticulars(particulars, 'MV OCEAN PEARL');
     expect(particulars).toEqual(before);
+  });
+});
+
+describe('copyCrewPolicy', () => {
+  it("keeps the ship's limit on the months onboard: it is the company's policy, like the rest of what a sister ship shares", () => {
+    expect(copyCrewPolicy({ maxMonthsOnboard: 9 })).toEqual({ maxMonthsOnboard: 9 });
+  });
+
+  it('has nothing to copy for a ship on the default, so the copy stays on the default too', () => {
+    expect(copyCrewPolicy({})).toEqual({});
+    expect('maxMonthsOnboard' in copyCrewPolicy({ maxMonthsOnboard: undefined })).toBe(false);
+  });
+
+  it('does not copy a stored limit that is damaged', () => {
+    for (const months of [0, 12, 6.5, '9', Number.NaN] as unknown[]) {
+      expect(copyCrewPolicy({ maxMonthsOnboard: months as number }), String(months)).toEqual({});
+    }
   });
 });
 

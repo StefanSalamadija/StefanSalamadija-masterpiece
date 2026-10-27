@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  contractBand, contractEndDate, DEFAULT_MAX_MONTHS_ONBOARD, daysOnboard, maxMonthsOnboardOf, onboardLimitBand, onboardLimitDate,
+  contractBand, contractEndDate, DEFAULT_MAX_MONTHS_ONBOARD, daysOnboard, isValidMaxMonths, MAX_MONTHS_ONBOARD_LIMIT,
+  maxMonthsOnboardOf, onboardLimitBand, onboardLimitDate, validMaxMonths,
 } from './contracts';
 import type { CrewMember } from './types';
 
@@ -23,11 +24,41 @@ describe('DEFAULT_MAX_MONTHS_ONBOARD', () => {
   });
 });
 
+describe('MAX_MONTHS_ONBOARD_LIMIT', () => {
+  it('is the 11 months of the Maritime Labour Convention, the most a ship can set', () => {
+    expect(MAX_MONTHS_ONBOARD_LIMIT).toBe(11);
+  });
+});
+
+// What a stored value can be: backup import checks only that a record has an id and a time, so a damaged or
+// hand-edited ship can hold anything. A value that is not whole months from 1 to 11 is not used.
+const BAD_LIMITS: unknown[] = [0, 12, 6.5, '9', Number.NaN, -3, 'abc', Number.POSITIVE_INFINITY, null, 100, true];
+
+describe('isValidMaxMonths', () => {
+  it('is true for whole months from 1 to 11 and nothing else', () => {
+    for (const months of [1, 2, 9, 10, 11]) expect(isValidMaxMonths(months), String(months)).toBe(true);
+    for (const months of [...BAD_LIMITS, undefined]) expect(isValidMaxMonths(months), String(months)).toBe(false);
+  });
+});
+
+describe('validMaxMonths', () => {
+  it('is the value when it is whole months from 1 to 11, else the default', () => {
+    expect(validMaxMonths(9)).toBe(9);
+    expect(validMaxMonths(1)).toBe(1);
+    for (const months of [...BAD_LIMITS, undefined]) expect(validMaxMonths(months), String(months)).toBe(DEFAULT_MAX_MONTHS_ONBOARD);
+  });
+});
+
 describe('maxMonthsOnboardOf', () => {
   it("is the ship's own limit when it has one, else the default", () => {
     expect(maxMonthsOnboardOf({ maxMonthsOnboard: 9 })).toBe(9);
     expect(maxMonthsOnboardOf({})).toBe(DEFAULT_MAX_MONTHS_ONBOARD);
     expect(maxMonthsOnboardOf({ maxMonthsOnboard: undefined })).toBe(11);
+  });
+  it('is the default for a stored limit that is not whole months from 1 to 11', () => {
+    for (const months of [0, 12, 6.5, '9', Number.NaN, -3, 'abc'] as unknown[]) {
+      expect(maxMonthsOnboardOf({ maxMonthsOnboard: months as number }), String(months)).toBe(11);
+    }
   });
 });
 
@@ -75,6 +106,12 @@ describe('daysOnboard', () => {
   it('counts across a leap day', () => {
     expect(daysOnboard(crew({ signOnDate: '2028-02-28' }), '2028-03-01')).toBe(3);
   });
+  it('is never negative: a sign-off before the sign-on (a damaged record) is 0 days', () => {
+    const damaged = crew({ signOnDate: '2026-06-10', signOffDate: '2026-06-01' });
+    expect(daysOnboard(damaged, '2026-10-25')).toBe(0);
+    expect(daysOnboard(damaged, '2026-06-10')).toBe(0);
+    expect(daysOnboard(damaged, '2026-06-05')).toBe(0);
+  });
   it('is 0 when a date is not a date, rather than a made-up number', () => {
     expect(daysOnboard(crew({ signOnDate: '' }), '2026-10-25')).toBe(0);
     expect(daysOnboard(m, '')).toBe(0);
@@ -104,6 +141,9 @@ describe('onboardLimitDate', () => {
     expect(onboardLimitDate(crew({ signOnDate: '2026-01-01' }), 11)).toBe('2026-12-01');
     expect(onboardLimitDate(crew({ signOnDate: '2026-01-31' }), 1)).toBe('2026-02-28');
   });
+  it('uses 11 months for a limit that is not whole months from 1 to 11, and does not throw', () => {
+    for (const months of BAD_LIMITS) expect(onboardLimitDate(crew({ signOnDate: '2026-01-01' }), months as number), String(months)).toBe('2026-12-01');
+  });
 });
 
 describe('onboardLimitBand', () => {
@@ -130,5 +170,12 @@ describe('onboardLimitBand', () => {
   });
   it('is none when the sign-on is not a date', () => {
     expect(onboardLimitBand(crew({ signOnDate: '' }), '2026-12-01', 11)).toBe('none');
+  });
+  it('uses 11 months for a limit that is not whole months from 1 to 11, and does not throw', () => {
+    for (const months of BAD_LIMITS) {
+      expect(onboardLimitBand(j, '2026-12-01', months as number), String(months)).toBe('red');
+      expect(onboardLimitBand(j, '2026-11-01', months as number), String(months)).toBe('amber');
+      expect(onboardLimitBand(j, '2026-10-31', months as number), String(months)).toBe('ok');
+    }
   });
 });

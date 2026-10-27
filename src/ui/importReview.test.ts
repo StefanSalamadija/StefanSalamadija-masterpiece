@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conflictKey, computeMerge } from '../domain/merge';
+import { conflictKey, computeMerge, resolveMerge } from '../domain/merge';
 import type { MergeItem, MergePlan } from '../domain/merge';
 import type { SyncRecord, TableName, Tables } from '../domain/types';
 import {
@@ -322,6 +322,48 @@ describe('conflictViews', () => {
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
+  });
+});
+
+describe("a merge of the contract length, the planned relief and the ship's limit", () => {
+  const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], ...extra });
+  const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
+    resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');
+  const planned = { reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };
+
+  it('is a conflict that names the field by the words of the crew form, and keeps all three fields whichever side is chosen', () => {
+    const local = tables({ crew: [crew({ contractMonths: 6, ...planned, updatedAt: '2026-03-01T00:00:00.000Z' })] });
+    const incoming = tables({ crew: [crew({ contractMonths: 9, ...planned, updatedAt: '2026-04-01T00:00:00.000Z' })] });
+    const merged = computeMerge(local, incoming, undefined);
+    expect(merged.summary.conflicts).toBe(1);
+    expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Contract length (months)', local: '6', incoming: '9' }]);
+    expect(decide(merged, 'incoming')[0].record).toMatchObject({ contractMonths: 9, ...planned });
+    expect(decide(merged, 'local')[0].record).toMatchObject({ contractMonths: 6, ...planned });
+  });
+
+  it('shows a planned relief that only one side has, and takes a file that has it as a plain update', () => {
+    const local = tables({ crew: [crew({ contractMonths: 6, updatedAt: '2026-03-01T00:00:00.000Z' })] });
+    const incoming = tables({ crew: [crew({ contractMonths: 6, ...planned, updatedAt: '2026-04-01T00:00:00.000Z' })] });
+    const asConflict = computeMerge(local, incoming, undefined);
+    expect(conflictViews(asConflict)[0].changes).toEqual([
+      { label: 'Planned relief date', local: EMPTY_VALUE, incoming: '2026-11-05' },
+      { label: 'Planned relief port', local: EMPTY_VALUE, incoming: 'Santos' },
+    ]);
+    const asUpdate = computeMerge(local, incoming, '2026-03-15T00:00:00.000Z');   // only the file changed it since the last exchange
+    expect(asUpdate.items.map((i) => i.kind)).toEqual(['update']);
+    expect(decide(asUpdate, 'incoming')[0].record).toMatchObject({ contractMonths: 6, ...planned });
+  });
+
+  it("is a conflict for a ship whose maximum months onboard differs, which is kept beside the particulars", () => {
+    const ship = (extra: object, updatedAt: string): SyncRecord => rec({ particulars: { name: 'MV OCEAN STAR' }, ...extra, updatedAt });
+    const merged = computeMerge(
+      tables({ ships: [ship({ maxMonthsOnboard: 9 }, '2026-03-01T00:00:00.000Z')] }),
+      tables({ ships: [ship({ maxMonthsOnboard: 11 }, '2026-04-01T00:00:00.000Z')] }),
+      undefined,
+    );
+    expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Maximum months onboard', local: '9', incoming: '11' }]);
+    expect(decide(merged, 'incoming')[0].record).toMatchObject({ maxMonthsOnboard: 11, particulars: { name: 'MV OCEAN STAR' } });
+    expect(decide(merged, 'local')[0].record).toMatchObject({ maxMonthsOnboard: 9 });
   });
 });
 

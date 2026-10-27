@@ -1,11 +1,11 @@
-import { DEFAULT_MAX_MONTHS_ONBOARD } from './contracts';
+import { isValidMaxMonths, MAX_MONTHS_ONBOARD_LIMIT } from './contracts';
 import { isValidIsoDate } from './dates';
 import type { Certificate, CrewDraft, FieldError, Particulars } from './types';
 
 const MSG_DATE = 'Enter a valid date.';
 const MSG_POSITIVE = 'Must be a positive number.';
 const MSG_CONTRACT_MONTHS = 'Enter whole months between 1 and 24.';
-const MSG_MAX_MONTHS_ONBOARD = `Enter a number from 1 to ${DEFAULT_MAX_MONTHS_ONBOARD}.`;
+const MSG_MAX_MONTHS_ONBOARD = `Enter a number from 1 to ${MAX_MONTHS_ONBOARD_LIMIT}.`;
 const MAX_CONTRACT_MONTHS = 24;
 
 /** Strips whitespace and a leading `IMO` prefix. */
@@ -79,8 +79,7 @@ export function validateCrewMember(m: CrewDraft, today: string): FieldError[] {
  */
 export function validateMaxMonthsOnboard(months: number | undefined): FieldError | undefined {
   if (months === undefined) return undefined;
-  const ok = Number.isInteger(months) && months >= 1 && months <= DEFAULT_MAX_MONTHS_ONBOARD;
-  return ok ? undefined : error('maxMonthsOnboard', MSG_MAX_MONTHS_ONBOARD);
+  return isValidMaxMonths(months) ? undefined : error('maxMonthsOnboard', MSG_MAX_MONTHS_ONBOARD);
 }
 
 /** The name is required; dates are optional but must be real, and expiry can't precede issue. */

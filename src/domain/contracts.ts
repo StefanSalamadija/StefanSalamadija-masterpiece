@@ -2,12 +2,29 @@ import { addDays, addMonths, isValidIsoDate } from './dates';
 import { expiryBand } from './expiry';
 import type { Band, CrewMember, ShipProfile } from './types';
 
-/** The most a seafarer may stay onboard under the Maritime Labour Convention; a ship can set a shorter limit. */
+/** The limit a ship has until it sets one of its own: the most a seafarer may stay onboard under the Maritime Labour Convention. */
 export const DEFAULT_MAX_MONTHS_ONBOARD = 11;
 
-/** The ship's limit on the months a crew member stays onboard: its own when it has set one, else the default. */
+/** The most a ship can set its limit to (it can set a shorter one, from 1 month). Kept apart from the default, which could change. */
+export const MAX_MONTHS_ONBOARD_LIMIT = 11;
+
+/** True for a limit that can be used: whole months from 1 to `MAX_MONTHS_ONBOARD_LIMIT`. Any other value, of any type, is not one. */
+export function isValidMaxMonths(months: unknown): months is number {
+  return typeof months === 'number' && Number.isInteger(months) && months >= 1 && months <= MAX_MONTHS_ONBOARD_LIMIT;
+}
+
+/**
+ * The limit to work with: `months` when it can be used, else the default. A backup is only checked for its ids and times,
+ * so a stored limit may be damaged (6.5, "9", 0, 12); it must never reach a date calculation, where it would throw, or
+ * give nonsense alerts, or allow more than the Convention does.
+ */
+export function validMaxMonths(months: unknown): number {
+  return isValidMaxMonths(months) ? months : DEFAULT_MAX_MONTHS_ONBOARD;
+}
+
+/** The ship's limit on the months a crew member stays onboard: its own when it has set a usable one, else the default. */
 export function maxMonthsOnboardOf(ship: Pick<ShipProfile, 'maxMonthsOnboard'>): number {
-  return ship.maxMonthsOnboard ?? DEFAULT_MAX_MONTHS_ONBOARD;
+  return validMaxMonths(ship.maxMonthsOnboard);
 }
 
 /** A contract is amber from this many days before it ends. */
@@ -40,12 +57,13 @@ function daysBetween(from: string, to: string): number {
 
 /**
  * How many days the contract has run at `asAt`, with the sign-on day as the first. It stops at the sign-off date, and is
- * 0 before the sign-on. 0 as well when a date is not a date, so that a screen never shows a made-up number.
+ * 0 before the sign-on. 0 as well when a date is not a date, or the sign-off is before the sign-on (a damaged record),
+ * so that a screen never shows a made-up or a negative number.
  */
 export function daysOnboard(m: Pick<CrewMember, 'signOnDate' | 'signOffDate'>, asAt: string): number {
   if (!isValidIsoDate(m.signOnDate) || !isValidIsoDate(asAt) || asAt < m.signOnDate) return 0;
   const end = m.signOffDate && isValidIsoDate(m.signOffDate) && m.signOffDate < asAt ? m.signOffDate : asAt;
-  return daysBetween(m.signOnDate, end) + 1;
+  return Math.max(0, daysBetween(m.signOnDate, end) + 1);
 }
 
 /** Red once the contract has ended, amber from 30 days before its last day (that day included), none without a length. */
@@ -53,12 +71,18 @@ export function contractBand(m: Contract, ref: string): Band {
   return expiryBand(contractEndDate(m), ref, { days: CONTRACT_WARNING_DAYS });
 }
 
-/** The day the crew member has been onboard for `maxMonths`: the sign-on date plus those months. */
+/**
+ * The day the crew member has been onboard for `maxMonths`: the sign-on date plus those months. A limit that is not whole
+ * months from 1 to 11 is the default (see `validMaxMonths`). Throws for a sign-on that is not a date.
+ */
 export function onboardLimitDate(m: Pick<CrewMember, 'signOnDate'>, maxMonths: number): string {
-  return addMonths(m.signOnDate, maxMonths);
+  return addMonths(m.signOnDate, validMaxMonths(maxMonths));
 }
 
-/** Red from the day the limit is reached, amber from 30 days before, none when the sign-on is not a date. */
+/**
+ * Red from the day the limit is reached, amber from 30 days before, none when the sign-on is not a date. A limit that is
+ * not whole months from 1 to 11 is the default (see `validMaxMonths`).
+ */
 export function onboardLimitBand(m: Pick<CrewMember, 'signOnDate'>, ref: string, maxMonths = DEFAULT_MAX_MONTHS_ONBOARD): Band {
   if (!isValidIsoDate(m.signOnDate)) return 'none';
   const limit = onboardLimitDate(m, maxMonths);

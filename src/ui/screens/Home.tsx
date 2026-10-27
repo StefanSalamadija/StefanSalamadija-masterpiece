@@ -39,8 +39,7 @@ function Alerts({ shipId, maxMonthsOnboard }: { shipId: string; maxMonthsOnboard
       {alerts && alerts.length > 0 && (
         <ul class="alert-list" role="list">
           {alerts.map((alert) => (
-            // Contracts and limits all link to the reliefs, so the link does not tell two people's alerts apart.
-            <li key={`${alert.kind}:${alert.href}:${alert.title}:${alert.detail}`} class="card alert-row">
+            <li key={alert.key} class="card alert-row">
               <a class="alert-link" href={alert.href}>
                 <span class="alert-head">
                   <span class="alert-title">{alert.title}</span>

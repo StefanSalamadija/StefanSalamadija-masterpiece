@@ -237,6 +237,26 @@ describe('copyShip', () => {
     expect((await listForShip<ClockChange>(db, 'clockChanges', cp.id))[0].toOffsetMinutes).toBe(180);
   });
 
+  it("copies the ship's limit on the months onboard, and gives a ship on the default none", async () => {
+    const { db, src } = await source();
+    const onDefault = await copyShip(db, src.id, 'MV ON DEFAULT', { includeCertificates: false });
+    expect(onDefault).not.toHaveProperty('maxMonthsOnboard');
+    expect(await db.ships.get(onDefault.id)).not.toHaveProperty('maxMonthsOnboard');
+
+    await updateRecord<ShipProfile>(db, 'ships', src.id, { maxMonthsOnboard: 9 });
+    const cp = await copyShip(db, src.id, 'MV OCEAN PEARL', { includeCertificates: false });
+    expect(cp.maxMonthsOnboard).toBe(9);
+    expect((await db.ships.get(cp.id))?.maxMonthsOnboard).toBe(9);
+    expect((await db.ships.get(src.id))?.maxMonthsOnboard).toBe(9);
+  });
+
+  it('does not copy a limit that is damaged', async () => {
+    const { db, src } = await source();
+    await db.ships.put({ ...(await db.ships.get(src.id) as ShipProfile), maxMonthsOnboard: 6.5 });
+    const cp = await copyShip(db, src.id, 'MV OCEAN PEARL', { includeCertificates: false });
+    expect(await db.ships.get(cp.id)).not.toHaveProperty('maxMonthsOnboard');
+  });
+
   it('leaves the source ship untouched', async () => {
     const { db, src } = await source();
     const before = await allTables(db);

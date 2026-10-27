@@ -1,8 +1,17 @@
-import type { BaseRecord, Certificate, Particulars } from './types';
+import { isValidMaxMonths } from './contracts';
+import type { BaseRecord, Certificate, Particulars, ShipProfile } from './types';
 
 /** Particulars for a sister ship: everything is kept except the identity (IMO, call sign, MMSI), which must be entered again. */
 export function copyParticulars(p: Particulars, newName: string): Particulars {
   return { ...p, name: newName, imo: '', callSign: '', mmsi: '' };
+}
+
+/**
+ * The crew policy of a sister ship: the source's limit on the months onboard, which is the company's rule and not one
+ * ship's. A ship on the default has none to copy, and a damaged stored limit is not copied.
+ */
+export function copyCrewPolicy(source: Pick<ShipProfile, 'maxMonthsOnboard'>): Pick<ShipProfile, 'maxMonthsOnboard'> {
+  return isValidMaxMonths(source.maxMonthsOnboard) ? { maxMonthsOnboard: source.maxMonthsOnboard } : {};
 }
 
 /**

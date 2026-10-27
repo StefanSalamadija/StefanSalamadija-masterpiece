@@ -107,7 +107,7 @@ test('particulars: the ship name is required, and a bad MMSI blocks saving', asy
 
 test('profiles: new, switch, copy, rename, delete', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await saveParticulars(page, { 'IMO number': '9074726', 'LOA (m)': '229', Flag: 'Malta' });
+  await saveParticulars(page, { 'IMO number': '9074726', 'LOA (m)': '229', Flag: 'Malta', 'Maximum months onboard': '9' });
   await openProfiles(page);
   await expect(row(page, 'MV OCEAN STAR')).toContainText('Active');
   await expect(row(page, 'MV OCEAN STAR').getByRole('button', { name: 'Make active' })).toHaveCount(0);
@@ -131,6 +131,7 @@ test('profiles: new, switch, copy, rename, delete', async ({ page }) => {
   await expect(page.getByLabel('IMO number')).toHaveValue('');
   await expect(page.getByLabel('LOA (m)')).toHaveValue('229');
   await expect(page.getByLabel('Flag')).toHaveValue('Malta');
+  await expect(page.getByLabel('Maximum months onboard')).toHaveValue('9');    // the crew policy goes with the copy
 
   await openProfiles(page);
   await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Delete' }).click();

@@ -1,4 +1,4 @@
-import { contractBand, contractEndDate, onboardLimitBand, onboardLimitDate } from './contracts';
+import { contractBand, contractEndDate, onboardLimitBand, onboardLimitDate, validMaxMonths } from './contracts';
 import { fullName, onboardAt } from './crew';
 import { certificateExpiryBand, crewDocExpiryBand } from './expiry';
 import type { Band, Certificate, CrewMember } from './types';
@@ -11,6 +11,8 @@ type Warning = 'amber' | 'red';
 
 /** One thing to look at on the Home screen. The dates in `detail` are shown as kept, year first. */
 export interface Alert {
+  /** Tells the alert from every other, whoever else has the same name and dates: the kind and the id of the record (`contract:<crew id>`). */
+  key: string;
   kind: AlertKind;
   band: Warning;
   /** Who or what: a person's full name, a certificate's name. */
@@ -76,7 +78,7 @@ function worstFlag(flags: (Flag | undefined)[]): Flag | undefined {
 }
 
 /** The alert for a record shown by `worst`, with the date it names; none when the record has nothing that warns. */
-function alertFrom(worst: Flag | undefined, rest: Pick<Alert, 'kind' | 'title' | 'href'>): Dated[] {
+function alertFrom(worst: Flag | undefined, rest: Pick<Alert, 'key' | 'kind' | 'title' | 'href'>): Dated[] {
   return worst ? [{ date: worst.date, alert: { ...rest, band: worst.band, detail: worst.detail } }] : [];
 }
 
@@ -88,7 +90,7 @@ function crewDocAlerts(crew: CrewMember[], today: string): Dated[] {
         flag(m.passportExpiry, crewDocExpiryBand(m.passportExpiry, today), PASSPORT),
         flag(m.seamansBookExpiry, crewDocExpiryBand(m.seamansBookExpiry, today), SEAMANS_BOOK),
       ]),
-      { kind: 'crewDoc', title: fullName(m), href: `#/ship/crew/${encodeURIComponent(m.id)}` },
+      { key: `crewDoc:${m.id}`, kind: 'crewDoc', title: fullName(m), href: `#/ship/crew/${encodeURIComponent(m.id)}` },
     ),
   );
 }
@@ -103,7 +105,7 @@ function certificateAlerts(certificates: Certificate[], today: string): Dated[] 
           flag(c.expiryDate, certificateExpiryBand(c.expiryDate, today), CERTIFICATE_EXPIRY),
           flag(c.nextSurveyDue, certificateExpiryBand(c.nextSurveyDue, today), CERTIFICATE_SURVEY),
         ]),
-        { kind: 'certificate', title: c.name, href: `#/ship/certificates/${encodeURIComponent(c.id)}` },
+        { key: `certificate:${c.id}`, kind: 'certificate', title: c.name, href: `#/ship/certificates/${encodeURIComponent(c.id)}` },
       ),
     );
 }
@@ -117,21 +119,23 @@ function contractAlerts(crew: CrewMember[], today: string): Dated[] {
     const end = contractEndDate(m);
     const found = flag(end, contractBand(m, today), CONTRACT);
     const worst = found && (found.band === 'red' ? { ...found, detail: `${found.detail}${RELIEF_OVERDUE}` } : found);
-    return alertFrom(worst, { kind: 'contract', title: fullName(m), href: RELIEFS });
+    return alertFrom(worst, { key: `contract:${m.id}`, kind: 'contract', title: fullName(m), href: RELIEFS });
   });
 }
 
 /**
  * The limit on the months onboard (`maxMonths`, the ship's) for the crew onboard on `today`: one alert for each who
- * reaches it within 30 days or has reached it, whether or not their contract has a length.
+ * reaches it within 30 days or has reached it, whether or not their contract has a length. A limit that is not whole
+ * months from 1 to 11 (a damaged ship record) is the default, in the words as in the dates.
  */
 function onboardLimitAlerts(crew: CrewMember[], today: string, maxMonths: number): Dated[] {
-  const words: Words = { amber: `Reaches ${maxMonths}-month onboard limit`, red: `Over ${maxMonths}-month onboard limit since` };
+  const months = validMaxMonths(maxMonths);
+  const words: Words = { amber: `Reaches ${months}-month onboard limit`, red: `Over ${months}-month onboard limit since` };
   return onboardAt(crew, today).flatMap((m) => {
-    const band = onboardLimitBand(m, today, maxMonths);
+    const band = onboardLimitBand(m, today, months);
     // The date is only worked out for a band that warns: the sign-on of a damaged record may not be a date.
-    const date = band === 'amber' || band === 'red' ? onboardLimitDate(m, maxMonths) : undefined;
-    return alertFrom(flag(date, band, words), { kind: 'onboardLimit', title: fullName(m), href: RELIEFS });
+    const date = band === 'amber' || band === 'red' ? onboardLimitDate(m, months) : undefined;
+    return alertFrom(flag(date, band, words), { key: `onboardLimit:${m.id}`, kind: 'onboardLimit', title: fullName(m), href: RELIEFS });
   });
 }
 
