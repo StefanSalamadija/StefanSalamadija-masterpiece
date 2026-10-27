@@ -33,11 +33,11 @@ At sign-off they can give the relief a ship-only handover file.
 ## 3. Roadmap (each piece gets its own spec → plan → build)
 
 1. **Base:** this spec.
-2. **Library** (user request, built right after the base):
+2. **SMS forms engine** (user decision 2026-10-27: built right after the base, before the Library, because these forms are used daily): fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. The user's sample forms have arrived (15, Word legacy form fields and Excel sheets). They are company documents: they stay on the user's devices and are never committed to this public repository.
+3. **Library** (user request):
    - **Document shelf:** about 100 of the user's own PDF/Word/Excel files (SMS manuals, circulars, stability booklet, their own legal copies of codes), stored offline, with folders and tags, full-text search inside the documents, favourites, and optional inclusion in the ship handover.
    - **Built-in quick-reference cards:** only original or public-domain content (for example Beaufort scale, phonetic alphabet, flag signals, COLREG lights and shapes, formulas, unit tables). No copyrighted IMO or other publisher texts are bundled.
    - Own spec when started.
-3. **SMS forms engine:** fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. Starts once the user sends 3–5 sample forms.
 4. **Cargo:** draft survey (initial/final, trim, hog/sag and density corrections), final trimming pours, air draft (keel to hatch cover) for loader clearance. Hydrostatic tables are entered per ship profile. Results are an aid and are checked against the approved stability booklet/loading computer.
 5. **Admin:** port and crew papers (crew lists, IMO FAL), voyage reports (noon, arrival/departure, NOR, SOF), planned tasks and due dates, work/rest hours, cargo/ballast logs and ROB.
 6. **Finance and converters** (includes the **personal budget planner**, designed in `2026-10-25-masterpiece-budget-design.md`): currency (offline rates, updated when online or entered by hand), units, financial calculators, personal planning (personal data), and ship's business (ship data: master's cash, wages and advances, slop chest, disbursements).
