@@ -19,11 +19,21 @@ type Say = (text: string) => void;
 /** "Lock after (minutes in background)", saved with its own button. Nothing is saved while the number is wrong. */
 function LockTimeForm({ pin, say }: { pin: PinSettings; say: Say }) {
   const { db } = useAppState();
-  const [minutes, setMinutes] = useState(String(relockMinutesOf(pin)));
+  const stored = relockMinutesOf(pin);
+  const [minutes, setMinutes] = useState(String(stored));
   const [error, setError] = useState<FieldError>();
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const input = useRef<HTMLInputElement>(null);
+  // The lock time can be changed from another tab: the field follows what is stored (and so shows what this tab has saved).
+  // Only a change counts: on opening the field already shows it, and must not be reset over what has been typed since.
+  const shown = useRef(stored);
+  useEffect(() => {
+    if (shown.current === stored) return;
+    shown.current = stored;
+    setMinutes(String(stored));
+    setError(undefined);
+  }, [stored]);
 
   async function save(event: Event): Promise<void> {
     event.preventDefault();
@@ -64,22 +74,46 @@ function LockTimeForm({ pin, say }: { pin: PinSettings; say: Say }) {
 }
 
 /**
- * The lock is on: change the passcode, the fingerprint, the lock time, or turn it off. The passcode cannot be changed and
- * the lock cannot be turned off without the current passcode (or fingerprint), so that a phone left unlocked is not enough.
+ * The lock is on: change the passcode, the fingerprint, the lock time, or turn it off. The passcode cannot be changed, the
+ * lock cannot be turned off and a fingerprint cannot be added without the current passcode (the fingerprint also does
+ * to change the passcode or turn the lock off, once one is enrolled), so that a phone left unlocked is not enough.
+ * Taking a fingerprint away only removes a way in, so it asks for nothing.
  */
 function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
   const { db } = useAppState();
   const fingerprintAvailable = useFingerprintAvailable() === true;
   const [changing, setChanging] = useState(false);
-  // Changing the passcode and turning the lock off ask for the current passcode (or fingerprint) first.
+  // Changing the passcode, turning the lock off and turning the fingerprint on ask for the current passcode first.
   const [confirming, setConfirming] = useState<ConfirmPurpose>();
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
   // The confirmation closes as the new-passcode form opens: the focus goes to the form's first field, not back to the button that is gone.
   const newPasscode = useRef<HTMLInputElement>(null);
   // The box follows a tap at once; if the phone then refuses, it goes back to what is true.
-  const [fingerprintOn, setFingerprintOn] = useState(pin.fingerprint !== undefined);
-  useEffect(() => setFingerprintOn(pin.fingerprint !== undefined), [pin.fingerprint]);
+  const enrolled = pin.fingerprint !== undefined;
+  const [fingerprintOn, setFingerprintOn] = useState(enrolled);
+  const seenEnrolled = useRef(enrolled);
+  useEffect(() => {
+    if (seenEnrolled.current === enrolled) return; // only a change (here or in another tab), not the first run, which could undo a tap
+    seenEnrolled.current = enrolled;
+    setFingerprintOn(enrolled);
+  }, [enrolled]);
+
+  /** Turns the fingerprint on once the passcode has been confirmed: the phone is asked for a key; if it will not make one the box goes back. */
+  async function enrollFingerprint(): Promise<void> {
+    setFingerprintOn(true);
+    if (await setFingerprint(db, true)) {
+      say('Fingerprint unlock is on.');
+    } else {
+      setFingerprintOn(false);
+      say(FINGERPRINT_TOGGLE_FAILED);
+    }
+  }
+
+  /** Opens a confirmation, unless one of the buttons below is running. */
+  function confirm(purpose: ConfirmPurpose): void {
+    if (!working.current) setConfirming(purpose);
+  }
 
   /** Runs one of the buttons below; a second tap while one runs is ignored. */
   async function run(action: () => Promise<void>): Promise<void> {
@@ -110,7 +144,7 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
         />
       ) : (
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => setConfirming('change')}>
+          <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => confirm('change')}>
             Change passcode
           </button>
         </div>
@@ -120,16 +154,21 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
           <input
             type="checkbox" checked={fingerprintOn} aria-disabled={busy ? 'true' : undefined}
             onChange={(event) => {
-              const on = event.currentTarget.checked;
-              setFingerprintOn(on);
-              void run(async () => {
-                if (await setFingerprint(db, on)) {
-                  say(on ? 'Fingerprint unlock is on.' : 'Fingerprint unlock is off.');
-                } else {
-                  setFingerprintOn(!on);
-                  say(FINGERPRINT_TOGGLE_FAILED);
-                }
-              });
+              const box = event.currentTarget;
+              const on = box.checked;
+              if (working.current) {
+                box.checked = !on; // one of the buttons is running: the tap is not taken
+              } else if (on) {
+                // Adding a way in needs the passcode. The box stays as it is (off) until that is given.
+                box.checked = false;
+                setConfirming('fingerprint');
+              } else {
+                setFingerprintOn(false);
+                void run(async () => {
+                  await setFingerprint(db, false);
+                  say('Fingerprint unlock is off.');
+                });
+              }
             }}
           />
           <span>Unlock with fingerprint</span>
@@ -137,7 +176,7 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
       )}
       <LockTimeForm pin={pin} say={say} />
       <div class="form-actions">
-        <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => setConfirming('off')}>
+        <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => confirm('off')}>
           Turn off app lock
         </button>
       </div>
@@ -149,12 +188,14 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
             setConfirming(undefined);
             if (confirming === 'change') {
               setChanging(true);
-              return;
+            } else if (confirming === 'fingerprint') {
+              void run(enrollFingerprint);
+            } else {
+              void run(async () => {
+                await turnOffLock(db);
+                say('App lock is off.');
+              });
             }
-            void run(async () => {
-              await turnOffLock(db);
-              say('App lock is off.');
-            });
           }}
         />
       )}

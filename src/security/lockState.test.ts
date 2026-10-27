@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LockoutState, PinSettings } from '../domain/types';
-import { DEFAULT_RELOCK_MINUTES, FULL_LOCK_MS, evaluateLockout, relockMinutesOf } from './lockState';
-import { lockRemainingMs, registerFailure } from './pin';
+import { DEFAULT_RELOCK_MINUTES, FULL_LOCK_MS, evaluateLockout, pinForLock, relockMinutesOf } from './lockState';
+import { lockRemainingMs, registerFailure, verifyPin } from './pin';
 
 const t0 = new Date('2026-10-25T12:00:00Z');
 const after = (ms: number): string => new Date(t0.getTime() + ms).toISOString();
@@ -112,5 +112,41 @@ describe('relockMinutesOf', () => {
     for (const bad of [undefined, null, 'five', Number.NaN, -1, Number.POSITIVE_INFINITY]) {
       expect(relockMinutesOf(pin(bad))).toBe(DEFAULT_RELOCK_MINUTES);
     }
+  });
+});
+
+describe('pinForLock', () => {
+  const good: PinSettings = {
+    hash: { salt: 'c2FsdA==', hash: 'aGFzaA==', iterations: 1000 }, relockMinutes: 7, lockout: { failures: 2 },
+    fingerprint: { credentialId: 'Y3JlZA', publicKey: 'a2V5', alg: -7 },
+  };
+
+  it('hands back a well-formed passcode setting as it is', () => {
+    expect(pinForLock(good)).toEqual(good);
+  });
+
+  it.each([['null', null], ['a string', 'x'], ['a number', 5], ['an array', []], ['an empty object', {}], ['nothing', undefined]])(
+    'never throws for %s, and gives a passcode that nothing opens and a lockout that is the longest lock',
+    async (_name, damaged) => {
+      const pin = pinForLock(damaged);
+      expect(await verifyPin('2580', pin.hash)).toBe(false);
+      expect(await verifyPin('0000', pin.hash)).toBe(false);
+      expect(pin.fingerprint).toBeUndefined();
+      expect(relockMinutesOf(pin)).toBe(DEFAULT_RELOCK_MINUTES);
+      expect(evaluateLockout(pin.lockout, t0).remainingMs).toBe(FULL_LOCK_MS);
+    },
+  );
+
+  it('keeps what is readable and drops what is not: a damaged hash does not take the fingerprint with it, a damaged fingerprint is dropped', async () => {
+    const noHash = pinForLock({ ...good, hash: 'broken' });
+    expect(noHash.fingerprint).toEqual(good.fingerprint);
+    expect(await verifyPin('2580', noHash.hash)).toBe(false);
+    expect(pinForLock({ ...good, fingerprint: { credentialId: 5 } }).fingerprint).toBeUndefined();
+    expect(pinForLock({ ...good, fingerprint: { credentialId: 'a', publicKey: 'b', alg: 99 } }).fingerprint).toBeUndefined();
+  });
+
+  it('lets relockMinutesOf and evaluateLockout read what is left of a damaged setting without throwing', () => {
+    expect(relockMinutesOf(null as unknown as PinSettings)).toBe(DEFAULT_RELOCK_MINUTES);
+    expect(relockMinutesOf(undefined as unknown as PinSettings)).toBe(DEFAULT_RELOCK_MINUTES);
   });
 });

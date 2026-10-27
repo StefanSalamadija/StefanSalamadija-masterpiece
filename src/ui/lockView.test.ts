@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FINGERPRINT_NOT_RECOGNISED, FINGERPRINT_SETUP_FAILED, LOCK_FORGOTTEN_NOTE, LOCK_LIMITS_NOTE, LOCK_MINUTES_ERROR,
   LOCK_NO_REUSE_NOTE, PASSCODE_FORMAT_ERROR, PASSCODE_MISMATCH, WRONG_PASSCODE, confirmIntro, confirmTitle, lockoutText,
-  parseLockMinutes, passcodeDigits, passcodeProblem, protectIntro,
+  LOCK_ENDED_ANNOUNCEMENT, lockStartedAnnouncement, parseLockMinutes, passcodeDigits, passcodeProblem, protectIntro, unsavedLockText,
 } from './lockView';
 
 describe('the lock texts', () => {
@@ -34,6 +34,36 @@ describe('the confirmation of the current passcode in Settings', () => {
     expect(confirmIntro('change', false)).toBe('To set a new passcode, enter your current passcode.');
     expect(confirmIntro('off', false)).toBe('To turn off the app lock, enter your current passcode.');
     expect(confirmIntro('off', true)).toBe('To turn off the app lock, enter your current passcode or use your fingerprint.');
+  });
+
+  it('asks only for the passcode before the fingerprint is turned on: there is no fingerprint yet to ask with', () => {
+    expect(confirmTitle('fingerprint')).toBe('Turn on fingerprint unlock?');
+    expect(confirmIntro('fingerprint', false)).toBe('To turn on fingerprint unlock, enter your current passcode.');
+  });
+});
+
+describe('the lock that could not be saved', () => {
+  it('says so, in these words, with the seconds left', () => {
+    expect(unsavedLockText(300_000)).toBe("Couldn't save \u2014 locked for safety. Try again in 300 s.");
+    expect(unsavedLockText(29_001)).toBe("Couldn't save \u2014 locked for safety. Try again in 30 s.");
+    expect(unsavedLockText(1)).toBe("Couldn't save \u2014 locked for safety. Try again in 1 s.");
+  });
+});
+
+describe('what a screen reader is told when a lock starts and ends', () => {
+  it('is said once at the start, with the whole time, in words that are not the countdown on the screen', () => {
+    expect(lockStartedAnnouncement(30_000, false)).toBe('Locked after too many attempts. You can try again in 30 seconds.');
+    expect(lockStartedAnnouncement(1_000, false)).toBe('Locked after too many attempts. You can try again in 1 second.');
+    expect(lockStartedAnnouncement(300_000, true)).toBe(
+      "Couldn't save the attempt, so the app is locked for safety. You can try again in 300 seconds.",
+    );
+    // The countdown on the screen is the one element with these words; a second element with them would be found twice.
+    expect(lockStartedAnnouncement(30_000, false)).not.toMatch(/Too many attempts\. Try again in/);
+    expect(lockStartedAnnouncement(30_000, true)).not.toContain(unsavedLockText(30_000));
+  });
+
+  it('is said once at the end', () => {
+    expect(LOCK_ENDED_ANNOUNCEMENT).toBe('You can try again now.');
   });
 });
 

@@ -1,5 +1,5 @@
 import { useAppState } from '../../app/AppState';
-import { setFlash, takeFlash } from '../../app/flash';
+import { addFlash, dropFlash } from '../../app/flash';
 import { skipProtect, turnOnLock } from '../../security/appLock';
 import { LogoMark } from '../components/LogoMark';
 import { PasscodeForm } from '../components/PasscodeForm';
@@ -26,15 +26,12 @@ export function ProtectApp() {
         <PasscodeForm
           autoFocus fingerprintOffered={fingerprint} submitLabel="Turn on app lock"
           onSubmit={async (pin, withFingerprint) => {
-            let flashed = false;
             try {
-              // The message waits for the screen that replaces this one: the home screen shows it.
-              await turnOnLock(db, pin, withFingerprint, () => {
-                setFlash(FINGERPRINT_SETUP_FAILED);
-                flashed = true;
-              });
+              // The message waits for the screen that replaces this one: the home screen shows it, after any message that
+              // is already waiting ("Import complete." on a phone restored from a backup).
+              await turnOnLock(db, pin, withFingerprint, () => addFlash(FINGERPRINT_SETUP_FAILED));
             } catch (err) {
-              if (flashed) takeFlash(); // the lock was not saved after all; leave a flash that was there before alone
+              dropFlash(FINGERPRINT_SETUP_FAILED); // the lock was not saved after all: its message is not true; the others stay
               throw err;
             }
           }}

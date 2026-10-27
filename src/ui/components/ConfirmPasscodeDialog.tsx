@@ -5,7 +5,7 @@ import type { FieldError, PinSettings } from '../../domain/types';
 import { isFingerprintAvailable, unlockWithFingerprint } from '../../security/fingerprint';
 import { isValidPin } from '../../security/pin';
 import {
-  FINGERPRINT_NOT_RECOGNISED, PASSCODE_FORMAT_ERROR, WRONG_PASSCODE, confirmIntro, confirmTitle, lockoutText,
+  FINGERPRINT_NOT_RECOGNISED, PASSCODE_FORMAT_ERROR, WRONG_PASSCODE, confirmIntro, confirmTitle, lockoutText, unsavedLockText,
 } from '../lockView';
 import type { ConfirmPurpose } from '../lockView';
 import { useFingerprintAvailable } from '../useFingerprintAvailable';
@@ -16,8 +16,9 @@ import { Field } from './Field';
 const problem = (message: string): FieldError => ({ field: 'current', severity: 'error', message });
 
 /**
- * Asks for the current passcode before Settings changes the passcode or turns the lock off. On a phone with a fingerprint
- * enrolled the fingerprint does as well. The passcode is checked the way the lock screen checks it, with the same
+ * Asks for the current passcode before Settings changes the passcode, turns the lock off or turns the fingerprint on. On a
+ * phone with a fingerprint enrolled the fingerprint does as well, except to turn the fingerprint on: only the passcode may
+ * add a way in. The passcode is checked the way the lock screen checks it, with the same
  * lockout: every wrong one is counted and saved before it is answered, a lock on is shown with its countdown, and an
  * unreadable lockout is the longest lock. `onConfirmed` is called once, when the right passcode or fingerprint is given.
  */
@@ -32,8 +33,8 @@ export function ConfirmPasscodeDialog({ purpose, pin, onConfirmed, onCancel, foc
   const { db } = useAppState();
   const fingerprint = pin.fingerprint;
   const fingerprintAvailable = useFingerprintAvailable() === true;
-  const offerFingerprint = fingerprint !== undefined && fingerprintAvailable;
-  const { lockout, lockedOut, checking, check, recordSuccess } = usePasscodeCheck(db, pin);
+  const offerFingerprint = purpose !== 'fingerprint' && fingerprint !== undefined && fingerprintAvailable;
+  const { ready, lockedOut, remainingMs, unsaved, checking, announcement, check, recordSuccess } = usePasscodeCheck(db, pin);
   const [code, setCode] = useState('');
   const [error, setError] = useState<FieldError>();
   const [prompting, setPrompting] = useState(false);
@@ -42,7 +43,7 @@ export function ConfirmPasscodeDialog({ purpose, pin, onConfirmed, onCancel, foc
   const input = useRef<HTMLInputElement>(null);
 
   const busy = checking || prompting;
-  const canType = lockout !== undefined && !lockedOut && !busy;
+  const canType = ready && !lockedOut && !busy;
 
   async function confirm(): Promise<void> {
     if (!canType) return;
@@ -64,7 +65,7 @@ export function ConfirmPasscodeDialog({ purpose, pin, onConfirmed, onCancel, foc
   }
 
   async function confirmByFingerprint(): Promise<void> {
-    if (!fingerprint || busy || promptingNow.current) return;
+    if (!offerFingerprint || !fingerprint || busy || promptingNow.current) return;
     promptingNow.current = true;
     setPrompting(true);
     try {
@@ -96,7 +97,11 @@ export function ConfirmPasscodeDialog({ purpose, pin, onConfirmed, onCancel, foc
               setError(undefined);
             }}
           />
-          {lockedOut && <p class="lock-message" role="timer">{lockoutText(lockout?.remainingMs ?? 0)}</p>}
+          {lockedOut && (
+            <p class="lock-message" role="timer">{unsaved ? unsavedLockText(remainingMs) : lockoutText(remainingMs)}</p>
+          )}
+          {/* Told once when a lock starts and when it ends; the countdown above is a timer, which is not read out every second. */}
+          <p class="visually-hidden" role="status">{announcement}</p>
           {offerFingerprint && (
             <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => void confirmByFingerprint()}>
               Use fingerprint

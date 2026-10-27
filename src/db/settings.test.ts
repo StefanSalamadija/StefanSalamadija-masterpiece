@@ -37,6 +37,19 @@ describe('updatePin', () => {
     expect((await getSettings(db)).pin).toEqual(pin({ relockMinutes: 20, lockout: { failures: 2 } }));
   });
 
+  it('writes nothing when the change hands back the very pin it was given', async () => {
+    const db = freshDb();
+    await updateSettings(db, { pin: pin() });
+    let writes = 0;
+    db.settings.hook('updating', () => { writes += 1; });
+    const stored = (await getSettings(db)).pin;
+    const after = await updatePin(db, (p) => p);
+    expect(writes).toBe(0);
+    expect(after.pin).toEqual(stored);
+    await updatePin(db, (p) => ({ ...p }));
+    expect(writes).toBe(1);
+  });
+
   it('can take the fingerprint away by leaving it out', async () => {
     const db = freshDb();
     await updateSettings(db, { pin: pin({ fingerprint: { credentialId: 'Y3JlZA', publicKey: 'a2V5', alg: -7 } }) });

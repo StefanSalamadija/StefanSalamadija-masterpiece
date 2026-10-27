@@ -28,7 +28,21 @@ export function gateScreen(input: GateInput): GateScreen {
   return 'app';
 }
 
-/** True when the app has to lock on coming back to the front. No passcode: never. Unreadable times and lock times stay on the side of locking. */
-export function relockDue(pin: PinSettings | undefined, hiddenAt: string | undefined, now: Date): boolean {
-  return pin !== undefined && shouldRelock(hiddenAt, now, relockMinutesOf(pin));
+/** When the app went to the background, on both clocks: the wall clock (an ISO instant) and the monotonic one (`performance.now()`). */
+export interface HiddenMonotonic { hiddenAt: number; now: number }
+
+/**
+ * True when the app has to lock on coming back to the front. No passcode: never; never hidden: no. Anything that cannot be
+ * read stays on the side of locking. The wall clock can be set back to hide a long absence, so a clock that reads earlier
+ * than when the app was hidden counts as due, and so does the monotonic time (if given) passing the lock time: either
+ * clock saying so is enough. (The monotonic clock may stand still while a device sleeps; the wall clock covers that.)
+ */
+export function relockDue(pin: PinSettings | undefined, hiddenAt: string | undefined, now: Date, mono?: HiddenMonotonic): boolean {
+  if (pin === undefined || pin === null) return false;
+  if (hiddenAt === undefined) return false;
+  if (shouldRelock(hiddenAt, now, relockMinutesOf(pin))) return true;
+  if (now.getTime() < Date.parse(hiddenAt)) return true;
+  if (mono === undefined) return false;
+  const away = mono.now - mono.hiddenAt;
+  return Number.isNaN(away) || away < 0 || away > relockMinutesOf(pin) * 60_000;
 }

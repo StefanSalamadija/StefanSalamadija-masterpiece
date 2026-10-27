@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
 
 // Opening a passcode takes a moment (100,000 PBKDF2 rounds): every wait below is on what the page shows, never a sleep.
 // The clock is the one `freshApp` installs, so a lockout and the time in the background are moved with `page.clock`.
@@ -64,6 +64,34 @@ const dialog = (page: Page) => page.getByRole('dialog');
 async function confirmWith(page: Page, code: string): Promise<void> {
   await page.getByLabel('Current passcode').fill(code);
   await dialog(page).getByRole('button', { name: 'Confirm' }).click();
+}
+
+const BACKUP_PASSWORD = 'lozinka-ćevapi';
+const CRYPTO = { timeout: 20_000 }; // 600,000 PBKDF2 rounds to seal or open a backup
+
+/** Exports a full backup from Settings and returns the file the browser saved. */
+async function exportToFile(page: Page): Promise<string> {
+  await page.goto('./#/settings');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export full backup' }).click();
+  await dialog(page).getByLabel('Backup password').fill(BACKUP_PASSWORD);
+  await dialog(page).getByLabel('Repeat password').fill(BACKUP_PASSWORD);
+  await dialog(page).getByRole('button', { name: 'Export', exact: true }).click();
+  const file = await (await download).path();
+  await expect(dialog(page)).toHaveCount(0, CRYPTO);
+  if (file === null) throw new Error('The download has no file.');
+  return file;
+}
+
+/** Wipes the device, and opens `file` on the import screen, ready for Apply import. */
+async function wipeAndOpenImport(page: Page, file: string): Promise<void> {
+  await page.evaluate(() => new Promise((resolve) => { const q = indexedDB.deleteDatabase('masterpiece'); q.onsuccess = q.onerror = q.onblocked = resolve; }));
+  await page.reload();
+  await page.getByRole('link', { name: 'Import a backup' }).click();
+  await page.getByLabel('Backup file').setInputFiles(file);
+  await page.getByLabel('Password').fill(BACKUP_PASSWORD);
+  await page.getByRole('button', { name: 'Open' }).click();
+  await expect(page.getByRole('button', { name: 'Apply import' })).toBeVisible(CRYPTO);
 }
 
 async function openSettings(page: Page): Promise<void> {
@@ -180,10 +208,77 @@ test.describe('on a phone: a fingerprint that cannot be set up, and the fingerpr
     await expect(banner(page)).toContainText(SHIP);
 
     await openSettings(page);
-    await page.getByLabel('Unlock with fingerprint').check();
+    await page.getByLabel('Unlock with fingerprint').click();   // adding a way in asks for the passcode first
+    await confirmWith(page, PIN);
     await expect(page.getByText('Fingerprint unlock is on.')).toBeVisible();
+    await expect(page.getByLabel('Unlock with fingerprint')).toBeChecked();
     await page.reload();                                   // the fingerprint opens it again
     await expect(banner(page)).toContainText(SHIP);
+  });
+
+  test('turning the fingerprint on asks for the current passcode: a wrong one is refused and nothing is enrolled', async ({ page }) => {
+    await virtualFingerprint(page, true);
+    await freshApp(page); await setupShip(page, SHIP, 'UTC+03:00', { skipLock: false });
+    await page.getByLabel('Also unlock with fingerprint').uncheck();     // a lock with the passcode only
+    await turnOnFromProtectStep(page);
+    expect((await deviceSettings(page)).pin.fingerprint).toBeUndefined();
+    await openSettings(page);
+    const toggle = page.getByLabel('Unlock with fingerprint');
+    await expect(toggle).not.toBeChecked();
+
+    await toggle.click();
+    await expect(dialog(page).getByRole('heading', { name: 'Turn on fingerprint unlock?' })).toBeVisible();
+    await expect(dialog(page).getByText('To turn on fingerprint unlock, enter your current passcode.', { exact: true })).toBeVisible();
+    await expect(dialog(page).getByRole('button', { name: 'Use fingerprint' })).toHaveCount(0);
+    await confirmWith(page, '1111');
+    await expect(dialog(page).getByRole('alert')).toHaveText('Wrong passcode.');
+    expect((await deviceSettings(page)).pin.fingerprint).toBeUndefined();   // nothing enrolled
+    expect((await deviceSettings(page)).pin.lockout.failures).toBe(1);      // and counted, like any wrong passcode
+    await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(toggle).not.toBeChecked();
+    expect((await deviceSettings(page)).pin.fingerprint).toBeUndefined();
+
+    // The way round that the review found: a fingerprint added without the passcode would have turned the lock off without it.
+    await page.getByRole('button', { name: 'Turn off app lock' }).click();
+    await expect(dialog(page).getByRole('button', { name: 'Use fingerprint' })).toHaveCount(0);
+    await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+
+    await toggle.click();
+    await confirmWith(page, PIN);
+    await expect(page.getByText('Fingerprint unlock is on.')).toBeVisible();
+    await expect(toggle).toBeChecked();
+    expect((await deviceSettings(page)).pin.fingerprint).toBeDefined();
+    // Taking it away again asks for nothing.
+    await toggle.click();
+    await expect(page.getByText('Fingerprint unlock is off.')).toBeVisible();
+    expect((await deviceSettings(page)).pin.fingerprint).toBeUndefined();
+  });
+
+  test('the fingerprint view puts the focus on its first control', async ({ page }) => {
+    const { cdp, authenticatorId } = await virtualFingerprint(page, true);
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (window as unknown as { focused: string[] }).focused = seen;
+      document.addEventListener('focusin', (event) => seen.push((event.target as HTMLElement).textContent ?? ''));
+    });
+    await freshApp(page); await setupShip(page, SHIP, 'UTC+03:00', { skipLock: false });
+    await turnOnFromProtectStep(page);
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
+    await page.reload();                                                    // the prompt fails, the passcode view follows
+    await expect(page.getByText('Fingerprint not recognised — enter your passcode.')).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { focused: string[] }).focused)).toContain('Unlock with fingerprint');
+  });
+
+  test('on a restored phone whose fingerprint cannot be set up, Import complete. is kept beside the fingerprint message', async ({ page }) => {
+    await freshApp(page); await setupShip(page);
+    const file = await exportToFile(page);
+    await wipeAndOpenImport(page, file);
+    await virtualFingerprint(page, false);                                  // present, but every fingerprint check fails
+    await page.getByRole('button', { name: 'Apply import' }).click();
+    await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
+    await expect(page.getByLabel('Also unlock with fingerprint')).toBeChecked();
+    await turnOnFromProtectStep(page);
+    await expect(page.getByText("Import complete. Fingerprint couldn't be set up. You can try again in Settings.", { exact: true })).toBeVisible();
   });
 
   test('the fingerprint confirms turning the lock off; one that is not recognised changes nothing and counts for nothing', async ({ page }) => {
@@ -548,3 +643,194 @@ test('Forgot passcode: Cancel keeps everything, and Erase everything leaves noth
   await setupShip(page, 'MV SEA BREEZE', 'UTC+03:00', { skipLock: false });
   await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
 });
+
+test('two tabs share one lockout: wrong passcodes add up across them, and a tab that did not know cannot undo or pass a lock', async ({ page }) => {
+  await deviceWithLock(page);
+  await page.reload();
+  const other = await page.context().newPage();
+  const stale = await page.context().newPage();
+  // This tab does not hear what the others save (as a tab that has been asleep does not): it works from a stale lockout.
+  await stale.addInitScript(() => {
+    (window as unknown as { BroadcastChannel: unknown }).BroadcastChannel = class {
+      onmessage = null; onmessageerror = null;
+      postMessage(): void {}
+      close(): void {}
+      addEventListener(): void {}
+      removeEventListener(): void {}
+    };
+  });
+  await other.goto('./');
+  await stale.goto('./');
+  for (const tab of [page, other, stale]) await expect(lockedHeading(tab)).toBeVisible();
+  for (const tab of [page, other, stale]) await expect(passcode(tab)).not.toHaveAttribute('readonly', '');
+
+  // 3 wrong passcodes in one tab and 2 in another make 5: the stored lockout is the sum, and it is a lock, in both.
+  for (let i = 0; i < 3; i++) await passcode(page).fill('0000');
+  await expect(page.getByRole('alert')).toHaveText('Wrong passcode.');
+  for (let i = 0; i < 2; i++) await passcode(other).fill('0000');
+  await expect(countdown(other)).toBeVisible();
+  await expect(countdown(page)).toBeVisible();        // the tab that was not typing is locked too, without being touched
+  const locked = (await deviceSettings(page)).pin.lockout;
+  expect(locked.failures).toBe(5);
+  expect(typeof locked.lockedUntil).toBe('string');
+
+  // The third tab has heard nothing: it still offers a field. A wrong passcode there leaves the lock exactly as it was
+  // (it neither counts nor shortens), and the right one does not pass it.
+  await expect(passcode(stale)).not.toHaveAttribute('readonly', '');
+  await passcode(stale).fill('0000');
+  await expect(passcode(stale)).toHaveValue('');
+  expect((await deviceSettings(page)).pin.lockout).toEqual(locked);
+  await passcode(stale).fill(PIN);
+  await expect(passcode(stale)).toHaveValue('');
+  expect((await deviceSettings(page)).pin.lockout).toEqual(locked);
+  await expect(banner(stale)).toHaveCount(0);
+  await expect(lockedHeading(stale)).toBeVisible();
+  await expect(banner(page)).toHaveCount(0);
+  await stale.close();
+  await other.close();
+
+  // Once the lock is over the right passcode opens the app, and the failures are gone.
+  await page.clock.fastForward(31_000);
+  await expect(countdown(page)).toHaveCount(0);
+  await passcode(page).fill(PIN);
+  await expect(banner(page)).toContainText(SHIP);
+  expect((await deviceSettings(page)).pin.lockout).toEqual({ failures: 0 });
+});
+
+test('the lock time changed in another tab shows in this one', async ({ page }) => {
+  await deviceWithLock(page);
+  await openSettings(page);
+  const minutes = page.getByLabel('Lock after (minutes in background)');
+  await expect(minutes).toHaveValue('5');
+  const other = await page.context().newPage();
+  await other.goto('./');
+  await other.getByLabel('Passcode').fill(PIN);
+  await openSettings(other);
+  await other.getByLabel('Lock after (minutes in background)').fill('9');
+  await other.getByRole('button', { name: 'Set lock time' }).click();
+  await expect(other.getByText('The app locks after 9 minutes in the background.')).toBeVisible();
+  await expect(minutes).toHaveValue('9');
+});
+
+test('a wrong passcode that cannot be saved holds the longest lock, and says so', async ({ page }) => {
+  await deviceWithLock(page);
+  await page.reload();
+  await expect(lockedHeading(page)).toBeVisible();
+  await expect(passcode(page)).not.toHaveAttribute('readonly', '');
+  await failWrites(page);                                  // from now on every write fails the way a full disk does
+  await passcode(page).fill('0000');
+  await expect(page.getByRole('timer')).toHaveText("Couldn't save \u2014 locked for safety. Try again in 300 s.");
+  await expect(passcode(page)).toHaveAttribute('readonly', '');
+  await expect(page.getByRole('alert')).toContainText('Storage on this device is full');   // the error toast, not a passcode message
+  await expect(banner(page)).toHaveCount(0);
+
+  // Nothing opens it while it is on, not even the right passcode; once it is over, and writes work, the right one does.
+  await allowWrites(page);
+  await page.clock.fastForward(301_000);
+  await expect(page.getByRole('timer')).toHaveCount(0);
+  await passcode(page).fill(PIN);
+  await expect(banner(page)).toContainText(SHIP);
+});
+
+test('a damaged passcode setting keeps the app locked, and the only way out is to erase it', async ({ page }) => {
+  await freshApp(page);
+  // What is in the setting, and whether the lock can ever be tried again (a setting with nothing readable in it never can).
+  const damages: { value: unknown; triesAgain: boolean }[] = [
+    { value: null, triesAgain: false },
+    { value: 'garbage', triesAgain: true },
+    { value: {}, triesAgain: true },
+  ];
+  for (const { value, triesAgain } of damages) {
+    await setupShip(page, SHIP, 'UTC+03:00', { skipLock: false });
+    await turnOnFromProtectStep(page);
+    await page.evaluate((damaged) => new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('masterpiece');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const store = open.result.transaction('settings', 'readwrite').objectStore('settings');
+        store.get('device').onsuccess = (event) => {
+          const settings = (event.target as IDBRequest).result;
+          store.put({ ...settings, pin: damaged }).onsuccess = () => { open.result.close(); resolve(); };
+        };
+      };
+    }), value);
+    await page.reload();
+    await expect(lockedHeading(page)).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
+    await expect(page.getByRole('navigation')).toHaveCount(0);
+    await expect(page.getByRole('timer')).toHaveText('Too many attempts. Try again in 300 s.');
+    await expect(passcode(page)).toHaveAttribute('readonly', '');
+
+    await page.clock.fastForward(301_000);
+    if (triesAgain) {
+      // The lock is over, but no passcode matches what is left of the setting: the right one is a wrong one, and it
+      // locks for the longest time at once (an unreadable lockout was made the 7th failure).
+      await expect(passcode(page)).not.toHaveAttribute('readonly', '');
+      await passcode(page).fill(PIN);
+      await expect(page.getByRole('timer')).toHaveText('Too many attempts. Try again in 300 s.');
+    } else {
+      await expect(page.getByRole('timer')).toHaveText('Too many attempts. Try again in 300 s.');   // time does not open it either
+    }
+    await expect(lockedHeading(page)).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Forgot passcode?' }).click();
+    await page.getByRole('button', { name: 'Erase everything' }).click();
+    await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+  }
+});
+
+test('the app locks on coming back when the clock was set back while it was in the background', async ({ page }) => {
+  await deviceWithLock(page);
+  const setVisibility = (state: string) =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, state);
+  await setVisibility('hidden');
+  await page.clock.fastForward('30:00');                  // half an hour away ...
+  await page.clock.setSystemTime('2026-10-25T08:59:00Z'); // ... and the clock then set back to before it left (it was 09:00)
+  await setVisibility('visible');
+  await expect(lockedHeading(page)).toBeVisible();
+  await expect(banner(page)).toHaveCount(0);
+});
+
+test('a screen reader is told once when a lock starts and once when it ends', async ({ page }) => {
+  await deviceWithLock(page);
+  await page.reload();
+  const announcement = page.locator('.lock .visually-hidden');
+  await expect(announcement).toHaveAttribute('role', 'status');
+  await expect(announcement).toHaveText('');
+  for (let i = 0; i < 4; i++) await passcode(page).fill('0000');
+  await expect(page.getByRole('alert')).toHaveText('Wrong passcode.');
+  await expect(announcement).toHaveText('');               // a wrong passcode on its own is the alert, not this
+  await passcode(page).fill('0000');
+  await expect(announcement).toHaveText(/^Locked after too many attempts\. You can try again in (30|29) seconds\.$/);
+  await expect(page.getByRole('timer')).toHaveText(/^Too many attempts\. Try again in \d+ s\.$/);   // the countdown is the timer, once
+  await page.clock.fastForward(31_000);
+  await expect(announcement).toHaveText('You can try again now.');
+});
+
+test('Erase everything: when another page keeps the database open, the dialog says so and is free again; the erase goes through when it lets go', async ({ page }) => {
+  await deviceWithLock(page);
+  await page.reload();
+  // A page of an old version, say: it holds its connection and does not close it when asked.
+  const other = await page.context().newPage();
+  await other.goto('./');
+  await other.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => { (window as unknown as { stubborn: IDBDatabase }).stubborn = open.result; resolve(); };
+  }));
+
+  await page.getByRole('button', { name: 'Forgot passcode?' }).click();
+  await page.getByRole('button', { name: 'Erase everything' }).click();
+  await expect(dialog(page).getByRole('alert')).toHaveText('Close Masterpiece in other tabs, then try again.');
+  await expect(dialog(page).getByRole('button', { name: 'Erase everything' })).toBeEnabled();
+  await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+  // The other page lets go: the delete that was asked for goes through, and this page starts again from nothing.
+  await other.evaluate(() => (window as unknown as { stubborn: IDBDatabase }).stubborn.close());
+  await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+});
+

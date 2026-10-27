@@ -2,7 +2,7 @@
  * What the lock screen believes about the lockout, worked out so that it can only ever fail closed: a state that cannot
  * be read, or a time that cannot be worked with, means locked for the longest lock, never unlocked.
  */
-import type { LockoutState, PinSettings } from '../domain/types';
+import type { FingerprintCredential, LockoutState, PinHash, PinSettings } from '../domain/types';
 import { clampLockout, lockRemainingMs } from './pin';
 
 /** Relock after this many minutes in the background unless the person chose another number. */
@@ -63,7 +63,38 @@ export function evaluateLockout(stored: unknown, now: Date): LockoutView {
 }
 
 /** Minutes in the background before the app locks again. A stored value that is not a usable number gives the default. */
-export function relockMinutesOf(pin: PinSettings): number {
-  const minutes: unknown = pin.relockMinutes;
+export function relockMinutesOf(pin: PinSettings | null | undefined): number {
+  const minutes: unknown = pin?.relockMinutes;
   return typeof minutes === 'number' && Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_RELOCK_MINUTES;
+}
+
+/** A hash that no passcode matches: `verifyPin` gives false for it (zero rounds cannot be derived). */
+const UNUSABLE_HASH: PinHash = { salt: '', hash: '', iterations: 0 };
+
+function isPinHash(value: unknown): value is PinHash {
+  if (typeof value !== 'object' || value === null) return false;
+  const { salt, hash, iterations } = value as Record<string, unknown>;
+  return typeof salt === 'string' && typeof hash === 'string' && typeof iterations === 'number';
+}
+
+function isFingerprint(value: unknown): value is FingerprintCredential {
+  if (typeof value !== 'object' || value === null) return false;
+  const { credentialId, publicKey, alg } = value as Record<string, unknown>;
+  return typeof credentialId === 'string' && typeof publicKey === 'string' && (alg === -7 || alg === -257);
+}
+
+/**
+ * The stored passcode settings as the lock screen works with them. A damaged setting (`null`, a string, an object with
+ * no usable hash) must keep the app locked, not open it, so it is turned into one that nothing opens: no passcode matches
+ * its hash, its lockout is unreadable (which `evaluateLockout` makes the longest lock), and a fingerprint that is
+ * not readable is left out. The only way out of such a lock is to erase the data on the device.
+ */
+export function pinForLock(stored: unknown): PinSettings {
+  const p = typeof stored === 'object' && stored !== null ? (stored as Record<string, unknown>) : {};
+  return {
+    hash: isPinHash(p.hash) ? p.hash : UNUSABLE_HASH,
+    relockMinutes: typeof p.relockMinutes === 'number' ? p.relockMinutes : DEFAULT_RELOCK_MINUTES,
+    lockout: p.lockout as LockoutState, // unread: `evaluateLockout` takes anything, and fails closed
+    ...(isFingerprint(p.fingerprint) && { fingerprint: p.fingerprint }),
+  };
 }

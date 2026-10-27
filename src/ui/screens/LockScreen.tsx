@@ -7,7 +7,7 @@ import { isFingerprintAvailable, unlockWithFingerprint } from '../../security/fi
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LogoMark } from '../components/LogoMark';
 import {
-  FINGERPRINT_NOT_RECOGNISED, PASSCODE_FORMAT_ERROR, WRONG_PASSCODE, lockoutText, passcodeDigits,
+  FINGERPRINT_NOT_RECOGNISED, PASSCODE_FORMAT_ERROR, WRONG_PASSCODE, lockoutText, passcodeDigits, unsavedLockText,
 } from '../lockView';
 import { logoMode } from '../theme';
 import { useDialogAction } from '../useDialogAction';
@@ -29,7 +29,9 @@ function EraseDialog({ onCancel, focusFallback }: { onCancel: () => void; focusF
       focusFallback={focusFallback}
       // On success the page starts again from nothing, so the dialog is never closed here.
       onConfirm={() => void run(async () => {
-        await eraseDeviceData(db);
+        // If another page holds the database the dialog says so and is free again; the delete then goes through when that
+        // page lets go, and this page starts again from nothing.
+        await eraseDeviceData(db, { onErasedLater: () => window.location.reload() });
         window.location.reload();
       })}
       onCancel={onCancel}
@@ -57,13 +59,14 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
   const [notice, setNotice] = useState<Notice>();
   const [prompting, setPrompting] = useState(false);
   const [erasing, setErasing] = useState(false);
-  const { lockout, lockedOut, checking, check, recordSuccess } = usePasscodeCheck(db, pin);
+  const { ready, lockedOut, remainingMs, unsaved, checking, announcement, check, recordSuccess } = usePasscodeCheck(db, pin);
 
   const alive = useRef(true);
   // Set at once, where the state is only seen by the next render: a second prompt in between must not start a second one.
   const promptingNow = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const forgotButton = useRef<HTMLButtonElement>(null);
+  const fingerprintButton = useRef<HTMLButtonElement>(null);
   const inputId = useId();
   const messageId = useId();
 
@@ -113,8 +116,13 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
     if (fingerprint) void unlockByFingerprint();
   }, []);
 
+  // The fingerprint view puts the focus on its first control when it opens (the phone's own prompt opens over it).
+  useEffect(() => {
+    if (view === 'fingerprint') fingerprintButton.current?.focus();
+  }, [view]);
+
   // The field gets the focus when it opens, when a check is over (a wrong passcode keeps it there) and when a lock ends.
-  const canType = view === 'passcode' && lockout !== undefined && !lockedOut && !checking;
+  const canType = view === 'passcode' && ready && !lockedOut && !checking;
   useEffect(() => {
     if (canType) input.current?.focus();
   }, [canType]);
@@ -128,7 +136,7 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
 
   const shipName = activeShip?.particulars.name;
   const showMessage = lockedOut ? (
-    <p id={messageId} class="lock-message" role="timer">{lockoutText(lockout?.remainingMs ?? 0)}</p>
+    <p id={messageId} class="lock-message" role="timer">{unsaved ? unsavedLockText(remainingMs) : lockoutText(remainingMs)}</p>
   ) : notice ? (
     <p id={messageId} class="lock-message" role={notice.urgent ? 'alert' : 'status'}>{notice.text}</p>
   ) : null;
@@ -142,7 +150,10 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
 
         {view === 'fingerprint' ? (
           <div class="lock-actions">
-            <button type="button" class="btn btn-primary btn-large" aria-disabled={prompting ? 'true' : undefined} onClick={() => void unlockByFingerprint()}>
+            <button
+              ref={fingerprintButton} type="button" class="btn btn-primary btn-large" aria-disabled={prompting ? 'true' : undefined}
+              onClick={() => void unlockByFingerprint()}
+            >
               Unlock with fingerprint
             </button>
             <button type="button" class="btn btn-link" onClick={() => setView('passcode')}>Use passcode</button>
@@ -174,6 +185,8 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
         {view === 'fingerprint' && showMessage}
 
         <button ref={forgotButton} type="button" class="btn btn-link" onClick={() => setErasing(true)}>Forgot passcode?</button>
+        {/* Told once when a lock starts and when it ends; the countdown above is a timer, which is not read out every second. */}
+        <p class="visually-hidden" role="status">{announcement}</p>
       </div>
       {erasing && <EraseDialog onCancel={() => setErasing(false)} focusFallback={forgotButton} />}
     </main>

@@ -51,14 +51,17 @@ export function updateSettings(db: MasterpieceDB, patch: Partial<Settings>): Pro
 /**
  * Changes the stored passcode settings (lockout, lock time, fingerprint, hash) from what is stored now, in one
  * transaction, so a stale copy held by the screen never overwrites a newer one. Does nothing when no passcode is set.
- * `change` runs inside the transaction: it must be synchronous.
+ * `change` runs inside the transaction: it must be synchronous. When it hands back the very object it was given,
+ * nothing is written (a look at the stored state, such as the lockout check, writes nothing).
  */
 export function updatePin(db: MasterpieceDB, change: (pin: PinSettings) => PinSettings): Promise<Settings> {
   return guardWrite(() =>
     db.transaction('rw', db.settings, async () => {
       const current = await readOrCreate(db);
       if (!current.pin) return current;
-      const updated: Settings = { ...current, pin: change(current.pin) };
+      const pin = change(current.pin);
+      if (pin === current.pin) return current;
+      const updated: Settings = { ...current, pin };
       await db.settings.put(updated);
       return updated;
     }),

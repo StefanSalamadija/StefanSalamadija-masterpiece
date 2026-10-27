@@ -1,5 +1,6 @@
 import type { ComponentType } from 'preact';
 import { useEffect } from 'preact/hooks';
+import { pinForLock } from '../security/lockState';
 import { ErrorToast } from '../ui/components/ErrorToast';
 import { Header } from '../ui/components/Header';
 import { Nav, ShipNav } from '../ui/components/Nav';
@@ -89,7 +90,9 @@ function Gate() {
     locked: lock.locked,
     lockPrompted: settings.lockPrompted,
   });
-  if (screen === 'lock' && settings.pin) return <LockScreen pin={settings.pin} onUnlock={lock.unlock} />;
+  // A lock decision never ends in the app: a passcode setting that is damaged (`null`, a string) is made into one that
+  // nothing opens, so the app stays locked (the only way out is "Forgot passcode?", which erases the data).
+  if (screen === 'lock') return <LockScreen pin={pinForLock(settings.pin)} onUnlock={lock.unlock} />;
   if (screen === 'protect') return <ProtectApp />;
   return <Shell />;
 }
