@@ -7,7 +7,9 @@ import { relockMinutesOf } from '../../security/lockState';
 import {
   FINGERPRINT_TOGGLE_FAILED, LOCK_FORGOTTEN_NOTE, LOCK_LIMITS_NOTE, LOCK_MINUTES_ERROR, LOCK_NO_REUSE_NOTE, parseLockMinutes,
 } from '../lockView';
+import type { ConfirmPurpose } from '../lockView';
 import { useFingerprintAvailable } from '../useFingerprintAvailable';
+import { ConfirmPasscodeDialog } from './ConfirmPasscodeDialog';
 import { Field } from './Field';
 import { PasscodeForm } from './PasscodeForm';
 
@@ -61,13 +63,20 @@ function LockTimeForm({ pin, say }: { pin: PinSettings; say: Say }) {
   );
 }
 
-/** The lock is on: change the passcode, the fingerprint, the lock time, or turn it off. */
+/**
+ * The lock is on: change the passcode, the fingerprint, the lock time, or turn it off. The passcode cannot be changed and
+ * the lock cannot be turned off without the current passcode (or fingerprint), so that a phone left unlocked is not enough.
+ */
 function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
   const { db } = useAppState();
   const fingerprintAvailable = useFingerprintAvailable() === true;
   const [changing, setChanging] = useState(false);
+  // Changing the passcode and turning the lock off ask for the current passcode (or fingerprint) first.
+  const [confirming, setConfirming] = useState<ConfirmPurpose>();
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
+  // The confirmation closes as the new-passcode form opens: the focus goes to the form's first field, not back to the button that is gone.
+  const newPasscode = useRef<HTMLInputElement>(null);
   // The box follows a tap at once; if the phone then refuses, it goes back to what is true.
   const [fingerprintOn, setFingerprintOn] = useState(pin.fingerprint !== undefined);
   useEffect(() => setFingerprintOn(pin.fingerprint !== undefined), [pin.fingerprint]);
@@ -91,7 +100,7 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
     <>
       {changing ? (
         <PasscodeForm
-          autoFocus fingerprintOffered={false} submitLabel="Set new passcode"
+          autoFocus passcodeRef={newPasscode} fingerprintOffered={false} submitLabel="Set new passcode"
           onSubmit={async (newPin) => {
             await changePasscode(db, newPin);
             setChanging(false);
@@ -101,7 +110,7 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
         />
       ) : (
         <div class="form-actions">
-          <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => setChanging(true)}>
+          <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => setConfirming('change')}>
             Change passcode
           </button>
         </div>
@@ -128,16 +137,27 @@ function LockOn({ pin, say }: { pin: PinSettings; say: Say }) {
       )}
       <LockTimeForm pin={pin} say={say} />
       <div class="form-actions">
-        <button
-          type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined}
-          onClick={() => void run(async () => {
-            await turnOffLock(db);
-            say('App lock is off.');
-          })}
-        >
+        <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => setConfirming('off')}>
           Turn off app lock
         </button>
       </div>
+      {confirming && (
+        <ConfirmPasscodeDialog
+          purpose={confirming} pin={pin} focusFallback={confirming === 'change' ? newPasscode : undefined}
+          onCancel={() => setConfirming(undefined)}
+          onConfirmed={() => {
+            setConfirming(undefined);
+            if (confirming === 'change') {
+              setChanging(true);
+              return;
+            }
+            void run(async () => {
+              await turnOffLock(db);
+              say('App lock is off.');
+            });
+          }}
+        />
+      )}
     </>
   );
 }

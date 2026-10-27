@@ -24,23 +24,21 @@ describe('gateScreen', () => {
     expect(gateScreen({ ...base, hasPin: false, locked: true, lockPrompted: true })).toBe('app');
   });
 
-  it('offers the protect step while it is due and unanswered (lockPrompted is false) and no lock is set', () => {
-    expect(gateScreen({ ...base, hasPin: false, locked: false, lockPrompted: false })).toBe('protect');
+  it('offers the protect step when a ship exists, no lock is set and it has not been answered (lockPrompted not true)', () => {
+    for (const lockPrompted of [undefined, false]) {
+      expect(gateScreen({ ...base, hasPin: false, locked: false, lockPrompted })).toBe('protect');
+    }
     // Also when the in-memory flag still says locked (a passcode that was removed).
-    expect(gateScreen({ ...base, hasPin: false, locked: true, lockPrompted: false })).toBe('protect');
+    expect(gateScreen({ ...base, hasPin: false, locked: true, lockPrompted: undefined })).toBe('protect');
   });
 
   it('does not offer it again once answered', () => {
     expect(gateScreen({ ...base, hasPin: false, locked: false, lockPrompted: true })).toBe('app');
   });
 
-  it('does not offer it on a device whose ship did not come from the welcome screen (lockPrompted never set), such as one filled by an import', () => {
-    expect(gateScreen({ ...base, hasPin: false, locked: false, lockPrompted: undefined })).toBe('app');
-  });
-
   it('never offers it with a ship missing, and never with a passcode set', () => {
-    expect(gateScreen({ ...base, hasShip: false, hasPin: false, locked: false, lockPrompted: false })).toBe('welcome');
-    expect(gateScreen({ ...base, hasPin: true, locked: false, lockPrompted: false })).toBe('app');
+    expect(gateScreen({ ...base, hasShip: false, hasPin: false, locked: false, lockPrompted: undefined })).toBe('welcome');
+    expect(gateScreen({ ...base, hasPin: true, locked: false, lockPrompted: undefined })).toBe('app');
   });
 });
 

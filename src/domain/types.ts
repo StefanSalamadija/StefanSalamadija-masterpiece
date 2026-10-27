@@ -33,7 +33,7 @@ export interface PinSettings { hash: PinHash; relockMinutes: number; lockout: Lo
 export type Theme = 'day' | 'night' | 'contrast';
 export interface Settings { key: 'device'; deviceId: string; deviceName: string; activeShipId?: string; backupReminderDays: number;
   lastExportAt?: string; lastSync: Record<string, string>; theme: Theme; pin?: PinSettings; firstExportDone?: boolean;
-  /** The "Protect Masterpiece" step: `false` while it is due and unanswered (set when the first ship is made on the welcome screen), `true` once answered (lock turned on, or skipped). */
+  /** The "Protect Masterpiece" step was answered (lock turned on, or skipped), so it is not offered again. */
   lockPrompted?: boolean }
 export type SnapshotReason = 'before-import' | 'before-update' | 'manual';
 export interface Snapshot { id: string; createdAt: string; reason: SnapshotReason; note?: string; data: Tables }

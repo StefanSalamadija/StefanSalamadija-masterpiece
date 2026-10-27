@@ -1,3 +1,4 @@
+import type { RefObject } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { reportError } from '../../app/errors';
 import type { FieldError } from '../../domain/types';
@@ -14,6 +15,8 @@ export interface PasscodeFormProps {
   secondary: { label: string; onClick: () => Promise<void> | void };
   /** Puts the focus in the first field when the form appears. */
   autoFocus?: boolean;
+  /** Gives the first field to the caller, such as for a dialog that closes as the form opens to hand the focus to. */
+  passcodeRef?: RefObject<HTMLInputElement | null>;
 }
 
 type Problems = { pin?: FieldError; repeat?: FieldError };
@@ -23,7 +26,7 @@ type Problems = { pin?: FieldError; repeat?: FieldError };
  * the phone has a sensor, and two buttons. The first problem found is shown on its field and gets the focus. While an
  * action runs both buttons are `aria-disabled` (not `disabled`, which would take the focus away) and a second tap is ignored.
  */
-export function PasscodeForm({ fingerprintOffered, submitLabel, onSubmit, secondary, autoFocus }: PasscodeFormProps) {
+export function PasscodeForm({ fingerprintOffered, submitLabel, onSubmit, secondary, autoFocus, passcodeRef }: PasscodeFormProps) {
   const [pin, setPin] = useState('');
   const [repeat, setRepeat] = useState('');
   const [withFingerprint, setWithFingerprint] = useState(true);
@@ -31,7 +34,8 @@ export function PasscodeForm({ fingerprintOffered, submitLabel, onSubmit, second
   const [busy, setBusy] = useState(false);
   // Set at once, where `busy` is only seen by the next render: a second tap in between must not run an action twice.
   const running = useRef(false);
-  const pinInput = useRef<HTMLInputElement>(null);
+  const ownPinInput = useRef<HTMLInputElement>(null);
+  const pinInput = passcodeRef ?? ownPinInput;
   const repeatInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {

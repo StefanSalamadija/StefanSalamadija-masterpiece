@@ -8,7 +8,8 @@ import { logoMode } from '../theme';
 import { useFingerprintAvailable } from '../useFingerprintAvailable';
 
 /**
- * Offered when the first ship has been made on the welcome screen, and again after a restart if it was left unanswered:
+ * Offered when there is a ship, no passcode and no answer yet: after the first ship is made, after a backup is restored
+ * onto an empty device, and again after a restart if it was left unanswered:
  * set a 4-digit passcode, with the fingerprint as well on a phone that has a sensor, or skip. Either answer is kept, so
  * the step does not come back. It covers the whole screen, like the lock, so no ship data is behind it.
  */
@@ -25,11 +26,15 @@ export function ProtectApp() {
         <PasscodeForm
           autoFocus fingerprintOffered={fingerprint} submitLabel="Turn on app lock"
           onSubmit={async (pin, withFingerprint) => {
+            let flashed = false;
             try {
               // The message waits for the screen that replaces this one: the home screen shows it.
-              await turnOnLock(db, pin, withFingerprint, () => setFlash(FINGERPRINT_SETUP_FAILED));
+              await turnOnLock(db, pin, withFingerprint, () => {
+                setFlash(FINGERPRINT_SETUP_FAILED);
+                flashed = true;
+              });
             } catch (err) {
-              takeFlash();
+              if (flashed) takeFlash(); // the lock was not saved after all; leave a flash that was there before alone
               throw err;
             }
           }}

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
-import { updateSettings } from '../../db/settings';
 import { createShip } from '../../db/ships';
 import { deviceOffsetMinutes } from '../../domain/shipTime';
 import { LogoMark } from '../components/LogoMark';
@@ -33,9 +32,6 @@ export function FirstShip() {
     }
     setBusy(true);
     try {
-      // The protect step is due once this ship exists: saved first, so that it is there when the ship arrives, and so that
-      // it comes back after a restart if it is left unanswered. A device that has answered it once is not asked again.
-      if (settings.lockPrompted === undefined) await updateSettings(db, { lockPrompted: false });
       await createShip(db, trimmed, offset);
       // The new ship arrives through the app state, which replaces this screen. Staying busy until then stops a second tap from making a second ship.
     } catch (err) {

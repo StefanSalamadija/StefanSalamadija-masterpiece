@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   FINGERPRINT_NOT_RECOGNISED, FINGERPRINT_SETUP_FAILED, LOCK_FORGOTTEN_NOTE, LOCK_LIMITS_NOTE, LOCK_MINUTES_ERROR,
-  LOCK_NO_REUSE_NOTE, PASSCODE_FORMAT_ERROR, PASSCODE_MISMATCH, WRONG_PASSCODE, lockoutText, parseLockMinutes,
-  passcodeDigits, passcodeProblem, protectIntro,
+  LOCK_NO_REUSE_NOTE, PASSCODE_FORMAT_ERROR, PASSCODE_MISMATCH, WRONG_PASSCODE, confirmIntro, confirmTitle, lockoutText,
+  parseLockMinutes, passcodeDigits, passcodeProblem, protectIntro,
 } from './lockView';
 
 describe('the lock texts', () => {
@@ -24,6 +24,16 @@ describe('the lock texts', () => {
   it('say what the protect step offers: the fingerprint sentence only where there is a sensor', () => {
     expect(protectIntro(false)).toBe('Set a 4-digit passcode to open the app.');
     expect(protectIntro(true)).toBe('Set a 4-digit passcode to open the app. You can also unlock with your fingerprint.');
+  });
+});
+
+describe('the confirmation of the current passcode in Settings', () => {
+  it('names what it is for, and offers the fingerprint only where one is enrolled and available', () => {
+    expect(confirmTitle('change')).toBe('Change passcode?');
+    expect(confirmTitle('off')).toBe('Turn off app lock?');
+    expect(confirmIntro('change', false)).toBe('To set a new passcode, enter your current passcode.');
+    expect(confirmIntro('off', false)).toBe('To turn off the app lock, enter your current passcode.');
+    expect(confirmIntro('off', true)).toBe('To turn off the app lock, enter your current passcode or use your fingerprint.');
   });
 });
 

@@ -46,6 +46,26 @@ async function backgroundFor(page: Page, time: string | number): Promise<void> {
   await setVisibility('visible');
 }
 
+/** The device settings as stored in IndexedDB, to see what was really written. */
+function deviceSettings(page: Page): Promise<Record<string, any>> {
+  return page.evaluate(() => new Promise<Record<string, any>>((resolve, reject) => {
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const request = open.result.transaction('settings').objectStore('settings').get('device');
+      request.onsuccess = () => { open.result.close(); resolve(request.result); };
+    };
+  }));
+}
+
+const dialog = (page: Page) => page.getByRole('dialog');
+
+/** In the confirmation that Settings asks for: types the current passcode and presses Confirm. */
+async function confirmWith(page: Page, code: string): Promise<void> {
+  await page.getByLabel('Current passcode').fill(code);
+  await dialog(page).getByRole('button', { name: 'Confirm' }).click();
+}
+
 async function openSettings(page: Page): Promise<void> {
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
@@ -165,6 +185,29 @@ test.describe('on a phone: a fingerprint that cannot be set up, and the fingerpr
     await page.reload();                                   // the fingerprint opens it again
     await expect(banner(page)).toContainText(SHIP);
   });
+
+  test('the fingerprint confirms turning the lock off; one that is not recognised changes nothing and counts for nothing', async ({ page }) => {
+    const { cdp, authenticatorId } = await virtualFingerprint(page, true);
+    await freshApp(page); await setupShip(page, SHIP, 'UTC+03:00', { skipLock: false });
+    await turnOnFromProtectStep(page);
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Turn off app lock' }).click();
+    await expect(dialog(page).getByText('To turn off the app lock, enter your current passcode or use your fingerprint.')).toBeVisible();
+
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
+    await dialog(page).getByRole('button', { name: 'Use fingerprint' }).click();
+    await expect(dialog(page).getByRole('alert')).toHaveText('Fingerprint not recognised — enter your passcode.');
+    expect((await deviceSettings(page)).pin).toBeDefined();
+    expect((await deviceSettings(page)).pin.lockout.failures).toBe(0);
+
+    await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: true });
+    await dialog(page).getByRole('button', { name: 'Use fingerprint' }).click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect(page.getByText('App lock is off.')).toBeVisible();
+    await page.reload();
+    await expect(banner(page)).toContainText(SHIP);
+    expect(Object.keys(await deviceSettings(page))).not.toContain('pin');
+  });
 });
 
 test('a lockout survives a reload, and the countdown goes on', async ({ page }) => {
@@ -235,13 +278,42 @@ test('a wrong passcode empties the field and leaves the focus in it', async ({ p
   await expect(banner(page)).toContainText(SHIP);
 });
 
-test('Settings: turn the app lock off, and no lock appears after a reload', async ({ page }) => {
+test('Settings: turning the app lock off asks for the current passcode; the wrong one is refused, the right one turns it off', async ({ page }) => {
   await deviceWithLock(page);
   await page.reload();
   await passcode(page).fill(PIN);
   await openSettings(page);
   await expect(page.getByText("Don't reuse your bank card or SIM PIN.")).toBeVisible();
+
+  // Cancel: nothing changes, and the focus goes back to the button.
   await page.getByRole('button', { name: 'Turn off app lock' }).click();
+  await expect(dialog(page).getByRole('heading', { name: 'Turn off app lock?' })).toBeVisible();
+  await expect(dialog(page).getByText('To turn off the app lock, enter your current passcode.')).toBeVisible();
+  await expect(page.getByLabel('Current passcode')).toHaveAttribute('type', 'password');
+  await expect(page.getByLabel('Current passcode')).toHaveAttribute('inputmode', 'numeric');
+  await expect(page.getByLabel('Current passcode')).toHaveAttribute('maxlength', '4');
+  await expect(page.getByLabel('Current passcode')).toBeFocused();
+  await expectNoHorizontalScroll(page);
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Turn off app lock' })).toBeFocused();
+
+  // A wrong passcode is refused; the dialog stays, the field is empty and keeps the focus, and the lock is still on.
+  await page.getByRole('button', { name: 'Turn off app lock' }).click();
+  await confirmWith(page, '1111');
+  await expect(dialog(page).getByRole('alert')).toHaveText('Wrong passcode.');
+  await expect(page.getByLabel('Current passcode')).toHaveValue('');
+  await expect(page.getByLabel('Current passcode')).toBeFocused();
+  expect((await deviceSettings(page)).pin).toBeDefined();
+  await expect(page.getByText('App lock is off.')).toHaveCount(0);
+  // Fewer than four digits is not an attempt: it is said so and nothing is counted.
+  await confirmWith(page, '25');
+  await expect(dialog(page).getByRole('alert')).toHaveText('Use exactly 4 digits.');
+  expect((await deviceSettings(page)).pin.lockout.failures).toBe(1);
+
+  // The right one turns it off, and the failures are forgotten with it.
+  await confirmWith(page, PIN);
+  await expect(dialog(page)).toHaveCount(0);
   await expect(page.getByText('App lock is off.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Turn on app lock' })).toBeVisible();
 
@@ -250,14 +322,7 @@ test('Settings: turn the app lock off, and no lock appears after a reload', asyn
   await expect(lockedHeading(page)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toHaveCount(0); // it was answered once
   // The hash and the lockout are gone from the device settings, not just hidden.
-  const stored = await page.evaluate(() => new Promise<Record<string, unknown>>((resolve, reject) => {
-    const open = indexedDB.open('masterpiece');
-    open.onerror = () => reject(open.error);
-    open.onsuccess = () => {
-      const request = open.result.transaction('settings').objectStore('settings').get('device');
-      request.onsuccess = () => { open.result.close(); resolve(request.result); };
-    };
-  }));
+  const stored = await deviceSettings(page);
   expect(Object.keys(stored)).not.toContain('pin');
   expect(stored.lockPrompted).toBe(true);
 
@@ -277,10 +342,20 @@ test('Settings: turn the app lock off, and no lock appears after a reload', asyn
   await expect(banner(page)).toContainText(SHIP);
 });
 
-test('Settings: change the passcode; the old one fails and the new one works', async ({ page }) => {
+test('Settings: changing the passcode asks for the current one; then the old one fails and the new one works', async ({ page }) => {
   await deviceWithLock(page);
   await openSettings(page);
   await page.getByRole('button', { name: 'Change passcode' }).click();
+  await expect(dialog(page).getByRole('heading', { name: 'Change passcode?' })).toBeVisible();
+
+  // Without the current passcode there is no way to the new one.
+  await confirmWith(page, '1111');
+  await expect(dialog(page).getByRole('alert')).toHaveText('Wrong passcode.');
+  await expect(page.getByLabel('New passcode')).toHaveCount(0);
+  await confirmWith(page, PIN);
+  await expect(dialog(page)).toHaveCount(0);
+
+  await expect(page.getByLabel('New passcode')).toBeFocused();
   await expectNoHorizontalScroll(page);
   await page.getByLabel('New passcode').fill('13');
   await page.getByLabel('Repeat passcode').fill('13');
@@ -294,11 +369,69 @@ test('Settings: change the passcode; the old one fails and the new one works', a
   await page.getByRole('button', { name: 'Set new passcode' }).click();
   await expect(page.getByText('Passcode changed.')).toBeVisible();
 
+  // The old passcode now fails and the new one works, on the lock screen.
   await page.reload();
   await passcode(page).fill(PIN);
   await expect(page.getByRole('alert')).toHaveText('Wrong passcode.');
   await passcode(page).fill('1357');
   await expect(banner(page)).toContainText(SHIP);
+
+  // Asking again wants the new one: the old one no longer opens the way.
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Change passcode' }).click();
+  await confirmWith(page, PIN);
+  await expect(dialog(page).getByRole('alert')).toHaveText('Wrong passcode.');
+  await confirmWith(page, '1357');
+  await expect(page.getByLabel('New passcode')).toBeVisible();
+});
+
+test('Settings: a wrong current passcode counts towards the same lockout as the lock screen, and a lock is shown with its countdown', async ({ page }) => {
+  await deviceWithLock(page);
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Turn off app lock' }).click();
+  for (let i = 0; i < 3; i++) await confirmWith(page, '0000');
+  await expect(dialog(page).getByRole('alert')).toHaveText('Wrong passcode.');
+  expect((await deviceSettings(page)).pin.lockout.failures).toBe(3);   // saved before it was answered
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+
+  // Two more on the lock screen make the fifth: the failures were not forgotten with the dialog.
+  await page.reload();
+  await passcode(page).fill('0000');
+  await expect(page.getByRole('alert')).toHaveText('Wrong passcode.');
+  await passcode(page).fill('0000');
+  await expect(countdown(page)).toBeVisible();
+  await page.clock.fastForward(31_000);
+  await expect(countdown(page)).toHaveCount(0);
+  await passcode(page).fill(PIN);
+  await expect(banner(page)).toContainText(SHIP);
+
+  // The same from the dialog: the fifth wrong one there locks, the dialog says so, and nothing can be tried.
+  expect((await deviceSettings(page)).pin.lockout.failures).toBe(0);
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Change passcode' }).click();
+  for (let i = 0; i < 5; i++) await confirmWith(page, '0000');
+  await expect(dialog(page).getByText(/Too many attempts\. Try again in \d+ s\./)).toBeVisible();
+  await expect(page.getByLabel('Current passcode')).toHaveAttribute('readonly', '');
+  await expect(dialog(page).getByRole('button', { name: 'Confirm' })).toBeDisabled();
+  await expect(dialog(page).getByRole('alert')).toHaveCount(0);
+
+  // A reload does not give the attempts back, and the right passcode is not taken until the lock is over.
+  await page.reload();
+  await expect(countdown(page)).toBeVisible();
+  await expect(passcode(page)).toHaveAttribute('readonly', '');
+  await page.clock.fastForward(31_000);
+  await passcode(page).fill(PIN);
+  await expect(banner(page)).toContainText(SHIP);
+
+  // And the countdown in the dialog ends: the right passcode is then taken.
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Turn off app lock' }).click();
+  for (let i = 0; i < 5; i++) await confirmWith(page, '0000');
+  await expect(dialog(page).getByText(/Too many attempts/)).toBeVisible();
+  await page.clock.fastForward(31_000);
+  await expect(dialog(page).getByText(/Too many attempts/)).toHaveCount(0);
+  await confirmWith(page, PIN);
+  await expect(page.getByText('App lock is off.')).toBeVisible();
 });
 
 test('Settings: the lock time, and the app locking after it', async ({ page }) => {

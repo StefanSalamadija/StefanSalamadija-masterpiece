@@ -18,6 +18,19 @@ export const LOCK_NO_REUSE_NOTE = "Don't reuse your bank card or SIM PIN.";
 
 const MAX_LOCK_MINUTES = 60;
 
+/** What Settings asks the current passcode (or fingerprint) for: setting a new passcode, or turning the lock off. */
+export type ConfirmPurpose = 'change' | 'off';
+
+export function confirmTitle(purpose: ConfirmPurpose): string {
+  return purpose === 'change' ? 'Change passcode?' : 'Turn off app lock?';
+}
+
+/** The line in the confirmation dialog, before the field. */
+export function confirmIntro(purpose: ConfirmPurpose, fingerprint: boolean): string {
+  const what = purpose === 'change' ? 'set a new passcode' : 'turn off the app lock';
+  return `To ${what}, enter your current passcode${fingerprint ? ' or use your fingerprint' : ''}.`;
+}
+
 /** The line under the protect step's heading. The fingerprint sentence is only true on a phone with a sensor. */
 export function protectIntro(fingerprint: boolean): string {
   return `Set a 4-digit passcode to open the app.${fingerprint ? ' You can also unlock with your fingerprint.' : ''}`;

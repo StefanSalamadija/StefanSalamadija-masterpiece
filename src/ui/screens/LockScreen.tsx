@@ -1,14 +1,9 @@
 import type { RefObject } from 'preact';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
-import { reportError } from '../../app/errors';
 import { eraseDeviceData } from '../../app/eraseDevice';
 import type { PinSettings } from '../../domain/types';
-import { saveLockout } from '../../security/appLock';
 import { isFingerprintAvailable, unlockWithFingerprint } from '../../security/fingerprint';
-import { evaluateLockout } from '../../security/lockState';
-import type { LockoutView } from '../../security/lockState';
-import { registerFailure, registerSuccess, verifyPin } from '../../security/pin';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LogoMark } from '../components/LogoMark';
 import {
@@ -17,8 +12,7 @@ import {
 import { logoMode } from '../theme';
 import { useDialogAction } from '../useDialogAction';
 import { useFingerprintAvailable } from '../useFingerprintAvailable';
-
-const COUNTDOWN_STEP_MS = 1000;
+import { usePasscodeCheck } from '../usePasscodeCheck';
 
 interface Notice {
   text: string;
@@ -59,18 +53,14 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
   const fingerprint = pin.fingerprint;
   const fingerprintAvailable = useFingerprintAvailable() === true;
   const [view, setView] = useState<'fingerprint' | 'passcode'>(fingerprint ? 'fingerprint' : 'passcode');
-  /** The lockout once it has been checked and saved; `undefined` until then, so no passcode is taken before. */
-  const [lockout, setLockout] = useState<LockoutView>();
   const [code, setCode] = useState('');
   const [notice, setNotice] = useState<Notice>();
-  const [checking, setChecking] = useState(false);
   const [prompting, setPrompting] = useState(false);
   const [erasing, setErasing] = useState(false);
+  const { lockout, lockedOut, checking, check, recordSuccess } = usePasscodeCheck(db, pin);
 
   const alive = useRef(true);
-  const stored = useRef<unknown>(pin.lockout);
-  // Set at once, where the state is only seen by the next render: a second try in between must not start a second check.
-  const checkingNow = useRef(false);
+  // Set at once, where the state is only seen by the next render: a second prompt in between must not start a second one.
   const promptingNow = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const forgotButton = useRef<HTMLButtonElement>(null);
@@ -80,31 +70,6 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
   useEffect(() => () => {
     alive.current = false;
   }, []);
-
-  /** Looks at the lockout now, saves it if it had to be repaired or cut short, and only then lets the countdown show. */
-  async function settle(): Promise<LockoutView> {
-    const next = evaluateLockout(stored.current, new Date());
-    if (next.persist) {
-      stored.current = next.state;
-      try {
-        await saveLockout(db, next.state);
-      } catch (err) {
-        reportError(err); // the lock holds in memory all the same
-      }
-    }
-    if (alive.current) setLockout(next);
-    return next;
-  }
-
-  async function finishUnlock(): Promise<void> {
-    stored.current = registerSuccess();
-    try {
-      await saveLockout(db, registerSuccess());
-    } catch (err) {
-      reportError(err); // the way in was right; failing to forget the failures must not keep the person out
-    }
-    onUnlock();
-  }
 
   async function unlockByFingerprint(): Promise<void> {
     if (!fingerprint || promptingNow.current) return;
@@ -118,7 +83,8 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
       const ok = await unlockWithFingerprint(fingerprint);
       if (!alive.current) return;
       if (ok) {
-        await finishUnlock();
+        await recordSuccess();
+        onUnlock();
       } else {
         // A fingerprint that is not recognised does not count towards the lockout.
         setNotice({ text: FINGERPRINT_NOT_RECOGNISED, urgent: false });
@@ -131,53 +97,21 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
   }
 
   async function tryPasscode(entered: string): Promise<void> {
-    if (checkingNow.current) return;
-    checkingNow.current = true;
-    setChecking(true);
-    try {
-      const before = await settle();
-      if (before.remainingMs > 0) {
-        setNotice(undefined);
-        setCode('');
-        return;
-      }
-      if (await verifyPin(entered, pin.hash)) {
-        await finishUnlock();
-        return;
-      }
-      const at = new Date();
-      const failed = registerFailure(before.state, at);
-      stored.current = failed;
-      try {
-        await saveLockout(db, failed); // saved before the result is shown
-      } catch (err) {
-        reportError(err);
-      }
-      if (!alive.current) return;
-      const now = evaluateLockout(failed, at);
-      setLockout(now);
-      // Once the lock is on, the countdown says it; "Wrong passcode." would only come back, stale, when the lock ends.
-      setNotice(now.remainingMs > 0 ? undefined : { text: WRONG_PASSCODE, urgent: true });
-      setCode('');
-    } finally {
-      checkingNow.current = false;
-      if (alive.current) setChecking(false);
+    const result = await check(entered);
+    if (result === 'ignored' || !alive.current) return;
+    if (result === 'right') {
+      onUnlock();
+      return;
     }
+    // Once the lock is on, the countdown says it; "Wrong passcode." would only come back, stale, when the lock ends.
+    setNotice(result === 'wrong' ? { text: WRONG_PASSCODE, urgent: true } : undefined);
+    setCode('');
   }
 
-  // Once, on opening: check the saved lockout, and open the phone's fingerprint prompt if one is enrolled.
+  // Once, on opening: open the phone's fingerprint prompt if one is enrolled.
   useEffect(() => {
-    void settle();
     if (fingerprint) void unlockByFingerprint();
   }, []);
-
-  const lockedOut = lockout !== undefined && lockout.remainingMs > 0;
-
-  useEffect(() => {
-    if (!lockedOut) return;
-    const timer = window.setInterval(() => void settle(), COUNTDOWN_STEP_MS);
-    return () => window.clearInterval(timer);
-  }, [lockedOut]);
 
   // The field gets the focus when it opens, when a check is over (a wrong passcode keeps it there) and when a lock ends.
   const canType = view === 'passcode' && lockout !== undefined && !lockedOut && !checking;
@@ -194,7 +128,7 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
 
   const shipName = activeShip?.particulars.name;
   const showMessage = lockedOut ? (
-    <p id={messageId} class="lock-message" role="timer">{lockoutText(lockout.remainingMs)}</p>
+    <p id={messageId} class="lock-message" role="timer">{lockoutText(lockout?.remainingMs ?? 0)}</p>
   ) : notice ? (
     <p id={messageId} class="lock-message" role={notice.urgent ? 'alert' : 'status'}>{notice.text}</p>
   ) : null;

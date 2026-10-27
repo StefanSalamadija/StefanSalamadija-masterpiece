@@ -8,11 +8,25 @@ export async function freshApp(page: Page, opts: { time?: string } = {}): Promis
 }
 
 /**
+ * Answers the protect step with `Skip for now`, if it is on screen, and waits for the app behind it. The step is offered
+ * whenever a ship exists, no passcode is set and it has not been answered: after the first ship is made and after a backup is
+ * restored onto an empty device. After `Create ship` or `Apply import` the app shows either the protect step (heading
+ * `Protect Masterpiece`, which covers the whole screen) or the header (banner), never both; this waits for whichever comes.
+ * `ship`, if given, is the name the header must then show.
+ */
+export async function skipProtectStep(page: Page, ship?: string): Promise<void> {
+  const protect = page.getByRole('heading', { name: 'Protect Masterpiece' });
+  const header = page.getByRole('banner');
+  await expect(protect.or(header)).toBeVisible();
+  if (await protect.isVisible()) await page.getByRole('button', { name: 'Skip for now' }).click();
+  await (ship === undefined ? expect(header).toBeVisible() : expect(header).toContainText(ship));
+}
+
+/**
  * Creates the first ship from the welcome screen. `offset` is the label of the ship's-time option, such as `UTC+03:00`.
- * After `Create ship` the app shows either the protect step (heading `Protect Masterpiece`, which covers the whole screen) or
- * the header (banner). With `skipLock` (the default) the protect step is answered with `Skip for now`, and the helper then
- * waits for the header to show the ship. With `skipLock: false` it returns as soon as either is on screen, so a test of the
- * protect step finds it still there.
+ * With `skipLock` (the default) the protect step that follows is answered with `Skip for now` (see `skipProtectStep`) and the
+ * helper waits for the header to show the ship. With `skipLock: false` it returns as soon as the protect step or the header
+ * is on screen, so a test of the protect step finds it still there.
  */
 export async function setupShip(
   page: Page, name = 'MV OCEAN STAR', offset = 'UTC+03:00', opts: { skipLock?: boolean } = {},
@@ -22,13 +36,9 @@ export async function setupShip(
   await page.getByLabel('Ship name').fill(name);
   await page.getByLabel("Ship's time (UTC offset)").selectOption({ label: offset });
   await page.getByRole('button', { name: 'Create ship' }).click();
-  const protect = page.getByRole('heading', { name: 'Protect Masterpiece' });
-  const header = page.getByRole('banner');
+  if (skipLock) return skipProtectStep(page, name);
   // Never both at once: the protect step is a full screen of its own, with no header behind it.
-  await expect(protect.or(header)).toBeVisible();
-  if (!skipLock) return;
-  if (await protect.isVisible()) await page.getByRole('button', { name: 'Skip for now' }).click();
-  await expect(header).toContainText(name);
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' }).or(page.getByRole('banner'))).toBeVisible();
 }
 
 /** At phone width (360 px) the page must not scroll sideways. */

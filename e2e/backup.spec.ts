@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import type { Download, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
 
 // Every device starts at 2026-10-25T09:00Z with the ship at UTC+03:00, so the ship's today is 2026-10-25.
 // Opening or sealing a file derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow one
@@ -197,10 +197,39 @@ test('full backup round trip on a wiped device', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Review' })).toBeFocused();
   await expectNoHorizontalScroll(page);
   await page.getByRole('button', { name: 'Apply import' }).click();
-  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+  // A device restored from a backup is asked to protect the app before anything else is shown.
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
+  await skipProtectStep(page, 'MV OCEAN STAR');
   await expect(page).toHaveURL(/#\/$/);
   await expect(page.getByText('Import complete.')).toBeVisible();
   await page.goto('./#/ship/crew'); await expect(page.getByRole('listitem').filter({ hasText: 'PETROVIĆ' })).toBeVisible();
+});
+
+test('a backup restored onto an empty device asks to protect the app, and the answer is kept', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const file = await pathOf(await exportFull(page, PASSWORD));
+  await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('masterpiece'); q.onsuccess = q.onerror = q.onblocked = r; }));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+  await page.getByRole('link', { name: 'Import a backup' }).click();
+  await openFile(page, file, PASSWORD);
+  await expect(applyButton(page)).toBeVisible(CRYPTO);
+  await applyButton(page).click();
+
+  // The step comes before the app: no header, nothing of the restored ship behind it.
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
+  await expect(page.getByRole('banner')).toHaveCount(0);
+  await expect(page.getByRole('navigation')).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+  await expect(page).toHaveURL(/#\/$/);
+  await expect(page.getByText('Import complete.')).toBeVisible();
+
+  // Skipping is an answer: it is not asked again.
+  await page.reload();
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toHaveCount(0);
 });
 
 test('handover file holds one ship; conflict across two devices', async ({ browser }) => {
@@ -223,7 +252,7 @@ test('handover file holds one ship; conflict across two devices', async ({ brows
     await summary(b, '3 new · 0 updated · 0 deleted · 0 conflicts');
     await expect(applyButton(b)).toBeEnabled();
     await applyButton(b).click();
-    await expect(b.getByRole('banner')).toContainText('MV OCEAN STAR');
+    await skipProtectStep(b, 'MV OCEAN STAR');
     await b.goto('./#/profiles');
     await expect(shipList(b).getByRole('listitem')).toHaveCount(1);
     await expect(shipList(b).getByRole('listitem')).toContainText('MV OCEAN STAR');
@@ -418,7 +447,7 @@ test('a handover file has a password of its own and holds one ship only', async 
     await b.getByRole('button', { name: 'Open' }).click();
     await summary(b, '3 new · 0 updated · 0 deleted · 0 conflicts');
     await applyButton(b).click();
-    await expect(b.getByRole('banner')).toContainText('MV OCEAN STAR');
+    await skipProtectStep(b, 'MV OCEAN STAR');
     await b.goto('./#/profiles');
     await expect(shipList(b).getByRole('listitem')).toHaveCount(1);
     expect((await stored(b, 'ships')).map((s) => s.particulars.name)).toEqual(['MV OCEAN STAR']);
@@ -444,6 +473,7 @@ test('deletions are listed and left alone unless they are ticked; a conflict can
     await openFile(b, await pathOf(first), PASSWORD);
     await summary(b, '4 new · 0 updated · 0 deleted · 0 conflicts');
     await applyButton(b).click();
+    await skipProtectStep(b); // the restored device is asked to protect the app first; the message is shown on Home after it
     await expect(b.getByText('Import complete.')).toBeVisible();
 
     // A deletes both people. On B, one of them was changed meanwhile.
@@ -514,6 +544,7 @@ test('a review that went stale is refused, and nothing is written', async ({ bro
     await openFile(b, await pathOf(first), PASSWORD);
     await summary(b, '3 new · 0 updated · 0 deleted · 0 conflicts');
     await applyButton(b).click();
+    await skipProtectStep(b); // the other tab of B, further down, then finds the step answered: the answer is kept with the device
     await expect(b.getByText('Import complete.')).toBeVisible();
 
     // A changes the crew member and exports again; B opens the new file, and the review shows one update.
