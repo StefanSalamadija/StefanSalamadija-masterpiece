@@ -918,6 +918,99 @@ textarea {
   color: var(--on-red);
 }
 
+/* ---- Home ---- */
+
+/* A reminder above the alerts. The words carry it; the amber edge only marks it. */
+.home-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--amber);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+:root[data-theme='contrast'] .home-notice {
+  border-width: 2px;
+  border-left-width: 8px;
+}
+
+.home-notice p {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.alerts {
+  margin: 0 0 16px;
+}
+
+.alerts h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.alerts .empty {
+  margin: 0;
+}
+
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alert-row {
+  padding: 0;
+}
+
+/* The whole card is the link to the record. */
+.alert-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: var(--target);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+}
+
+.alert-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.alert-title {
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.alert-detail {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.clock-change {
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Crew import ---- */
 
 /*

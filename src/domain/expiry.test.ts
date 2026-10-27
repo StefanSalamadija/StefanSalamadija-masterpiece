@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { certificateBand, crewDocBand, expiryBand, worstBand } from './expiry';
+import { certificateBand, certificateExpiryBand, crewDocBand, crewDocExpiryBand, expiryBand, worstBand } from './expiry';
 import type { CrewDraft } from './types';
 
 const REF = '2026-10-25';
@@ -76,5 +76,18 @@ describe('crewDocBand', () => {
   });
   it('is none when neither document has an expiry', () => {
     expect(crewDocBand({ ...draft, passportExpiry: '', seamansBookExpiry: '' }, REF)).toBe('none');
+  });
+});
+
+describe('crewDocExpiryBand and certificateExpiryBand', () => {
+  it('give one date the band that the whole record is judged by', () => {
+    expect(crewDocExpiryBand('2027-04-25', REF)).toBe('amber');
+    expect(crewDocExpiryBand('2027-04-26', REF)).toBe('ok');
+    expect(crewDocExpiryBand('2026-10-24', REF)).toBe('red');
+    expect(crewDocExpiryBand('', REF)).toBe('none');
+    expect(certificateExpiryBand('2027-01-23', REF)).toBe('amber');
+    expect(certificateExpiryBand('2027-01-24', REF)).toBe('ok');
+    expect(certificateExpiryBand('2026-10-24', REF)).toBe('red');
+    expect(certificateExpiryBand(undefined, REF)).toBe('none');
   });
 });

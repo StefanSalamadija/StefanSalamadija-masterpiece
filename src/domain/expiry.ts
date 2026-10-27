@@ -22,18 +22,22 @@ export function worstBand(...b: Band[]): Band {
   return b.reduce<Band>((worst, band) => (BAND_RANK[band] > BAND_RANK[worst] ? band : worst), 'none');
 }
 
-/** Worst of passport and seaman's book, amber from 6 months out. */
-export function crewDocBand(m: CrewDraft, ref: string): Band {
-  return worstBand(
-    expiryBand(m.passportExpiry, ref, CREW_DOC_WINDOW),
-    expiryBand(m.seamansBookExpiry, ref, CREW_DOC_WINDOW),
-  );
+/** One crew document's band (a passport or a seaman's book), amber from 6 months out. */
+export function crewDocExpiryBand(expiry: string | undefined, ref: string): Band {
+  return expiryBand(expiry, ref, CREW_DOC_WINDOW);
 }
 
-/** Worst of expiry and next survey, amber from 90 days out. */
+/** One certificate date's band (an expiry or a next survey), amber from 90 days out. */
+export function certificateExpiryBand(date: string | undefined, ref: string): Band {
+  return expiryBand(date, ref, CERTIFICATE_WINDOW);
+}
+
+/** Worst of passport and seaman's book. */
+export function crewDocBand(m: CrewDraft, ref: string): Band {
+  return worstBand(crewDocExpiryBand(m.passportExpiry, ref), crewDocExpiryBand(m.seamansBookExpiry, ref));
+}
+
+/** Worst of expiry and next survey. */
 export function certificateBand(c: Pick<Certificate, 'expiryDate' | 'nextSurveyDue'>, ref: string): Band {
-  return worstBand(
-    expiryBand(c.expiryDate, ref, CERTIFICATE_WINDOW),
-    expiryBand(c.nextSurveyDue, ref, CERTIFICATE_WINDOW),
-  );
+  return worstBand(certificateExpiryBand(c.expiryDate, ref), certificateExpiryBand(c.nextSurveyDue, ref));
 }
