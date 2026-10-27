@@ -30,7 +30,8 @@ function sameProps(a: Record<string, unknown>, b: Record<string, unknown>, ignor
   return true;
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
+/** Deep equality of two values from JSON: object key order is irrelevant, array order is not. */
+export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b || Object.is(a, b)) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
   if (Array.isArray(a) || Array.isArray(b)) {

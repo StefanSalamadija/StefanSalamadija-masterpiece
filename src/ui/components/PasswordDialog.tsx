@@ -63,7 +63,7 @@ export function PasswordDialog({
           {intro}
           {showWarning && <p class="field-warning">{KEEP_PASSWORD_SAFE}</p>}
           <Field
-            label="Backup password" type="password" value={password} inputRef={passwordInput}
+            label="Backup password" type="password" autoComplete="new-password" value={password} inputRef={passwordInput}
             error={problem('password', problems.password)}
             onInput={(value) => {
               setPassword(value);
@@ -71,7 +71,7 @@ export function PasswordDialog({
             }}
           />
           <Field
-            label="Repeat password" type="password" value={repeat} inputRef={repeatInput}
+            label="Repeat password" type="password" autoComplete="new-password" value={repeat} inputRef={repeatInput}
             error={problem('repeat', problems.repeat)}
             onInput={(value) => {
               setRepeat(value);

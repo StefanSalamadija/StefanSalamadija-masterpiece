@@ -1,6 +1,6 @@
 import { RANKS } from '../domain/catalogues';
 import { formatUtcMinute } from '../domain/dates';
-import { conflictKey } from '../domain/merge';
+import { conflictKey, deepEqual } from '../domain/merge';
 import type { MergeItem, MergePlan } from '../domain/merge';
 import { formatOffset, isValidOffset } from '../domain/shipTime';
 import type { SyncRecord, TableName } from '../domain/types';
@@ -20,8 +20,16 @@ const MAX_VALUE = 200;
 /** Shown for a value that is empty or missing. */
 export const EMPTY_VALUE = '—';
 
-/** Control characters, and the ones that hide text or flip its direction (zero-width space, LRM/RLM, bidi embeddings and isolates, word joiner, BOM). */
-const HIDDEN = /[\u0000-\u001F\u007F-\u009F​‎‏‪-‮⁠⁦-⁩﻿]/g;
+/*
+ * What is taken out of text from a file. Written with escapes and property names only: a literal invisible character in
+ * source cannot be read by a reviewer, which is the "Trojan Source" problem (see `sourceHygiene.test.ts`).
+ *  - `\p{Cc}`: control characters, the C1 ones (NEL) included.
+ *  - `\p{Bidi_Control}`: the marks, embeddings, overrides and isolates that flip or reorder text, and the Arabic letter mark.
+ *  - `\u00AD` soft hyphen, `\u180E` Mongolian vowel separator, `\u200B` zero-width space, `\u2060`-`\u2064` word joiner and
+ *    the invisible operators, `\uFEFF` byte order mark, and `\u{E0000}`-`\u{E007F}` tag characters (text that is not shown).
+ * The zero-width joiner and non-joiner stay: emoji sequences and some scripts cannot be written without them.
+ */
+const HIDDEN = /[\p{Cc}\p{Bidi_Control}\u00AD\u180E\u200B\u2060-\u2064\uFEFF\u{E0000}-\u{E007F}]/gu;
 
 /** `text` made safe to show: line breaks and tabs as spaces, hidden characters removed, trimmed, and cut to `max` characters with `…` where it was cut. */
 export function plainText(text: string, max: number): string {
@@ -32,6 +40,15 @@ export function plainText(text: string, max: number): string {
 
 export function isTooBigForBackup(bytes: number): boolean {
   return bytes > MAX_BACKUP_FILE_BYTES;
+}
+
+export const TOO_LARGE_MESSAGE = `This file is too large to be a Masterpiece backup (over ${MAX_BACKUP_FILE_BYTES / (1024 * 1024)} MB).`;
+
+const MAX_FILE_NAME_SHOWN = 100;
+
+/** The name of the chosen file as it is shown: a file name can carry the same tricks as any text from outside. */
+export function shownFileName(name: string): string {
+  return plainText(name, MAX_FILE_NAME_SHOWN);
 }
 
 /** "From Bridge laptop, exported 2026-10-25 09:05 UTC": the file's header, which has not been checked against the password yet. */
@@ -135,7 +152,7 @@ export function changedFields(table: TableName, local: SyncRecord, incoming: Syn
     changes.push({ label: 'Status', local: local.deleted ? 'Deleted' : 'Active', incoming: incoming.deleted ? 'Deleted' : 'Active' });
   }
   for (const key of keys) {
-    if (JSON.stringify(mine[key]) === JSON.stringify(theirs[key])) continue;
+    if (deepEqual(mine[key], theirs[key])) continue;
     changes.push({ label: labels[key] ?? (plainText(key, MAX_TITLE) || EMPTY_VALUE), local: show(key, mine[key]), incoming: show(key, theirs[key]) });
   }
   return changes;

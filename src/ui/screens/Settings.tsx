@@ -7,15 +7,15 @@ import type { ExportOutcome } from '../../backup/exportFlow';
 import { getRememberedPassword } from '../../backup/passwordCache';
 import { updateSettings } from '../../db/settings';
 import { listShips } from '../../db/ships';
-import { listSnapshots, restoreSnapshot } from '../../db/snapshots';
+import { listSnapshots, restoreSnapshot, SNAPSHOTS_KEPT } from '../../db/snapshots';
 import type { SnapshotSummary } from '../../db/snapshots';
 import type { FieldError } from '../../domain/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { PasswordDialog } from '../components/PasswordDialog';
 import {
-  cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, parseReminderDays, REMINDER_ERROR, snapshotCountsText,
-  snapshotDate, snapshotReason,
+  cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, oldestRemovedNote, parseReminderDays, REMINDER_ERROR,
+  snapshotCountsText, snapshotDate, snapshotReason,
 } from '../settingsView';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
@@ -96,8 +96,10 @@ function BackupSection() {
   );
 }
 
-function RestoreDialog({ snapshot, onClose, onRestored, focusFallback }: {
+function RestoreDialog({ snapshot, removalNote, onClose, onRestored, focusFallback }: {
   snapshot: SnapshotSummary;
+  /** Said when the restore pushes the oldest snapshot out: the snapshots are full. */
+  removalNote?: string;
   onClose: () => void;
   onRestored: () => void;
   focusFallback: RefObject<HTMLElement | null>;
@@ -116,9 +118,10 @@ function RestoreDialog({ snapshot, onClose, onRestored, focusFallback }: {
       body={
         <>
           <p>
-            {`This puts back the ships, crew, certificates and voyages of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`}
+            {`This puts back the ships, crew, certificates, voyages and clock changes of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`}
           </p>
           <p>Your current data is saved as a snapshot first, so the restore can be undone.</p>
+          {removalNote && <p>{removalNote}</p>}
         </>
       }
     />
@@ -138,7 +141,7 @@ function SnapshotSection() {
       {/* The focus goes here when the Restore button that opened the dialog is gone with its row. */}
       <h3 ref={heading} tabIndex={-1}>Restore snapshot</h3>
       <p class="helper-text">
-        Masterpiece keeps the last 5 snapshots of your data. One is saved automatically before an import and before an update.
+        {`Masterpiece keeps the last ${SNAPSHOTS_KEPT} snapshots of your data. One is saved automatically before an import, before an update and before a restore.`}
       </p>
       {snapshots?.length === 0 && <p class="empty">No snapshots yet.</p>}
       {snapshots && snapshots.length > 0 && (
@@ -169,7 +172,8 @@ function SnapshotSection() {
       <p class="live" role="status">{status}</p>
       {requested && (
         <RestoreDialog
-          snapshot={requested} focusFallback={heading} onClose={() => setRequested(undefined)}
+          snapshot={requested} removalNote={oldestRemovedNote(snapshots ?? [], SNAPSHOTS_KEPT)} focusFallback={heading}
+          onClose={() => setRequested(undefined)}
           onRestored={() => {
             setStatus(`Restored the snapshot from ${snapshotDate(requested.createdAt)}. Your previous data is saved as "Before restore".`);
             setRequested(undefined);

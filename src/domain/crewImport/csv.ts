@@ -30,7 +30,7 @@ function detectDelimiter(text: string): ',' | ';' {
  * Trailing rows with no content are dropped.
  */
 export function parseCsv(text: string): string[][] {
-  const source = text.startsWith('﻿') ? text.slice(1) : text;
+  const source = text.startsWith('\uFEFF') ? text.slice(1) : text;
   const delimiter = detectDelimiter(source);
   const rows: string[][] = [];
   let row: string[] = [];

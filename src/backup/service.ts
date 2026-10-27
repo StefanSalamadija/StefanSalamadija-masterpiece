@@ -1,5 +1,5 @@
 import { allTables, putRecords } from '../db/records';
-import { syncTables } from '../db/schema';
+import { syncTable, syncTables } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
 import { getSettings, updateSettings } from '../db/settings';
 import { listShips, liveActiveShipId } from '../db/ships';
@@ -10,7 +10,7 @@ import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { TABLE_NAMES } from '../domain/types';
 import type { ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
-import { DamagedFileError, openBackup, sealBackup, validatePassword } from './envelope';
+import { DamagedFileError, StaleReviewError, openBackup, sealBackup, validatePassword } from './envelope';
 import type { BackupHeader } from './envelope';
 import { backupFileName } from './fileName';
 
@@ -100,18 +100,39 @@ function laterOf(existing: string | undefined, incoming: string): string {
 }
 
 /**
- * Merges a prepared import into this device. When it writes anything, the data as it is now is first saved as a
- * `'before-import'` snapshot (an import that changes nothing must not push an older snapshot out). The records, the
- * time of this exchange with the other device (`lastSync`, never moved back) and the active ship are then saved in
- * one transaction, so a failed write leaves all three as they were. Throws, before touching anything, if a conflict
- * has no decision.
+ * Throws `StaleReviewError` unless every record the review compared the file with is still as the review saw it: the
+ * same `updatedAt` for a record that was there, and still absent for one that was added. Without this an import would
+ * write the file's version over a change made here after the review (in another tab, say), and a conflict settled as
+ * "keep this device's version" would write back the old copy of this device's record. Run inside the write transaction
+ * it is exact; run before it, it only keeps a refused review from using up a snapshot.
+ */
+async function assertReviewCurrent(db: MasterpieceDB, plan: MergePlan): Promise<void> {
+  for (const table of TABLE_NAMES) {
+    const items = plan.items.filter((item) => item.table === table);
+    if (items.length === 0) continue;
+    const current = await syncTable(db, table).bulkGet(items.map((item) => item.id));
+    const stale = items.some((item, i) => (item.local === undefined ? current[i] !== undefined : current[i]?.updatedAt !== item.local.updatedAt));
+    if (stale) throw new StaleReviewError();
+  }
+}
+
+/**
+ * Merges a prepared import into this device. First it checks that the data here is still what the review saw
+ * (`StaleReviewError` if not, before anything is written, a snapshot included, so that a refused review never uses up
+ * one of the snapshots). When it writes anything, the data as it is now is then saved as a `'before-import'` snapshot
+ * (an import that changes nothing must not push an older snapshot out). The records, the time of this exchange with the
+ * other device (`lastSync`, never moved back) and the active ship are then saved in one transaction, which checks the
+ * review once more, so a change made while the snapshot was taken is not written over either, and a failed write leaves
+ * all three as they were. Throws, before touching anything, if a conflict has no decision.
  */
 export async function applyImport(db: MasterpieceDB, p: PreparedImport, decisions: MergeDecisions): Promise<void> {
   const { deviceId } = await getSettings(db);
   const writes = resolveMerge(p.plan, decisions, new Date().toISOString(), deviceId);
+  await assertReviewCurrent(db, p.plan);
   if (writes.length > 0) await takeSnapshot(db, 'before-import');
   await guardWrite(() =>
     db.transaction('rw', [...syncTables(db), db.settings], async () => {
+      await assertReviewCurrent(db, p.plan);
       await putRecords(db, writes);
       const settings = await getSettings(db);
       const from = p.header.deviceId;

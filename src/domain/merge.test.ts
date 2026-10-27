@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeMerge, conflictKey, resolveMerge, sameContent } from './merge';
+import { computeMerge, conflictKey, deepEqual, resolveMerge, sameContent } from './merge';
 import type { Certificate, CrewMember, SyncRecord, Tables } from './types';
 
 const L = '2026-10-20T00:00:00.000Z';
@@ -272,6 +272,23 @@ describe('sameContent', () => {
     expect(sameContent(ship({ ...p1, tags: ['a', 'b'] }), ship({ ...p1, tags: ['a', 'b'] }))).toBe(true);
     expect(sameContent(ship({ ...p1, tags: ['a', 'b'] }), ship({ ...p1, tags: ['b', 'a'] }))).toBe(false);
     expect(sameContent(ship({ ...p1, tags: ['a'] }), ship({ ...p1, tags: { 0: 'a' } }))).toBe(false);
+  });
+});
+
+describe('deepEqual', () => {
+  it('compares objects whatever the order of their keys, and arrays by position', () => {
+    expect(deepEqual({ a: 1, b: { c: [1, 2], d: 'x' } }, { b: { d: 'x', c: [1, 2] }, a: 1 })).toBe(true);
+    expect(deepEqual([1, 2], [2, 1])).toBe(false);
+    expect(deepEqual({ a: 1 }, { a: 2 })).toBe(false);
+    expect(deepEqual({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false);
+  });
+
+  it('takes a missing key for one that is undefined, and tells values of different types apart', () => {
+    expect(deepEqual({ a: 1 }, { a: 1, b: undefined })).toBe(true);
+    expect(deepEqual('1', 1)).toBe(false);
+    expect(deepEqual(null, {})).toBe(false);
+    expect(deepEqual([], {})).toBe(false);
+    expect(deepEqual(undefined, undefined)).toBe(true);
   });
 });
 

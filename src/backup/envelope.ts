@@ -43,6 +43,12 @@ export class DamagedFileError extends BackupError {
   constructor() { super("The file is damaged and can't be read. Nothing was changed.", 'DamagedFileError'); }
 }
 
+export class StaleReviewError extends BackupError {
+  constructor() {
+    super('The data on this device changed while you were reviewing. Nothing was changed — open the file again.', 'StaleReviewError');
+  }
+}
+
 export function validatePassword(pw: string): string | null {
   return Array.from(pw).length < MIN_PASSWORD_LENGTH ? `Use at least ${MIN_PASSWORD_LENGTH} characters.` : null;
 }

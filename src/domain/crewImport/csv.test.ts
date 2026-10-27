@@ -36,7 +36,7 @@ describe('parseCsv', () => {
   });
 
   it('strips a BOM, unescapes doubled quotes and drops trailing empty lines', () => {
-    expect(parseCsv('﻿a,"He said ""hi"""\n\n\n')).toEqual([['a', 'He said "hi"']]);
+    expect(parseCsv('\uFEFFa,"He said ""hi"""\n\n\n')).toEqual([['a', 'He said "hi"']]);
   });
 
   it('keeps line breaks inside quoted values', () => {
@@ -54,6 +54,6 @@ describe('parseCsv', () => {
 
   it('returns no rows for empty input', () => {
     expect(parseCsv('')).toEqual([]);
-    expect(parseCsv('﻿\r\n')).toEqual([]);
+    expect(parseCsv('\uFEFF\r\n')).toEqual([]);
   });
 });

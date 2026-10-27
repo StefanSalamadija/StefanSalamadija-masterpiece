@@ -59,3 +59,12 @@ export function snapshotCountsText(counts: Record<TableName, number>): string {
   const parts = COUNT_WORDS.filter(([table]) => counts[table] > 0).map(([table, one, many]) => `${counts[table]} ${counts[table] === 1 ? one : many}`);
   return parts.length > 0 ? parts.join(' · ') : 'No records';
 }
+
+/**
+ * What a restore costs when the snapshots are full: it first saves the data as it is now, which pushes the oldest one
+ * out. `snapshots` are newest first, as `listSnapshots` has them; `limit` is how many are kept.
+ */
+export function oldestRemovedNote(snapshots: Pick<Snapshot, 'createdAt'>[], limit: number): string | undefined {
+  if (snapshots.length < limit) return undefined;
+  return `The oldest snapshot (${snapshotDate(snapshots[snapshots.length - 1].createdAt)}) is removed to make room.`;
+}

@@ -6,7 +6,7 @@ import { allTables, createRecord, softDelete } from './records';
 import { MasterpieceDB, openDb } from './schema';
 import { getSettings, updateSettings } from './settings';
 import { createShip } from './ships';
-import { listSnapshots, restoreSnapshot, snapshotInUpgrade, takeSnapshot } from './snapshots';
+import { listSnapshots, restoreSnapshot, SNAPSHOTS_KEPT, snapshotInUpgrade, takeSnapshot } from './snapshots';
 import { StorageFullError } from './storage';
 
 const draft: CrewDraft = {
@@ -63,6 +63,13 @@ describe('takeSnapshot', () => {
     for (let i = 0; i < 6; i++) { at(i); await takeSnapshot(db, 'manual', `n${i}`); }
     expect((await listSnapshots(db)).map((s) => s.note)).toEqual(['n5', 'n4', 'n3', 'n2', 'n1']);
     expect(await db.snapshots.count()).toBe(5);
+  });
+
+  it('says how many it keeps, for the screens that tell the user when the oldest goes', async () => {
+    expect(SNAPSHOTS_KEPT).toBe(5);
+    const db = freshDb();
+    for (let i = 0; i < SNAPSHOTS_KEPT + 2; i++) { at(i); await takeSnapshot(db, 'manual'); }
+    expect(await db.snapshots.count()).toBe(SNAPSHOTS_KEPT);
   });
 
   it('prunes by createdAt, not by the order the snapshots were taken in', async () => {

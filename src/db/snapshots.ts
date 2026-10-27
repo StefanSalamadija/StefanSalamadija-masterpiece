@@ -8,7 +8,7 @@ import { listShips, liveActiveShipId } from './ships';
 import { guardWrite } from './storage';
 
 /** How many snapshots are kept: the one just written plus the newest others by `createdAt`, ties going to the larger id. */
-const KEEP = 5;
+export const SNAPSHOTS_KEPT = 5;
 
 /** A snapshot without its data, plus how many records (deleted ones included) it holds per table. */
 export type SnapshotSummary = Omit<Snapshot, 'data'> & { counts: Record<TableName, number> };
@@ -18,14 +18,14 @@ function makeSnapshot(reason: SnapshotReason, note: string | undefined, data: Ta
 }
 
 /**
- * Makes room for one more snapshot, so that with it there are at most `KEEP`: deletes the oldest of those stored. Call
+ * Makes room for one more snapshot, so that with it there are at most `SNAPSHOTS_KEPT`: deletes the oldest of those stored. Call
  * it before writing the new one. The new snapshot is then never among the deleted, even when the device clock is behind
- * the stored ones, and storage never holds more than `KEEP` copies, the new one included. The `createdAt` index lists
+ * the stored ones, and storage never holds more than `SNAPSHOTS_KEPT` copies, the new one included. The `createdAt` index lists
  * the oldest first and breaks ties by primary key, so the same snapshots go every time. Reads keys only, never the data.
  */
 async function makeRoomForSnapshot(snapshots: Table<Snapshot, string>): Promise<void> {
   const oldestFirst = await snapshots.orderBy('createdAt').primaryKeys();
-  const excess = oldestFirst.length - (KEEP - 1);
+  const excess = oldestFirst.length - (SNAPSHOTS_KEPT - 1);
   if (excess > 0) await snapshots.bulkDelete(oldestFirst.slice(0, excess));
 }
 

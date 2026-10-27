@@ -4,14 +4,20 @@ import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
 import { getSettings, updateSettings } from '../db/settings';
 import { createShip, deleteShip, listShips } from '../db/ships';
-import { listSnapshots } from '../db/snapshots';
+import { listSnapshots, takeSnapshot } from '../db/snapshots';
 import { StorageFullError } from '../db/storage';
 import { conflictKey } from '../domain/merge';
 import { TABLE_NAMES } from '../domain/types';
 import type { Certificate, ClockChange, CrewDraft, CrewImportMapping, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
-import { DamagedFileError, NotABackupError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
+import { BackupError, DamagedFileError, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
 import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
+
+// The real `takeSnapshot`, as a mock that calls it, so that a test can change the data at the moment the snapshot is taken.
+vi.mock('../db/snapshots', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../db/snapshots')>();
+  return { ...actual, takeSnapshot: vi.fn(actual.takeSnapshot) };
+});
 
 const PW = 'pw-12345678';
 const FAST = { iterations: 1000 };
@@ -560,6 +566,160 @@ describe('prepareImport and applyImport between two devices', () => {
     expect((await getSettings(b)).lastSync).toEqual({});
     expect((await getSettings(b)).activeShipId).toBeUndefined();
     expect((await listSnapshots(b))[0].reason).toBe('before-import');
+  });
+});
+
+describe('applyImport refuses a review that went stale', () => {
+  const MESSAGE = 'The data on this device changed while you were reviewing. Nothing was changed — open the file again.';
+
+  /** Device B has A's data, A has changed a crew member since, and B has opened A's new file: the review shows one update. */
+  async function review() {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await updateRecord(a.db, 'crew', a.crew.id, { nationality: 'Croatian' });
+    at('2026-10-25T11:00:00.000Z');
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    return { a, b, text, p: await prepareImport(b, text, PW) };
+  }
+
+  /** What an import that is refused must leave exactly as it found it. */
+  async function snapshotOfState(db: MasterpieceDB) {
+    return { tables: await allTables(db), settings: await getSettings(db), snapshots: (await listSnapshots(db)).map((s) => s.id) };
+  }
+
+  it('is a backup error that says what to do', async () => {
+    const { b, p, a } = await review();
+    at('2026-10-25T11:30:00.000Z');
+    await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+    const error = await applyImport(b, p, { conflicts: {}, applyDeletions: true }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StaleReviewError);
+    expect(error).toBeInstanceOf(BackupError);
+    expect((error as Error).message).toBe(MESSAGE);
+    expect((error as Error).name).toBe('StaleReviewError');
+  });
+
+  it('refuses an update when the record was changed here after the review, and keeps that change', async () => {
+    const { a, b, p } = await review();
+    expect(p.plan.summary).toEqual({ added: 0, updated: 1, deleted: 0, conflicts: 0 });
+    at('2026-10-25T11:30:00.000Z');
+    await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+    const before = await snapshotOfState(b);
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+    expect(await snapshotOfState(b)).toEqual(before);
+    expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Montenegrin' });
+  });
+
+  it('refuses an add when the record has appeared here since the review', async () => {
+    const a = await deviceA();
+    const b = freshDb();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    const added = p.plan.items.find((item) => item.kind === 'add' && item.table === 'crew' && !item.incoming.deleted)!;
+    await b.crew.put(added.incoming as CrewMember); // another tab imported the same file meanwhile
+    const before = await snapshotOfState(b);
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+    expect(await snapshotOfState(b)).toEqual(before);
+  });
+
+  it('refuses a record that has gone from here since the review (a restore puts back what it was)', async () => {
+    const { a, b, p } = await review();
+    await b.crew.delete(a.crew.id);
+    const before = await snapshotOfState(b);
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+    expect(await snapshotOfState(b)).toEqual(before);
+  });
+
+  it('refuses a deletion that is not going to be applied too: the review as a whole no longer fits', async () => {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await softDelete(a.db, 'crew', a.crew.id);
+    at('2026-10-25T11:00:00.000Z');
+    const p = await prepareImport(b, (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text, PW);
+    expect(p.plan.summary.deleted).toBe(1);
+    at('2026-10-25T11:30:00.000Z');
+    await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: false })).rejects.toThrow(StaleReviewError);
+  });
+
+  describe('a conflict', () => {
+    async function conflict() {
+      const a = await deviceA();
+      at('2026-10-25T09:00:00.000Z');
+      const b = await deviceBSyncedWith(a.db);
+      at('2026-10-25T10:00:00.000Z');
+      await updateRecord(a.db, 'crew', a.crew.id, { nationality: 'Croatian' });
+      await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+      at('2026-10-25T11:00:00.000Z');
+      const p = await prepareImport(b, (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text, PW);
+      return { a, b, p, key: `crew:${a.crew.id}` };
+    }
+
+    it.each(['local', 'incoming'] as const)('is not settled with the old copy of this device\'s record when %s was chosen', async (choice) => {
+      const { a, b, p, key } = await conflict();
+      expect(p.plan.summary.conflicts).toBe(1);
+      at('2026-10-25T11:30:00.000Z');
+      await updateRecord(b, 'crew', a.crew.id, { nationality: 'Serbian' }); // after the review, in another tab
+      const before = await snapshotOfState(b);
+      await expect(applyImport(b, p, { conflicts: { [key]: choice }, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+      expect(await snapshotOfState(b)).toEqual(before);
+      expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Serbian' });
+    });
+
+    it('still takes the decision on a missing choice first: that is a mistake of the caller, not of the data', async () => {
+      const { b, p } = await conflict();
+      await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(/Unresolved conflict/);
+    });
+  });
+
+  it('does not take a snapshot, so that a refused review never uses up one of the five', async () => {
+    const { a, b, p } = await review();
+    for (let i = 0; i < 5; i += 1) {
+      at(`2026-10-25T11:0${i}:00.000Z`);
+      await takeSnapshot(b, 'manual', `Snapshot ${i}`);
+    }
+    const kept = (await listSnapshots(b)).map((s) => s.id);
+    expect(kept).toHaveLength(5);
+    at('2026-10-25T11:30:00.000Z');
+    await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+    expect((await listSnapshots(b)).map((s) => s.id)).toEqual(kept);
+  });
+
+  it('checks again inside the write, for a change made while the snapshot was being taken', async () => {
+    const { a, b, p } = await review();
+    const real = await vi.importActual<typeof import('../db/snapshots')>('../db/snapshots');
+    at('2026-10-25T11:30:00.000Z');
+    vi.mocked(takeSnapshot).mockImplementationOnce(async (db, reason, note) => {
+      await updateRecord(b, 'crew', a.crew.id, { nationality: 'Montenegrin' });
+      return real.takeSnapshot(db, reason, note);
+    });
+    const lastSync = (await getSettings(b)).lastSync;
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
+    expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Montenegrin' });
+    expect((await getSettings(b)).lastSync).toEqual(lastSync);
+  });
+
+  it('is not bothered by changes to records the review did not look at', async () => {
+    const { a, b, p } = await review();
+    at('2026-10-25T11:30:00.000Z');
+    await updateRecord(b, 'crew', a.otherCrew.id, { nationality: 'Montenegrin' }); // not in the file's changes
+    await createRecord<CrewMember>(b, 'crew', { shipId: a.ship.id, ...draft, surname: 'New here' });
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Croatian' });
+    expect(await b.crew.get(a.otherCrew.id)).toMatchObject({ nationality: 'Montenegrin' });
+  });
+
+  it('applies a review that is still current, and a second apply of the same review is then refused', async () => {
+    const { a, b, p } = await review();
+    at('2026-10-25T12:00:00.000Z');
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Croatian' });
+    // Its records are not what the review saw any more, so applying it again (another tab, a second tap) is turned away.
+    await expect(applyImport(b, p, { conflicts: {}, applyDeletions: true })).rejects.toThrow(StaleReviewError);
   });
 });
 

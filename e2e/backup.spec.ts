@@ -303,6 +303,8 @@ test('snapshot restore', async ({ browser }) => {
     await snapshotRow(b, 'Before import').getByRole('button', { name: 'Restore' }).click();
     const dialog = b.getByRole('dialog');
     await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
+    await expect(dialog.getByText(/ships, crew, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:\d\d UTC \(Before import\)/)).toBeVisible();
+    await expect(dialog.getByText('is removed to make room')).toHaveCount(0); // there is room: two snapshots at most here
     await dialog.getByRole('button', { name: 'Restore' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(b.getByText(/^Restored the snapshot from 2026-10-25 09:\d\d UTC\./)).toBeVisible();
@@ -499,6 +501,122 @@ test('deletions are listed and left alone unless they are ticked; a conflict can
   }
 });
 
+test('a review that went stale is refused, and nothing is written', async ({ browser }) => {
+  const [contextA, contextB] = [await browser.newContext(), await browser.newContext()];
+  try {
+    const [a, b] = [await contextA.newPage(), await contextB.newPage()];
+    await freshApp(a); await setupShip(a);
+    await addCrew(a, 'PETROVIĆ');
+    await at(a, '2026-10-25T09:10:00Z');
+    const first = await exportFull(a, PASSWORD);
+    await freshApp(b, { time: '2026-10-25T09:20:00Z' });
+    await b.getByRole('link', { name: 'Import a backup' }).click();
+    await openFile(b, await pathOf(first), PASSWORD);
+    await summary(b, '3 new · 0 updated · 0 deleted · 0 conflicts');
+    await applyButton(b).click();
+    await expect(b.getByText('Import complete.')).toBeVisible();
+
+    // A changes the crew member and exports again; B opens the new file, and the review shows one update.
+    await at(a, '2026-10-25T10:00:00Z');
+    await setNationality(a, 'PETROVIĆ', 'Croatian');
+    await at(a, '2026-10-25T10:10:00Z');
+    const second = await pathOf(await exportFull(a, PASSWORD));
+    await at(b, '2026-10-25T10:20:00Z');
+    await goToImport(b);
+    await openFile(b, second, PASSWORD);
+    await summary(b, '0 new · 1 updated · 0 deleted · 0 conflicts');
+
+    // Meanwhile, in another tab of B, the same crew member is edited.
+    const other = await contextB.newPage();
+    await freshApp(other, { time: '2026-10-25T10:30:00Z' });
+    await setNationality(other, 'PETROVIĆ', 'Montenegrin');
+    const snapshotsBefore = (await stored(b, 'snapshots')).map((snapshot) => snapshot.id);
+    const syncBefore = (await deviceSettings(b)).lastSync;
+    expect(snapshotsBefore).toHaveLength(1); // the one before the first import
+
+    // Apply is refused: the file's value does not go over the edit, nothing is written, and no snapshot is used up.
+    await applyButton(b).click();
+    await expect(b.getByRole('alert')).toHaveText('The data on this device changed while you were reviewing. Nothing was changed — open the file again.');
+    await expect(applyButton(b)).toHaveCount(0);
+    await expect(b.getByRole('heading', { name: 'Review' })).toHaveCount(0);
+    await expect(b.getByText('Import complete.')).toHaveCount(0);
+    await expect(b).toHaveURL(/#\/settings\/import$/);
+    expect((await stored(b, 'crew'))[0].nationality).toBe('Montenegrin');
+    expect((await stored(b, 'snapshots')).map((snapshot) => snapshot.id)).toEqual(snapshotsBefore);
+    expect((await deviceSettings(b)).lastSync).toEqual(syncBefore);
+
+    // The file is opened again, with the focus where the password is asked for: now the two edits are a conflict to decide.
+    await expect(b.getByLabel('Password')).toBeFocused();
+    await b.getByLabel('Password').fill(PASSWORD);
+    await b.getByRole('button', { name: 'Open' }).click();
+    await summary(b, '0 new · 0 updated · 0 deleted · 1 conflicts');
+    await expect(b.getByRole('alert')).toHaveText('');
+    await b.getByLabel("Use the file's version").check();
+    await applyButton(b).click();
+    await expect(b.getByText('Import complete.')).toBeVisible();
+    expect((await stored(b, 'crew'))[0].nationality).toBe('Croatian');
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+/** Writes snapshots straight into IndexedDB, one for each day of October 2026 named, taken at 08:15 UTC. */
+function seedSnapshots(page: Page, days: number[]): Promise<void> {
+  return page.evaluate(
+    (list) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('masterpiece');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction('snapshots', 'readwrite');
+          for (const day of list) {
+            tx.objectStore('snapshots').put({
+              id: `seed-${day}`, createdAt: `2026-10-${String(day).padStart(2, '0')}T08:15:00.000Z`, reason: 'manual', note: `Seed ${day}`,
+              data: { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] },
+            });
+          }
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+        };
+      }),
+    days,
+  );
+}
+
+test('restore says when it will push the oldest snapshot out', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await seedSnapshots(page, [11, 12, 13, 14]);
+  await page.goto('./#/settings');
+  await page.reload();
+  const snapshots = page.getByRole('list', { name: 'Snapshots' }).getByRole('listitem');
+  await expect(snapshots).toHaveCount(4);
+  await expect(page.getByText('Masterpiece keeps the last 5 snapshots of your data. One is saved automatically before an import, before an update and before a restore.')).toBeVisible();
+
+  // Four are kept, so there is room for the one the restore takes.
+  const dialog = page.getByRole('dialog');
+  await snapshotRow(page, 'Seed 14').getByRole('button', { name: 'Restore' }).click();
+  await expect(dialog.getByText(/ships, crew, certificates, voyages and clock changes of the snapshot from 2026-10-14 08:15 UTC \(Seed 14\)/)).toBeVisible();
+  await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
+  await expect(dialog.getByText('is removed to make room')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // Five are kept: the restore pushes the oldest out, and the dialog says which.
+  await seedSnapshots(page, [10]);
+  await page.reload();
+  await expect(snapshots).toHaveCount(5);
+  await snapshotRow(page, 'Seed 14').getByRole('button', { name: 'Restore' }).click();
+  await expect(dialog.getByText('The oldest snapshot (2026-10-10 08:15 UTC) is removed to make room.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(snapshots).toHaveCount(5);
+  await expectNoHorizontalScroll(page);
+});
+
 test('settings: backup reminder days and device name', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
@@ -562,6 +680,9 @@ test('the export dialog checks the password before it makes a file', async ({ pa
   const downloads: string[] = [];
   page.on('download', (download) => downloads.push(download.suggestedFilename()));
 
+  // The browser may offer to keep a password that is being made up.
+  await expect(password).toHaveAttribute('autocomplete', 'new-password');
+  await expect(repeat).toHaveAttribute('autocomplete', 'new-password');
   await password.fill('short'); await repeat.fill('short'); await exportButton.click();
   await expect(dialog.getByRole('alert')).toHaveText('Use at least 8 characters.');
   await expect(password).toBeFocused();
@@ -602,7 +723,7 @@ test('import with no ship: no header, a way back, and a file that is not a backu
   const huge = testInfo.outputPath('video.mp4');
   await fs.writeFile(huge, new Uint8Array(65 * 1024 * 1024));
   await page.getByLabel('Backup file').setInputFiles(huge);
-  await expect(page.getByRole('alert')).toHaveText("This isn't a Masterpiece backup file.");
+  await expect(page.getByRole('alert')).toHaveText('This file is too large to be a Masterpiece backup (over 64 MB).');
   await expect(page.getByText('video.mp4')).toBeVisible();
   expect(await reads()).toBe(0);
 
@@ -631,22 +752,34 @@ test('import with no ship: no header, a way back, and a file that is not a backu
   await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
 });
 
-test('the header of a file nobody has checked is shown as text, and shortened', async ({ page }, testInfo) => {
+test('the header of a file nobody has checked is shown as text, and shortened', async ({ page }) => {
   await freshApp(page);
   await page.getByRole('link', { name: 'Import a backup' }).click();
   const markup = '<img src=x onerror="window.pwned=1">';
-  const hostile = testInfo.outputPath('hostile.mpbak');
-  await fs.writeFile(hostile, JSON.stringify({
+  const override = String.fromCodePoint(0x202e); // a right-to-left override, which would show the extension backwards
+  const header = JSON.stringify({
     format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'd', deviceName: `${markup}${'N'.repeat(100)}`,
     exportedAt: '2026-10-25T09:05:00.000Z',
-  }));
-  await page.getByLabel('Backup file').setInputFiles(hostile);
+  });
+  // Made in the page, with a name: the browser does not accept a file from disk whose name has such a character in it.
+  await page.getByLabel('Backup file').evaluate((input, file) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([file.text], file.name, { type: 'application/octet-stream' }));
+    (input as HTMLInputElement).files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, { name: `hostile${override}kabpm.mpbak`, text: header });
+  // The name of the file is plain text too, and is tied to the input, which is emptied once the file is read.
+  await expect(page.locator('.import-file')).toHaveText('hostilekabpm.mpbak');
+  const described = await page.getByLabel('Backup file').evaluate((input) =>
+    (input.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent));
+  expect(described[0]).toBe('hostilekabpm.mpbak');
   const line = page.locator('.import-from');
   await expect(line).toHaveText(`From ${markup}${'N'.repeat(60 - markup.length)}…, exported 2026-10-25 09:05 UTC`);
   await expect(line.locator('img')).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
 
   // Without the password nothing more is read: the file has no encrypted part, so it is damaged.
+  await expect(page.getByLabel('Password')).toHaveAttribute('autocomplete', 'current-password');
   await page.getByLabel('Password').fill('anything-at-all');
   await page.getByRole('button', { name: 'Open' }).click();
   await expect(page.getByRole('alert')).toHaveText("The file is damaged and can't be read. Nothing was changed.", CRYPTO);

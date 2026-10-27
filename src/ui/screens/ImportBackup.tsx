@@ -3,13 +3,14 @@ import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { setFlash } from '../../app/flash';
 import { navigate } from '../../app/router';
-import { BackupError, NotABackupError, readHeader } from '../../backup/envelope';
+import { BackupError, readHeader } from '../../backup/envelope';
 import type { BackupHeader } from '../../backup/envelope';
 import { applyImport, prepareImport } from '../../backup/service';
 import type { PreparedImport } from '../../backup/service';
 import { Field } from '../components/Field';
 import {
-  conflictViews, deletionsLabel, deletionTitles, fromLine, isTooBigForBackup, summaryLine, unresolvedCount,
+  conflictViews, deletionsLabel, deletionTitles, fromLine, isTooBigForBackup, shownFileName, summaryLine, TOO_LARGE_MESSAGE,
+  unresolvedCount,
 } from '../importReview';
 import type { ConflictView } from '../importReview';
 
@@ -72,8 +73,13 @@ export function ImportBackup() {
   // Set at once, where `phase` is only seen by the next render: a second tap in between must not run it twice.
   const working = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const passwordInput = useRef<HTMLInputElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
+  /** The review was thrown away (the data here changed under it): the focus goes to the password, to open the file again. */
+  const reopen = useRef(false);
   const fileId = useId();
+  const nameId = `${fileId}-name`;
+  const helpId = `${fileId}-help`;
 
   const conflicts = useMemo(() => (prepared ? conflictViews(prepared.plan) : []), [prepared]);
   const deletions = useMemo(() => (prepared ? deletionTitles(prepared.plan) : []), [prepared]);
@@ -83,11 +89,15 @@ export function ImportBackup() {
   // The password has opened the file: the review is what there is to read now, so the focus goes to it.
   useEffect(() => {
     if (prepared) reviewHeading.current?.focus();
+    else if (reopen.current) {
+      reopen.current = false;
+      passwordInput.current?.focus();
+    }
   }, [prepared]);
 
   async function choose(file: File | undefined): Promise<void> {
     const mine = ++latestRead.current;
-    setFileName(file?.name);
+    setFileName(file && shownFileName(file.name));
     setChosen(undefined);
     setPassword('');
     setPrepared(undefined);
@@ -96,7 +106,10 @@ export function ImportBackup() {
     setProblem('');
     if (!file) return;
     try {
-      if (isTooBigForBackup(file.size)) throw new NotABackupError(); // not read: it may be a video picked by mistake
+      if (isTooBigForBackup(file.size)) {
+        setProblem(TOO_LARGE_MESSAGE); // not read: it may be a video picked by mistake
+        return;
+      }
       const text = await file.text();
       if (mine !== latestRead.current) return;
       setChosen({ text, header: readHeader(text) });
@@ -138,7 +151,15 @@ export function ImportBackup() {
       navigate('/');
       return; // stays busy until the screen is replaced, so that a second tap cannot import again
     } catch (err) {
-      reportError(err);
+      if (err instanceof BackupError) {
+        // The data here changed since the review (the file is not the cause), so the review is not true any more: it is
+        // thrown away, and the file is opened again for a new one.
+        setProblem(err.message);
+        setPrepared(undefined);
+        setChoices({});
+        setApplyDeletions(false);
+        reopen.current = true;
+      } else reportError(err);
     }
     working.current = false;
     setPhase('idle');
@@ -151,9 +172,13 @@ export function ImportBackup() {
       <div class="import-form">
         <div class="field">
           <label for={fileId}>Backup file</label>
-          <input id={fileId} ref={fileInput} type="file" disabled={busy} onChange={(event) => void choose(event.currentTarget.files?.[0])} />
-          {fileName !== undefined && <p class="import-file">{fileName}</p>}
-          <p class="helper-text">A Masterpiece backup or handover file. It is opened on this device and goes nowhere else.</p>
+          {/* The input is emptied once the file is read, so the name of the file is said by the text under it. */}
+          <input
+            id={fileId} ref={fileInput} type="file" disabled={busy} aria-describedby={fileName === undefined ? helpId : `${nameId} ${helpId}`}
+            onChange={(event) => void choose(event.currentTarget.files?.[0])}
+          />
+          {fileName !== undefined && <p id={nameId} class="import-file">{fileName}</p>}
+          <p id={helpId} class="helper-text">A Masterpiece backup or handover file. It is opened on this device and goes nowhere else.</p>
         </div>
 
         {chosen && <p class="import-from">{fromLine(chosen.header)}</p>}
@@ -161,7 +186,7 @@ export function ImportBackup() {
         {chosen && !prepared && (
           <form class="import-open" onSubmit={open} noValidate>
             <Field
-              label="Password" type="password" value={password}
+              label="Password" type="password" autoComplete="current-password" value={password} inputRef={passwordInput}
               onInput={(value) => {
                 setPassword(value);
                 setProblem('');

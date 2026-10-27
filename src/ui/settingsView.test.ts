@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TableName } from '../domain/types';
 import {
   cleanDeviceName, DEVICE_NAME_MAX, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, parseReminderDays, PASSWORD_MISMATCH,
-  passwordProblems, REMINDER_ERROR, snapshotCountsText, snapshotDate, snapshotReason,
+  oldestRemovedNote, passwordProblems, REMINDER_ERROR, snapshotCountsText, snapshotDate, snapshotReason,
 } from './settingsView';
 
 describe('parseReminderDays', () => {
@@ -139,5 +139,28 @@ describe('snapshotCountsText', () => {
 describe('EXPORT_CANCELLED', () => {
   it('says that closing the share sheet made no backup', () => {
     expect(EXPORT_CANCELLED).toBe('Export cancelled — no backup was made.');
+  });
+});
+
+describe('oldestRemovedNote', () => {
+  // Newest first, as `listSnapshots` has them.
+  const at = (hour: number) => ({ createdAt: `2026-10-25T${String(hour).padStart(2, '0')}:30:00.000Z` });
+  const five = [at(13), at(12), at(11), at(10), at(9)];
+
+  it('names the oldest snapshot when the limit is reached, because taking the snapshot of a restore removes it', () => {
+    expect(oldestRemovedNote(five, 5)).toBe('The oldest snapshot (2026-10-25 09:30 UTC) is removed to make room.');
+  });
+
+  it('says nothing while there is room', () => {
+    expect(oldestRemovedNote(five.slice(0, 4), 5)).toBeUndefined();
+    expect(oldestRemovedNote([], 5)).toBeUndefined();
+  });
+
+  it('still names the oldest if there are more than the limit', () => {
+    expect(oldestRemovedNote([at(14), ...five], 5)).toBe('The oldest snapshot (2026-10-25 09:30 UTC) is removed to make room.');
+  });
+
+  it('does not fail on a time that cannot be read', () => {
+    expect(oldestRemovedNote([at(13), { createdAt: 'long ago' }], 2)).toBe('The oldest snapshot (Unknown date) is removed to make room.');
   });
 });

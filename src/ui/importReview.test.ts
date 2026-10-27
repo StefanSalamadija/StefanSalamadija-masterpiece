@@ -4,7 +4,8 @@ import type { MergeItem, MergePlan } from '../domain/merge';
 import type { SyncRecord, TableName, Tables } from '../domain/types';
 import {
   changedFields, conflictViews, deletionsLabel, deletionTitles, EMPTY_VALUE, fromLine, isTooBigForBackup,
-  MAX_BACKUP_FILE_BYTES, MAX_DEVICE_NAME_SHOWN, plainText, recordTitle, summaryLine, unresolvedCount,
+  MAX_BACKUP_FILE_BYTES, MAX_DEVICE_NAME_SHOWN, plainText, recordTitle, shownFileName, summaryLine, TOO_LARGE_MESSAGE,
+  unresolvedCount,
 } from './importReview';
 
 const stamp = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'device-a', deleted: false, scope: 'ship' as const };
@@ -33,8 +34,24 @@ describe('plainText', () => {
     expect(plainText('a\tb\nc\r\nd', 100)).toBe('a b c  d');
   });
 
-  it('removes control characters and the characters that reorder or hide text', () => {
-    expect(plainText('a\u0000b\u0007c‮def⁦g​h﻿i\u0085j', 100)).toBe('abcdefghij');
+  // Written as escapes, and as a table: nobody can see what a literal one is, and a reviewer must be able to read what is covered.
+  it.each([
+    ['NUL', '\u0000'], ['BEL', '\u0007'], ['DEL', '\u007F'], ['NEL, a C1 control', '\u0085'], ['soft hyphen', '\u00AD'],
+    ['Arabic letter mark', '\u061C'], ['Mongolian vowel separator', '\u180E'], ['zero-width space', '\u200B'],
+    ['left-to-right mark', '\u200E'], ['right-to-left mark', '\u200F'], ['left-to-right embedding', '\u202A'],
+    ['right-to-left embedding', '\u202B'], ['pop directional formatting', '\u202C'], ['left-to-right override', '\u202D'],
+    ['right-to-left override', '\u202E'], ['word joiner', '\u2060'], ['function application', '\u2061'],
+    ['invisible plus', '\u2064'], ['left-to-right isolate', '\u2066'], ['right-to-left isolate', '\u2067'],
+    ['first strong isolate', '\u2068'], ['pop directional isolate', '\u2069'], ['byte order mark', '\uFEFF'],
+    ['a tag character', '\u{E0041}'],
+  ])('removes %s, which hide text or reorder it', (_name, character) => {
+    expect(plainText(`ab${character}cd`, 100)).toBe('abcd');
+    expect(plainText(character, 100)).toBe('');
+  });
+
+  it('keeps the joiners that emoji and some scripts need, which hide nothing', () => {
+    expect(plainText('\u{1F468}\u200D\u{1F469}', 100)).toBe('\u{1F468}\u200D\u{1F469}');
+    expect(plainText('م\u200Cک', 100)).toBe('م\u200Cک');
   });
 
   it('trims', () => {
@@ -51,7 +68,7 @@ describe('plainText', () => {
   });
 
   it('is empty for text that is only control characters', () => {
-    expect(plainText('‮\u0000', 10)).toBe('');
+    expect(plainText('\u202E\u0000', 10)).toBe('');
   });
 });
 
@@ -74,7 +91,7 @@ describe('fromLine', () => {
 
   it('copes with a name that is empty, or only control characters', () => {
     expect(fromLine({ deviceName: '', exportedAt: '2026-10-25T09:05:00.000Z' })).toBe('From an unknown device, exported 2026-10-25 09:05 UTC');
-    expect(fromLine({ deviceName: '‮', exportedAt: '2026-10-25T09:05:00.000Z' })).toBe('From an unknown device, exported 2026-10-25 09:05 UTC');
+    expect(fromLine({ deviceName: '\u202E', exportedAt: '2026-10-25T09:05:00.000Z' })).toBe('From an unknown device, exported 2026-10-25 09:05 UTC');
   });
 
   it('copes with an export time that cannot be read', () => {
@@ -112,7 +129,7 @@ describe('recordTitle', () => {
   });
 
   it('shows what the file says as plain text, shortened', () => {
-    expect(recordTitle('ships', rec({ particulars: { name: '<b>X</b>‮' } }))).toBe('Ship: <b>X</b>');
+    expect(recordTitle('ships', rec({ particulars: { name: '<b>X</b>\u202E' } }))).toBe('Ship: <b>X</b>');
     expect(recordTitle('crew', crew({ surname: 'S'.repeat(300) }))).toBe(`Crew: Ivan ${'S'.repeat(80 - 5)}…`);
   });
 
@@ -218,10 +235,10 @@ describe('changedFields', () => {
   });
 
   it('shows what the file says as plain text, and shortens a long value', () => {
-    const [change] = changedFields('crew', crew(), crew({ nationality: `<b>${'x'.repeat(500)}</b>‮` }));
+    const [change] = changedFields('crew', crew(), crew({ nationality: `<b>${'x'.repeat(500)}</b>\u202E` }));
     expect(change.incoming.startsWith('<b>xxx')).toBe(true);
     expect(change.incoming.endsWith('…')).toBe(true);
-    expect(change.incoming).not.toContain('‮');
+    expect(change.incoming).not.toContain('\u202E');
     expect(Array.from(change.incoming).length).toBeLessThanOrEqual(201);
   });
 
@@ -335,5 +352,38 @@ describe('isTooBigForBackup', () => {
     expect(isTooBigForBackup(5 * 1024 * 1024)).toBe(false);
     expect(isTooBigForBackup(MAX_BACKUP_FILE_BYTES)).toBe(false);
     expect(isTooBigForBackup(MAX_BACKUP_FILE_BYTES + 1)).toBe(true);
+  });
+});
+
+describe('shownFileName', () => {
+  it('shows the name of the chosen file as plain text, without what reorders it', () => {
+    expect(shownFileName('backup\u202Ekabpm.mpbak')).toBe('backupkabpm.mpbak');
+    expect(shownFileName('masterpiece-full-mv-ocean-star-2026-10-25-1200.mpbak')).toBe('masterpiece-full-mv-ocean-star-2026-10-25-1200.mpbak');
+  });
+
+  it('cuts a name that is very long', () => {
+    expect(shownFileName(`${'n'.repeat(150)}.mpbak`)).toBe(`${'n'.repeat(100)}…`);
+  });
+});
+
+describe('TOO_LARGE_MESSAGE', () => {
+  it('says that the file is too big, in megabytes of the limit', () => {
+    expect(TOO_LARGE_MESSAGE).toBe('This file is too large to be a Masterpiece backup (over 64 MB).');
+  });
+});
+
+describe('changedFields compares values like the merge does', () => {
+  const ship = (mapping: object): SyncRecord => rec({ particulars: { name: 'S' }, crewImportMapping: mapping });
+
+  it('does not list a value whose keys are only in another order', () => {
+    const one = { byHeader: { surname: 'surname', rank: 'rank' }, dateFormat: 'day-first', ignored: ['a', 'b'] };
+    const other = { ignored: ['a', 'b'], dateFormat: 'day-first', byHeader: { rank: 'rank', surname: 'surname' } };
+    expect(changedFields('ships', ship(one), ship(other))).toEqual([]);
+  });
+
+  it('lists a value that differs, also deep inside, and an array in another order', () => {
+    const one = { byHeader: { surname: 'surname' }, dateFormat: 'day-first', ignored: ['a', 'b'] };
+    expect(changedFields('ships', ship(one), ship({ ...one, byHeader: { surname: 'rank' } }))).toHaveLength(1);
+    expect(changedFields('ships', ship(one), ship({ ...one, ignored: ['b', 'a'] }))).toHaveLength(1);
   });
 });
