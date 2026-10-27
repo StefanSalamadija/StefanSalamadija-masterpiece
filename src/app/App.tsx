@@ -12,15 +12,19 @@ import { CrewImport } from '../ui/screens/CrewImport';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
 import { ImportBackup } from '../ui/screens/ImportBackup';
+import { LockScreen } from '../ui/screens/LockScreen';
 import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
+import { ProtectApp } from '../ui/screens/ProtectApp';
 import { Settings } from '../ui/screens/Settings';
 import { ShipTime } from '../ui/screens/ShipTime';
 import { Voyage } from '../ui/screens/Voyage';
 import { AppStateProvider, useAppState } from './AppState';
+import { gateScreen } from './lockGate';
 import { useRoute } from './router';
 import type { RoutePath } from './router';
 import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
+import { useAppLock } from './useAppLock';
 
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
@@ -71,11 +75,30 @@ function Shell() {
   );
 }
 
+/**
+ * Decides what is drawn before anything else: the welcome screen while there is no ship, the lock while it is locked, the
+ * protect step when it is due, else the app. The lock is decided before the app is rendered, so no ship name, header or
+ * screen is ever in the page while the app is locked (at start, after a reload, and on coming back from the background).
+ */
+function Gate() {
+  const { settings, activeShip } = useAppState();
+  const lock = useAppLock(settings.pin);
+  const screen = gateScreen({
+    hasShip: activeShip !== undefined,
+    hasPin: settings.pin !== undefined,
+    locked: lock.locked,
+    lockPrompted: settings.lockPrompted,
+  });
+  if (screen === 'lock' && settings.pin) return <LockScreen pin={settings.pin} onUnlock={lock.unlock} />;
+  if (screen === 'protect') return <ProtectApp />;
+  return <Shell />;
+}
+
 export function App() {
   return (
     <>
       <AppStateProvider>
-        <Shell />
+        <Gate />
       </AppStateProvider>
       <ErrorToast />
     </>

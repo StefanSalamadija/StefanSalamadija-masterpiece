@@ -10,6 +10,7 @@ import { listShips } from '../../db/ships';
 import { listSnapshots, restoreSnapshot, SNAPSHOTS_KEPT } from '../../db/snapshots';
 import type { SnapshotSummary } from '../../db/snapshots';
 import type { FieldError } from '../../domain/types';
+import { AppLockSettings } from '../components/AppLockSettings';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { PasswordDialog } from '../components/PasswordDialog';
@@ -267,6 +268,7 @@ export function Settings() {
       <BackupSection />
       <SnapshotSection />
       <DeviceSection />
+      <AppLockSettings />
       <div class="settings-section">
         <h3>About</h3>
         <p>Masterpiece {__APP_VERSION__}</p>

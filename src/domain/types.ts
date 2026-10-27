@@ -32,7 +32,9 @@ export interface FingerprintCredential { credentialId: string /* base64url */; p
 export interface PinSettings { hash: PinHash; relockMinutes: number; lockout: LockoutState; fingerprint?: FingerprintCredential }
 export type Theme = 'day' | 'night' | 'contrast';
 export interface Settings { key: 'device'; deviceId: string; deviceName: string; activeShipId?: string; backupReminderDays: number;
-  lastExportAt?: string; lastSync: Record<string, string>; theme: Theme; pin?: PinSettings; firstExportDone?: boolean }
+  lastExportAt?: string; lastSync: Record<string, string>; theme: Theme; pin?: PinSettings; firstExportDone?: boolean;
+  /** The "Protect Masterpiece" step: `false` while it is due and unanswered (set when the first ship is made on the welcome screen), `true` once answered (lock turned on, or skipped). */
+  lockPrompted?: boolean }
 export type SnapshotReason = 'before-import' | 'before-update' | 'manual';
 export interface Snapshot { id: string; createdAt: string; reason: SnapshotReason; note?: string; data: Tables }
 export type Band = 'none' | 'ok' | 'amber' | 'red';

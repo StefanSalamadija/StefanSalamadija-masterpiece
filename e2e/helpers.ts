@@ -9,8 +9,10 @@ export async function freshApp(page: Page, opts: { time?: string } = {}): Promis
 
 /**
  * Creates the first ship from the welcome screen. `offset` is the label of the ship's-time option, such as `UTC+03:00`.
- * With `skipLock` (the default) it also clicks `Skip for now` on the protect step, if that step appears, and then waits
- * for the header to show the ship. Without it, it returns as soon as the header or the protect step is on screen.
+ * After `Create ship` the app shows either the protect step (heading `Protect Masterpiece`, which covers the whole screen) or
+ * the header (banner). With `skipLock` (the default) the protect step is answered with `Skip for now`, and the helper then
+ * waits for the header to show the ship. With `skipLock: false` it returns as soon as either is on screen, so a test of the
+ * protect step finds it still there.
  */
 export async function setupShip(
   page: Page, name = 'MV OCEAN STAR', offset = 'UTC+03:00', opts: { skipLock?: boolean } = {},
@@ -20,12 +22,12 @@ export async function setupShip(
   await page.getByLabel('Ship name').fill(name);
   await page.getByLabel("Ship's time (UTC offset)").selectOption({ label: offset });
   await page.getByRole('button', { name: 'Create ship' }).click();
-  // Either the header of the app, or the protect step, which may cover the whole screen without it.
+  const protect = page.getByRole('heading', { name: 'Protect Masterpiece' });
   const header = page.getByRole('banner');
-  const skip = page.getByRole('button', { name: 'Skip for now' });
-  await expect(header.or(skip).first()).toBeVisible();
+  // Never both at once: the protect step is a full screen of its own, with no header behind it.
+  await expect(protect.or(header)).toBeVisible();
   if (!skipLock) return;
-  if (await skip.isVisible()) await skip.click();
+  if (await protect.isVisible()) await page.getByRole('button', { name: 'Skip for now' }).click();
   await expect(header).toContainText(name);
 }
 

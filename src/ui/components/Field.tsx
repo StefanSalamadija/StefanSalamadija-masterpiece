@@ -17,12 +17,14 @@ export interface FieldProps {
   multiline?: boolean;
   /** A line of help under the input, above any message; it is read with the label. */
   hint?: string;
+  /** The most characters the input takes (the browser stops typing there). */
+  maxLength?: number;
   /** What the browser may fill in: off unless said. A password a person makes up is `new-password`, one they give again `current-password`. */
   autoComplete?: 'new-password' | 'current-password';
 }
 
 /** A labelled input (or a text box, when `multiline`) with its hint and validation message underneath. */
-export function Field({ label, value, onInput, type = 'text', inputMode, error, inputRef, multiline, hint, autoComplete }: FieldProps) {
+export function Field({ label, value, onInput, type = 'text', inputMode, error, inputRef, multiline, hint, autoComplete, maxLength }: FieldProps) {
   const id = useId();
   const messageId = `${id}-message`;
   const hintId = `${id}-hint`;
@@ -40,7 +42,7 @@ export function Field({ label, value, onInput, type = 'text', inputMode, error, 
       ) : (
         <input
           // Preact types `<input>` as a union keyed by `type`; all the types here take the same attributes.
-          id={id} ref={inputRef} type={type as 'text'} inputMode={inputMode} value={value} autocomplete={autoComplete ?? 'off'}
+          id={id} ref={inputRef} type={type as 'text'} inputMode={inputMode} maxLength={maxLength} value={value} autocomplete={autoComplete ?? 'off'}
           step={type === 'number' ? 'any' : undefined}
           aria-invalid={isError ? 'true' : undefined} aria-describedby={describedBy}
           onInput={(event) => onInput(event.currentTarget.value)}

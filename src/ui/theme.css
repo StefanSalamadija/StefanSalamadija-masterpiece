@@ -1472,3 +1472,86 @@ textarea {
   padding-left: 20px;
   overflow-wrap: anywhere;
 }
+
+/* ---- App lock: the lock screen and the protect step ---- */
+
+.lock {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.lock-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+}
+
+.lock-card > svg {
+  align-self: center;
+}
+
+.lock-card h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.lock-ship {
+  margin: 0;
+  font-weight: 600;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.lock-intro {
+  margin: 0;
+}
+
+.lock-form,
+.lock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+
+.lock-actions {
+  text-align: center;
+}
+
+.lock-form .form-actions {
+  gap: 12px;
+}
+
+/* The passcode is four digits, shown as dots: big and centred, so that each digit is easy to hit and see. */
+.field .passcode-input {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.lock-message {
+  margin: 0;
+  font-weight: 600;
+  text-align: center;
+}
+
+.lock-message[role='alert'] {
+  color: var(--red);
+}
+
+/* A button that reads as a link: the quiet choice beside a big one. */
+.btn-link {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+}

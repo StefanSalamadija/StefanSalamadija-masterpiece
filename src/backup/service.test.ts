@@ -168,6 +168,55 @@ describe('exportBackup', () => {
     expect(before.firstExportDone).toBeUndefined();
   });
 
+  describe('the app lock', () => {
+    const SECRETS = ['SALT-of-device-A', 'HASH-of-device-A', 'CRED-of-device-A', 'KEY-of-device-A'];
+    const lockOf = (tag: string) => ({
+      pin: {
+        hash: { salt: `SALT-of-${tag}`, hash: `HASH-of-${tag}`, iterations: 1000 }, relockMinutes: 7, lockout: { failures: 3 },
+        fingerprint: { credentialId: `CRED-of-${tag}`, publicKey: `KEY-of-${tag}`, alg: -7 as const },
+      },
+      lockPrompted: true,
+    });
+
+    it('never goes into a backup or a handover: not the passcode hash, the fingerprint key, the lock time or the lockout', async () => {
+      const a = await deviceA();
+      await updateSettings(a.db, lockOf('device-A'));
+      for (const kind of ['full', 'handover'] as const) {
+        const { text } = await exportBackup(a.db, kind, PW, { shipId: a.ship.id, ...FAST });
+        const { header, payload } = await openBackup(text, PW);
+        const everything = JSON.stringify({ header, payload });
+        for (const secret of SECRETS) expect(everything).not.toContain(secret);
+        expect(everything).not.toMatch(/relockMinutes|lockout|lockPrompted|fingerprint|credentialId|"pin"/);
+        expect(Object.keys(header).sort()).toEqual(['deviceId', 'deviceName', 'exportedAt', 'format', 'kind', 'version']);
+      }
+    });
+
+    it("is left alone by an import, which brings in neither the other device's lock nor its protect answer", async () => {
+      const a = await deviceA();
+      await updateSettings(a.db, lockOf('device-A'));
+      const b = freshDb();
+      await updateSettings(b, { ...lockOf('device-B'), lockPrompted: undefined });
+      const before = (await getSettings(b)).pin;
+      const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+      await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+      const after = await getSettings(b);
+      expect(after.pin).toEqual(before);
+      expect(after.lockPrompted).toBeUndefined();
+      expect(JSON.stringify(after)).not.toContain('device-A');
+    });
+
+    it('is not created on a device that had none, by an import', async () => {
+      const a = await deviceA();
+      await updateSettings(a.db, lockOf('device-A'));
+      const b = freshDb();
+      const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+      await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+      const after = await getSettings(b);
+      expect(after.pin).toBeUndefined();
+      expect(after.lockPrompted).toBeUndefined();
+    });
+  });
+
   it('holds only the chosen ship in a handover, with its ship-scope records and tombstones', async () => {
     const a = await deviceA();
     const h = await exportBackup(a.db, 'handover', 'relief-pass', { shipId: a.ship.id, ...FAST });

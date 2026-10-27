@@ -1,4 +1,4 @@
-import type { Settings } from '../domain/types';
+import type { PinSettings, Settings } from '../domain/types';
 import type { MasterpieceDB } from './schema';
 import { guardWrite } from './storage';
 
@@ -44,6 +44,34 @@ export function updateSettings(db: MasterpieceDB, patch: Partial<Settings>): Pro
       const updated: Settings = { ...current, ...patch, key: DEVICE_KEY, deviceId: current.deviceId };
       await db.settings.put(updated);
       return updated;
+    }),
+  );
+}
+
+/**
+ * Changes the stored passcode settings (lockout, lock time, fingerprint, hash) from what is stored now, in one
+ * transaction, so a stale copy held by the screen never overwrites a newer one. Does nothing when no passcode is set.
+ * `change` runs inside the transaction: it must be synchronous.
+ */
+export function updatePin(db: MasterpieceDB, change: (pin: PinSettings) => PinSettings): Promise<Settings> {
+  return guardWrite(() =>
+    db.transaction('rw', db.settings, async () => {
+      const current = await readOrCreate(db);
+      if (!current.pin) return current;
+      const updated: Settings = { ...current, pin: change(current.pin) };
+      await db.settings.put(updated);
+      return updated;
+    }),
+  );
+}
+
+/** Takes the passcode settings away: the `pin` key itself goes, not just its value. */
+export function removePin(db: MasterpieceDB): Promise<Settings> {
+  return guardWrite(() =>
+    db.transaction('rw', db.settings, async () => {
+      const { pin: _removed, ...rest } = await readOrCreate(db);
+      await db.settings.put(rest);
+      return rest;
     }),
   );
 }
