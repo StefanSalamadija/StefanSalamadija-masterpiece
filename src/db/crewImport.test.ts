@@ -30,6 +30,7 @@ async function setup() {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('importCrew', () => {
@@ -51,14 +52,19 @@ describe('importCrew', () => {
   });
 
   it('updates the changed fields only and stamps the record', async () => {
+    // Only the clock is faked, so the record is created and then updated at two different, known moments instead of
+    // two real ones that can land in the same millisecond.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-25T08:00:00.000Z'));
     const { db, ship, ivan } = await setup();
+    vi.setSystemTime(new Date('2026-10-25T08:00:05.000Z'));
     await importCrew(db, ship, { creates: [], updates: [{ id: ivan.id, patch: { passportExpiry: '2031-01-01', signOffDate: undefined } }] }, mapping, 'crew.xlsx');
     const saved = await db.crew.get(ivan.id);
     const { signOffDate: _removed, ...rest } = ivan;
-    expect(saved).toEqual({ ...rest, passportExpiry: '2031-01-01', updatedAt: saved?.updatedAt });
+    expect(saved).toEqual({ ...rest, passportExpiry: '2031-01-01', updatedAt: '2026-10-25T08:00:05.000Z' });
     expect(saved).not.toHaveProperty('signOffDate');
     expect(saved?.signOffPort).toBe('Koper');
-    expect(saved?.updatedAt).not.toBe(ivan.updatedAt);
+    expect(ivan.updatedAt).toBe('2026-10-25T08:00:00.000Z');
   });
 
   it('keeps the contract length and the planned relief of a contract the sheet updates', async () => {
