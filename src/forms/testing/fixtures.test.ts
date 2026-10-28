@@ -1,13 +1,14 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as XLSX from 'xlsx';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeFormFixtures } from '../../../e2e/fixtures/makeForms';
 import { readPackage, sniffFormat, utf8 } from '../package';
 import type { FormKind } from '../package';
 import { parseXml } from '../xml';
 import { contentControlsDocx, oddLayoutsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './wordFixtures';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './excelFixtures';
+import { zipOf } from './zip';
 
 const FIXTURES: { name: string; fileName: string; kind: FormKind; build: () => Uint8Array }[] = [
   { name: 'toolboxTalkDocx', fileName: 'toolbox.docx', kind: 'docx', build: () => toolboxTalkDocx() },
@@ -80,6 +81,22 @@ describe.each(FIXTURES)('$name as an Office package', ({ build }) => {
     }
     for (const part of overrides) expect(pkg.entries.has(part), `Override for missing ${part}`).toBe(true);
   });
+});
+
+describe('the bytes of a fixture', () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** The zip entries carry a time, so two builds made seconds apart must not differ by it: the clock is moved on between them. */
+  it.each([...FIXTURES.map(({ name, build }) => [name, build] as const), ['zipOf', () => zipOf({ 'a.xml': '<a/>' })] as const])(
+    '%s does not depend on the time it is built',
+    (_name, build) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 5, 1, 12, 0, 0));
+      const first = build();
+      vi.setSystemTime(new Date(2026, 5, 1, 12, 0, 7));
+      expect(build()).toEqual(first);
+    },
+  );
 });
 
 describe('inventoryXlsx', () => {

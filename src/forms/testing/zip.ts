@@ -1,14 +1,20 @@
 import { strToU8, zipSync } from 'fflate';
 
+/** 1 January 1980, the earliest time a zip can hold, as `writePackage` uses for the files it writes. */
+const FIXED_TIME = new Date(1980, 0, 1);
+
 /**
  * A zip package built from `{ part path: text or bytes }`, for tests. Text is encoded as UTF-8. Parts are written in
  * the order given (except a name that is only digits, which JavaScript lists first). Nothing here is read from a real
  * company form: the callers invent every part.
+ *
+ * Every entry gets the same fixed time. Left to fflate it would be the time of writing (to 2 seconds), so the same
+ * parts would give different bytes from one call to the next, and a test that builds a fixture twice would flake.
  */
 export function zipOf(files: Record<string, string | Uint8Array>): Uint8Array {
   const parts: Record<string, Uint8Array> = {};
   for (const [path, content] of Object.entries(files)) parts[path] = typeof content === 'string' ? strToU8(content) : content;
-  return zipSync(parts);
+  return zipSync(parts, { mtime: FIXED_TIME });
 }
 
 /*
