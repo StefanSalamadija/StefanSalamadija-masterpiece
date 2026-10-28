@@ -4,6 +4,7 @@ import { TABLE_NAMES } from '../domain/types';
 import type {
   Certificate, ClockChange, CrewDocument, CrewMember, Settings, ShipProfile, Snapshot, SyncRecord, TableName, Voyage,
 } from '../domain/types';
+import { connectionWatch } from './connection';
 import { snapshotInUpgrade } from './snapshots';
 
 const APP_DB_NAME = 'masterpiece';
@@ -51,9 +52,16 @@ export function openDb(name: string = APP_DB_NAME): MasterpieceDB {
 
 let appDb: MasterpieceDB | undefined;
 
-/** The app's one database, created on first call. */
+/**
+ * The app's one database, created on first call. It is watched for connection problems from the start (see
+ * `connectionWatch`), so that every schema version has them handled, with no version needing to remember to.
+ */
 export function getDb(): MasterpieceDB {
-  return (appDb ??= openDb());
+  if (!appDb) {
+    appDb = openDb();
+    connectionWatch.watch(appDb);
+  }
+  return appDb;
 }
 
 /**

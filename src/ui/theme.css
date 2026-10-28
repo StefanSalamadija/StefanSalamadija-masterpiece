@@ -1552,7 +1552,8 @@ textarea {
 
 /* ---- App lock: the lock screen and the protect step ---- */
 
-.lock {
+.lock,
+.db-notice {
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
@@ -1561,7 +1562,8 @@ textarea {
   padding: 24px 16px;
 }
 
-.lock-card {
+.lock-card,
+.db-notice-card {
   width: 100%;
   max-width: 400px;
   display: flex;
@@ -1574,7 +1576,8 @@ textarea {
   align-self: center;
 }
 
-.lock-card h1 {
+.lock-card h1,
+.db-notice-card h1 {
   margin: 0;
   font-size: 24px;
   font-weight: 600;
@@ -1615,7 +1618,8 @@ textarea {
   text-align: center;
 }
 
-.lock-message {
+.lock-message,
+.db-notice-message {
   margin: 0;
   font-weight: 600;
   text-align: center;
@@ -1623,6 +1627,10 @@ textarea {
 
 .lock-message[role='alert'] {
   color: var(--red);
+}
+
+.db-notice-card .btn {
+  align-self: center;
 }
 
 /* A button that reads as a link: the quiet choice beside a big one. */

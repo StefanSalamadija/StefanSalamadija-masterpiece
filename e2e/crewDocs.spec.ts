@@ -561,3 +561,77 @@ test('crew edit: a new crew member is told to save first, and an existing one ha
   await expect(page.getByText('Save the crew member first to add documents.')).toHaveCount(0);
   await expectNoHorizontalScroll(page);
 });
+
+test('expiring: an ETA that has passed falls back to the next 90 days, and says so', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page);
+  await openMember(page, 'Ivan PETROVIĆ');
+  await addDocument(page, { document: 'Basic safety training', expiry: '2026-12-01' });
+  await addDocument(page, { document: 'Advanced fire fighting', expiry: '2027-01-24' }); // 91 days out: outside the window
+
+  // The ETA is 5 days ago: a window that ended then would show nothing of what is coming.
+  await setNextPort(page, 'Rotterdam', '2026-10-20T08:00');
+  await page.goto('./#/ship/expiring');
+  await expect(page.getByText('ETA 2026-10-20 has passed — showing the next 90 days.')).toBeVisible();
+  await expect(page.getByText('Next port Rotterdam')).toHaveCount(0);
+  await expect(page.getByText('No next port ETA set')).toHaveCount(0);
+  await expect(expiringList(page).getByRole('listitem')).toHaveCount(1);
+  await expect(expiringList(page)).toContainText('Basic safety training expires 2026-12-01');
+  await expectNoHorizontalScroll(page);
+
+  // An ETA today has not passed.
+  await setNextPort(page, 'Rotterdam', '2026-10-25T18:00');
+  await page.goto('./#/ship/expiring');
+  await expect(page.getByText('Next port Rotterdam, ETA 2026-10-25')).toBeVisible();
+  await expect(expiringList(page)).toHaveCount(0);
+  await expect(page.getByText('Nothing expires in that time.')).toBeVisible();
+});
+
+test('crew edit: unsaved changes are not lost to Add document or a document row; they are asked to be saved first', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page);
+  await openMember(page, 'Ivan PETROVIĆ');
+  await addDocument(page, { document: 'Medical fitness certificate', number: 'M-1', expiry: '2027-06-01' });
+  const crewScreen = page.url();
+  const saveFirst = page.getByText('Save your changes first.');
+
+  // Nothing has been changed: Add document goes on, and there is no message.
+  await expect(saveFirst).toHaveCount(0);
+
+  // A change, then Add document: the screen stays, the change stays, and the message is next to the Documents section.
+  await page.getByLabel('Nationality').fill('Montenegrin');
+  await page.getByRole('button', { name: 'Add document' }).click();
+  await expect(saveFirst).toBeVisible();
+  await expect(saveFirst).toHaveAttribute('role', 'alert');
+  await expect(page.locator('.crew-documents').getByText('Save your changes first.')).toBeVisible();
+  await expect(page).toHaveURL(crewScreen);
+  await expect(page.getByLabel('Nationality')).toHaveValue('Montenegrin');
+  await expect(page.getByRole('heading', { name: 'Add document' })).toHaveCount(0);
+
+  // A document row does the same.
+  await documentList(page).getByRole('link').click();
+  await expect(saveFirst).toBeVisible();
+  await expect(page).toHaveURL(crewScreen);
+  await expect(page.getByLabel('Nationality')).toHaveValue('Montenegrin');
+  expect((await stored(page, 'crew'))[0].nationality).toBe(''); // and nothing was saved behind the person's back
+
+  // Typing it back is no change: the message goes, and Add document works.
+  await page.getByLabel('Nationality').fill('');
+  await expect(saveFirst).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add document' }).click();
+  await expect(page.getByRole('heading', { name: 'Add document' })).toBeVisible();
+
+  // After a Save the changes are kept, and the Documents section is free.
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Edit crew member' })).toBeVisible();
+  await page.getByLabel('Nationality').fill('Montenegrin');
+  await page.getByRole('button', { name: 'Add document' }).click();
+  await expect(saveFirst).toBeVisible();
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  expect((await stored(page, 'crew'))[0].nationality).toBe('Montenegrin');
+  await openMember(page, 'Ivan PETROVIĆ');
+  await expect(saveFirst).toHaveCount(0);
+  await documentList(page).getByRole('link').click();
+  await expect(page.getByRole('heading', { name: 'Edit document' })).toBeVisible();
+});

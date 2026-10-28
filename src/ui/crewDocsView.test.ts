@@ -49,6 +49,31 @@ describe('expiringWindow', () => {
     }
   });
 
+  describe('with an ETA that has already passed', () => {
+    it('falls back to the next 90 days, and says the ETA has passed', () => {
+      expect(expiringWindow(voyage({ etaLocal: '2026-10-20T08:00' }), TODAY)).toEqual({
+        until: '2027-01-23', text: 'ETA 2026-10-20 has passed — showing the next 90 days.',
+      });
+      expect(expiringWindow(voyage({ etaLocal: '2026-10-24T23:59' }), TODAY).text).toBe('ETA 2026-10-24 has passed — showing the next 90 days.');
+    });
+
+    it('does not for an ETA today, which has not passed yet', () => {
+      expect(expiringWindow(voyage({ etaLocal: '2026-10-25T06:00' }), TODAY)).toEqual({
+        until: '2026-10-25', text: 'Next port Rotterdam, ETA 2026-10-25',
+      });
+    });
+
+    it('measures the 90 days from the ship\'s today, not from the ETA', () => {
+      expect(expiringWindow(voyage({ etaLocal: '2026-01-01T00:00' }), '2026-12-01')).toEqual({
+        until: '2027-03-01', text: 'ETA 2026-01-01 has passed — showing the next 90 days.',
+      });
+    });
+
+    it('says the ETA as the port wrote it, whatever the port is called', () => {
+      expect(expiringWindow(voyage({ etaLocal: '2026-10-20T08:00', nextPort: '' }), TODAY).text).toBe('ETA 2026-10-20 has passed — showing the next 90 days.');
+    });
+  });
+
   it('counts the 90 days from the date it is given', () => {
     expect(expiringWindow(undefined, '2026-12-01').until).toBe('2027-03-01');
   });

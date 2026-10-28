@@ -16,14 +16,18 @@ export interface ExpiringWindow {
 /**
  * The window of the Expiring screen. With an active voyage that has an ETA it is the date of the ETA, as the port wrote
  * it (the date part of `etaLocal`, whatever its UTC offset): "Next port Rotterdam, ETA 2027-01-05". Without a voyage, or
- * with no ETA (or one that is not a date and time), it is the next 90 days from `today`.
+ * with no ETA (or one that is not a date and time), it is the next 90 days from `today`. So is it when the ETA date is
+ * before `today`: that port was reached, or the ETA was not kept up, and a window that ends in the past would hide what
+ * is coming; the text then says so.
  */
 export function expiringWindow(voyage: Voyage | undefined, today: string): ExpiringWindow {
+  const next90 = addDays(today, EXPIRING_DAYS);
   if (voyage && isValidLocalDateTime(voyage.etaLocal)) {
-    const until = voyage.etaLocal.slice(0, 10);
-    return { until, text: `Next port ${voyage.nextPort.trim() || '—'}, ETA ${until}` };
+    const eta = voyage.etaLocal.slice(0, 10);
+    if (eta < today) return { until: next90, text: `ETA ${eta} has passed — showing the next ${EXPIRING_DAYS} days.` };
+    return { until: eta, text: `Next port ${voyage.nextPort.trim() || '—'}, ETA ${eta}` };
   }
-  return { until: addDays(today, EXPIRING_DAYS), text: NO_ETA_TEXT };
+  return { until: next90, text: NO_ETA_TEXT };
 }
 
 /** What a row of the Expiring screen says beside the name: "Medical fitness certificate expires 2026-12-24", or "expired" once it has. */

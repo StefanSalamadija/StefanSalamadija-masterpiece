@@ -61,6 +61,12 @@ export function crewFormOf(m: CrewDraft): CrewForm {
   };
 }
 
+/** True when the form holds something other than the saved contract has: what is typed back to what it was is not a change. */
+export function isCrewFormChanged(form: CrewForm, saved: CrewDraft): boolean {
+  const original = crewFormOf(saved);
+  return CONTROL_ORDER.some((control) => form[control] !== original[control]);
+}
+
 /** The contract fields that are optional: a box left empty leaves the field out. */
 const CONTRACT_KEYS = ['contractMonths', 'reliefPlannedDate', 'reliefPlannedPort'] as const;
 

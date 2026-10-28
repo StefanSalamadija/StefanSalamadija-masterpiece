@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CrewMember } from '../domain/types';
 import {
-  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, overlapProblem,
+  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, isCrewFormChanged, overlapProblem,
   problemsByControl, rejoinProblem, signOffProblem,
 } from './crewForm';
 import type { CrewForm } from './crewForm';
@@ -291,5 +291,22 @@ describe('rejoinProblem', () => {
   it('keeps the sign-off rule first', () => {
     const later = member({ id: 'later', signOnDate: '2026-10-01' });
     expect(rejoinProblem(m, '2026-10-10', TODAY, [m, later])?.message).toBe('Sign-on must be after the sign-off date (2026-10-10).');
+  });
+});
+
+describe('isCrewFormChanged', () => {
+  it('is false for the form as it was filled from the saved member', () => {
+    expect(isCrewFormChanged(crewFormOf(member()), member())).toBe(false);
+    expect(isCrewFormChanged(crewFormOf(member({ signOffDate: '2026-10-10', contractMonths: 6 })), member({ signOffDate: '2026-10-10', contractMonths: 6 }))).toBe(false);
+  });
+  it('is true once any control differs, a space or a rank included', () => {
+    expect(isCrewFormChanged(form({ nationality: 'Montenegrin' }), member())).toBe(true);
+    expect(isCrewFormChanged(form({ surname: 'PETROVIĆ ' }), member())).toBe(true);
+    expect(isCrewFormChanged(form({ rank: 'ab' }), member())).toBe(true);
+    expect(isCrewFormChanged(form({ contractMonths: '6' }), member())).toBe(true);
+  });
+  it('is false again when what was typed is typed back', () => {
+    expect(isCrewFormChanged(form({ nationality: 'Montenegrin' }), member())).toBe(true);
+    expect(isCrewFormChanged(form({ nationality: 'Croatian' }), member())).toBe(false);
   });
 });

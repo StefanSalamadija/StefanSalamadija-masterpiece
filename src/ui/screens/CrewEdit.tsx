@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { navigate, useRoute } from '../../app/router';
@@ -8,7 +8,7 @@ import type { CrewMember, FieldError } from '../../domain/types';
 import { BandBadge } from '../components/BandBadge';
 import { CrewFields } from '../components/CrewFields';
 import {
-  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, problemsByControl,
+  blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, isCrewFormChanged, problemsByControl,
 } from '../crewForm';
 import type { CrewControl, CrewForm } from '../crewForm';
 import { documentDetails } from '../crewDocsView';
@@ -19,13 +19,25 @@ import { useLive } from '../useLive';
  * the record elsewhere does not overwrite it. A problem shows once its field has been changed, and all of them after a
  * Save that found any; Save itself is always on, and moves the focus to the first field with a problem.
  */
-function CrewForm({ shipId, member, crew }: { shipId: string; member?: CrewMember; crew: CrewMember[] }) {
+function CrewForm({ shipId, member, crew, onUnsavedChange }: {
+  shipId: string;
+  member?: CrewMember;
+  crew: CrewMember[];
+  /** Told whether the form holds changes to the saved contract that are not saved yet (never for a new contract). */
+  onUnsavedChange?: (unsaved: boolean) => void;
+}) {
   const { db, shipToday } = useAppState();
   const [form, setForm] = useState(() => (member ? crewFormOf(member) : blankCrewForm()));
   const [changed, setChanged] = useState<ReadonlySet<CrewControl>>(new Set());
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
   const controls = useRef<Partial<Record<CrewControl, HTMLElement | null>>>({});
+
+  // Measured against the contract the form was made from, not the latest one: a change made elsewhere meanwhile is not something typed here.
+  const [original] = useState(member);
+  const unsaved = original !== undefined && isCrewFormChanged(form, original);
+  useEffect(() => onUnsavedChange?.(unsaved), [unsaved]);
+  useEffect(() => () => onUnsavedChange?.(false), []); // a form that is gone has nothing unsaved
 
   const problems = problemsByControl(crewFormProblems(form, shipToday, { id: member?.id, signOffDate: member?.signOffDate, crew }), form);
   const shown = (control: CrewControl): FieldError | undefined => {
@@ -71,9 +83,20 @@ function CrewForm({ shipId, member, crew }: { shipId: string; member?: CrewMembe
   );
 }
 
-/** The papers of a saved contract: each one opens to be edited, and a new one is added from here. */
-function Documents({ member }: { member: CrewMember }) {
+const SAVE_FIRST = 'Save your changes first.';
+
+/** True for a click that would open the link in this tab (not one that asks for a new tab or window). */
+function opensHere(event: MouseEvent): boolean {
+  return !(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey);
+}
+
+/**
+ * The papers of a saved contract: each one opens to be edited, and a new one is added from here. Both leave the contract's
+ * form, so while that holds changes that are not saved (`unsaved`) they say so and stay where they are: nothing typed is lost.
+ */
+function Documents({ member, unsaved }: { member: CrewMember; unsaved: boolean }) {
   const { db, shipToday } = useAppState();
+  const [refused, setRefused] = useState(false);
   const documents = useLive(() => db.crewDocuments.where('crewId').equals(member.id).filter((d) => !d.deleted).toArray(), [db, member.id]);
   const rows = useMemo(() => documents && sortDocuments(documents), [documents]);
   const documentsScreen = `/ship/crew/${encodeURIComponent(member.id)}/documents`;
@@ -81,12 +104,20 @@ function Documents({ member }: { member: CrewMember }) {
   return (
     <section class="form-section crew-documents">
       <h3>Documents</h3>
+      {refused && unsaved && <p class="field-error" role="alert">{SAVE_FIRST}</p>}
       {rows?.length === 0 && <p class="empty">No documents yet.</p>}
       {rows && rows.length > 0 && (
         <ul class="document-list" role="list" aria-label="Documents">
           {rows.map((d) => (
             <li key={d.id} class="card document-row">
-              <a class="document-link" href={`#${documentsScreen}/${encodeURIComponent(d.id)}`}>
+              <a
+                class="document-link" href={`#${documentsScreen}/${encodeURIComponent(d.id)}`}
+                onClick={(event) => {
+                  if (!unsaved || !opensHere(event)) return;
+                  event.preventDefault();
+                  setRefused(true);
+                }}
+              >
                 <span class="document-head">
                   <span class="document-label">{docLabel(d)}</span>
                   <BandBadge band={docBand(d, shipToday)} kind="crew" />
@@ -97,7 +128,15 @@ function Documents({ member }: { member: CrewMember }) {
           ))}
         </ul>
       )}
-      <button type="button" class="btn btn-outline" onClick={() => navigate(`${documentsScreen}/new`)}>Add document</button>
+      <button
+        type="button" class="btn btn-outline"
+        onClick={() => {
+          if (unsaved) setRefused(true);
+          else navigate(`${documentsScreen}/new`);
+        }}
+      >
+        Add document
+      </button>
     </section>
   );
 }
@@ -114,6 +153,8 @@ function NotFound() {
 /** Adds a crew member (`/ship/crew/new`) or edits one (`/ship/crew/:id`), who also has the papers they hold. */
 export function CrewEdit() {
   const { db, activeShip } = useAppState();
+  // Whether the form of the contract holds changes that are not saved; the Documents section must not leave them behind.
+  const [unsaved, setUnsaved] = useState(false);
   const { id } = useRoute().params;
   // `null` is a member that does not exist; `undefined` is still loading.
   const saved = useLive(async () => (id ? (await db.crew.get(id)) ?? null : null), [db, id]);
@@ -138,8 +179,8 @@ export function CrewEdit() {
   } else {
     content = (
       <>
-        <CrewForm key={saved.id} shipId={activeShip.id} member={saved} crew={crew} />
-        <Documents key={`documents-${saved.id}`} member={saved} />
+        <CrewForm key={saved.id} shipId={activeShip.id} member={saved} crew={crew} onUnsavedChange={setUnsaved} />
+        <Documents key={`documents-${saved.id}`} member={saved} unsaved={unsaved} />
       </>
     );
   }
