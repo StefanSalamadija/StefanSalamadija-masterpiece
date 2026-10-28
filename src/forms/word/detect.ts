@@ -163,13 +163,12 @@ class Detector {
 
   /**
    * The text that names a field from its own paragraph or cell: the text before it, back to the previous field or
-   * tick box. A checkbox on a line that starts with a box (`☐ Hot work ☐ Cold work`) is named by the text after it on
-   * that line instead, as each box there comes before its words; on a line that starts with text
-   * (`Yes ☐ No ☐`) each box comes after its words. The text after it is also taken when nothing comes before.
+   * tick box. A checkbox whose words follow the boxes of its line (see `labelsFollowBoxes`) is named by the text after
+   * it on that line instead. The text after a checkbox is also taken when nothing comes before it.
    */
   private inlineLabel(tokens: readonly Token[], i: number, field: RawField): string | undefined {
     const before = segment(tokens, i - 1, -1);
-    if (isCheckbox(field) && (lineStartsWithBox(tokens, i) || !hasWords(before))) {
+    if (isCheckbox(field) && (labelsFollowBoxes(tokens, i) || !hasWords(before))) {
       const after = segment(tokens, i + 1, 1, true);
       if (hasWords(after)) return after;
     }
@@ -371,17 +370,28 @@ class Detector {
   }
 }
 
-/** Whether the paragraph of `tokens[i]` starts with a box: a checkbox field or a box symbol before any text. */
-function lineStartsWithBox(tokens: readonly Token[], i: number): boolean {
+/**
+ * Whether the words of the boxes around `tokens[i]` come after each box. The boxes are the run of checkboxes (and box
+ * symbols) on the same line (paragraph) as `tokens[i]`, up to another kind of field. Their words follow them when:
+ * - nothing with words comes before the first box (`☐ Hot ☐ Cold`);
+ * - words come after the last box (`Permit type: ☐ Hot work ☐ Cold work`, `Is the area safe? ☐ Yes ☐ No`): the
+ *   text before the first box is then a question about them, not a box's name;
+ * - the text before the first box ends with `:` or `?` (a question whose boxes are named after them).
+ *
+ * Otherwise each box follows its words: `Yes ☐ No ☐ N/A ☐`, `Hot work ☐ Cold work ☐`, `Name [text] Yes ☐ No ☐`.
+ */
+function labelsFollowBoxes(tokens: readonly Token[], i: number): boolean {
+  const isBox = (t: Token): boolean => t.t === 'box' || (t.t === 'field' && isCheckbox(t.field));
+  const ends = (t: Token): boolean => t.t === 'break' || t.t === 'table' || t.t === 'repeat' || (t.t === 'field' && !isCheckbox(t.field));
   let start = i;
-  while (start > 0 && tokens[start - 1].t !== 'break') start -= 1;
-  for (let k = start; k <= i; k += 1) {
-    const t = tokens[k];
-    if (t.t === 'text' && t.s.trim() !== '') return false;
-    if (t.t === 'box') return true;
-    if (t.t === 'field') return isCheckbox(t.field);
-  }
-  return false;
+  while (start > 0 && !ends(tokens[start - 1])) start -= 1;
+  let end = i;
+  while (end < tokens.length - 1 && !ends(tokens[end + 1])) end += 1;
+  const run = tokens.slice(start, end + 1);
+  const first = run.findIndex(isBox);
+  const last = run.findLastIndex(isBox);
+  const lead = textOf(run.slice(0, first));
+  return !hasWords(lead) || hasWords(textOf(run.slice(last + 1))) || /[:?]$/.test(lead);
 }
 
 /** A row of the head of a table: text, and nothing to fill. */

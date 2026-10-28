@@ -234,6 +234,26 @@ describe('detectWord', () => {
     expect(s.fields.map((f) => f.label)).toEqual(['Yes', 'No', 'Hot work', 'Cold work', 'Hot work', 'Cold work', 'Done', 'Pending']);
   });
 
+  it.each([
+    ['Yes [] No []', ['Yes', 'No']],
+    ['Yes [] No [] N/A []', ['Yes', 'No', 'N/A']],
+    ['Hot work [] Cold work []', ['Hot work', 'Cold work']],
+    ['[] Hot [] Cold', ['Hot', 'Cold']],
+    ['Permit type: [] Hot work [] Cold work', ['Hot work', 'Cold work']],
+    ['Is the area safe? [] Yes [] No', ['Yes', 'No']],
+    ['Name [text] Yes [] No []', ['Name', 'Yes', 'No']],
+  ])('names the checkboxes of the line "%s" by the words that belong to each box', (line, labels) => {
+    const c = new Controls();
+    // `[]` is a FORMCHECKBOX, `[text]` a FORMTEXT; the rest is text, with the spaces as written.
+    const content = line.split(/(\[\]|\[text\])/).filter((part) => part !== '')
+      .map((part) => (part === '[]' ? c.formCheckbox() : part === '[text]' ? c.formText() : run(part))).join('');
+    const widths = [3000, 6638];
+    const body = p(content) + table(widths, [row(widths, ['Question', { content: p(content) }])]);
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Lines', code: 'TST-99', revision: '0' }), body }));
+    // The same line as a body paragraph, then in a table cell.
+    expect(s.fields.map((f) => f.label)).toEqual([...labels, ...labels]);
+  });
+
   it('takes tick headers in any case and box text symbols, and keeps going over a title row', () => {
     const c = new Controls();
     const widths = [5000, 1500, 1500];
@@ -474,6 +494,32 @@ describe('locateWord', () => {
       expectSameNodes(target.rows, [...(before.get(id) as { rows: Element[] }).rows, ...clones[id]]);
       for (const r of target.rows) for (const column of g.columns) expect(locateColumn(r, column)).toBeDefined();
     }
+  });
+
+  it('keeps two plain groups in one table apart when markup sits between and inside them, before and after clones', () => {
+    const c = new Controls();
+    const widths = [4000, 5638];
+    const [r1, r2, r3, r4, r5] = emptyRows(widths, 5);
+    const body = table(widths, [
+      headerRow(widths, ['Name', 'Rank']), r1, '<w:bookmarkStart w:id="80" w:name="a"/>', r2,
+      '<w:commentRangeStart w:id="81"/>', headerRow(widths, ['Item', 'Qty']), r3, '<w:permStart w:id="82" w:edGrp="everyone"/>', r4,
+      '<w:bookmarkEnd w:id="80"/>', r5, '<w:permEnd w:id="82"/>', row(widths, ['Total:', { content: p(c.formText()) }]),
+    ]);
+    const bytes = wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Two', code: 'TST-89', revision: '0' }), body });
+    const s = detect(bytes);
+    expect(s.rowGroups.map((g) => [g.capacity, g.columns.map((col) => col.label)])).toEqual([[2, ['Name', 'Rank']], [3, ['Item', 'Qty']]]);
+    expect(s.fields.map((f) => f.label)).toEqual(['Total']);
+
+    const doc = documentOf(bytes);
+    const before = locateWord(doc, MAIN, s);
+    const rowsOf = (targets: Map<string, WordTarget>, id: string) => (targets.get(id) as { rows: Element[] }).rows;
+    expect(rowsOf(before, 'g1')).toHaveLength(2);
+    expect(rowsOf(before, 'g2')).toHaveLength(3);
+    const clones = { g1: cloneAfter(rowsOf(before, 'g1').at(-1)!, 3), g2: cloneAfter(rowsOf(before, 'g2').at(-1)!, 2) };
+    const after = locateWord(doc, MAIN, s, { g1: 3, g2: 2 });
+    expectSameNodes(nodesOf(after.get('f1')!), nodesOf(before.get('f1')!));
+    expectSameNodes(rowsOf(after, 'g1'), [...rowsOf(before, 'g1'), ...clones.g1]);
+    expectSameNodes(rowsOf(after, 'g2'), [...rowsOf(before, 'g2'), ...clones.g2]);
   });
 
   it('still finds every id after the writer cloned items of a repeating section and rows of a plain table', () => {
