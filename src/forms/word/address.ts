@@ -1,5 +1,5 @@
-import type { FieldDef, FormSchema, RowGroupDef } from '../types';
-import { W, child, isEl, kids, wAttr } from './walk';
+import type { FieldDef, FormSchema } from '../types';
+import { W, child, isEl, isItem, kids, wAttr } from './walk';
 
 /*
  * Where a field is in a Word part: its `loc` (rulings R1).
@@ -20,7 +20,8 @@ import { W, child, isEl, kids, wAttr } from './walk';
  * - a content control: its `w:sdt`;
  * - a tick field: the `w:tc` of each option;
  * - a column of a plain group: the `w:tc`;
- * - a row group: its first `w:tr`, or its first item `w:sdt`. Row `i` is the `i`-th element sibling after it.
+ * - a row group: its first `w:tr`, or its first item `w:sdt`. Row `i` is the `i`-th sibling of the same kind after
+ *   it; other elements between rows (bookmarks, permission and comment ranges) are passed over, not counted.
  */
 
 /** Where a field or group is in a parsed part. `begin` is the `w:fldChar` of type `begin`; `cells` are in option order. */
@@ -119,15 +120,8 @@ function targetOf(nodes: (Element | undefined)[], field: FieldDef): WordTarget |
   return undefined;
 }
 
-/** A group's clones: the addresses under `parent` after index `last` move on by `extra`. */
+/** A group's clones: the addresses under `parent` (a template path) after template index `last` move on by `extra`. */
 interface Shift { parent: number[]; last: number; extra: number }
-
-function shiftOf(group: RowGroupDef, part: string, extra: number): Shift | undefined {
-  const loc = parseLoc(group.loc);
-  if (!loc || loc.part !== part || loc.paths.length !== 1 || loc.paths[0].length === 0 || !(extra > 0)) return undefined;
-  const path = loc.paths[0];
-  return { parent: path.slice(0, -1), last: path[path.length - 1] + group.capacity - 1, extra };
-}
 
 /** A template path as it is in an output where the writer cloned rows (compared with the template's own indices). */
 function shifted(path: readonly number[], shifts: readonly Shift[]): number[] {
@@ -139,44 +133,80 @@ function shifted(path: readonly number[], shifts: readonly Shift[]): number[] {
   return out;
 }
 
+/** Document order of two paths. */
+function compare(a: readonly number[], b: readonly number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i += 1) if (a[i] !== b[i]) return a[i] - b[i];
+  return a.length - b.length;
+}
+
+/** Whether `el` is a row of the same kind as a group's first row: a `w:tr`, or an item of a repeating section. */
+function sameKind(el: Element, first: Element): boolean {
+  return isEl(first, W, 'tr') ? isEl(el, W, 'tr') : isItem(el);
+}
+
+/**
+ * The first `count` rows of a group from its first row: the following siblings of the same kind, passing over any
+ * other element between them (a bookmark, a permission or comment range), as detection counted them. `lastOffset` is
+ * how many element siblings after the first the group's `capacity`-th row is.
+ */
+function rowsFrom(first: Element, count: number, capacity: number): { rows: Element[]; lastOffset?: number } {
+  const rows: Element[] = [];
+  let lastOffset: number | undefined;
+  let offset = 0;
+  for (let node: Node | null = first; node && rows.length < count; node = node.nextSibling) {
+    if (node.nodeType !== 1) continue;
+    if (sameKind(node as Element, first)) {
+      rows.push(node as Element);
+      if (rows.length === capacity) lastOffset = offset;
+    }
+    offset += 1;
+  }
+  return { rows, lastOffset };
+}
+
 /**
  * Resolves the stored addresses of a schema's fields and groups in a parsed part (`doc` is `part` parsed): the
  * template, or an output written from it. `extraRows[groupId]` is the number of rows or items the writer cloned
- * after that group's last row (`max(0, rows written − capacity)`); every later address under the same parent moves on
- * by that many, and the group's target has `capacity + extraRows` rows.
+ * directly after that group's last row (`max(0, rows written − capacity)`); every later address under the same parent
+ * moves on by that many, and the group's target has `capacity + extraRows` rows.
+ *
+ * A group's last row is found by counting its rows from the first (markup between rows is passed over). The elements
+ * between its first and last row are the template's, so the last row's template index is the first's plus that
+ * distance. Groups are taken in document order, so a group's first row is found with the clones of the groups before
+ * it already allowed for.
  *
  * Only the ids addressed in `part` are in the map. An address that does not lead to the kind of node it was made for
- * (a damaged or different file) is left out, so the caller can see what is missing; nothing is guessed.
- * Columns are resolved per row with `locateColumn`.
+ * (a damaged or different file) is left out, so the caller can see what is missing; nothing is guessed. `extraRows`
+ * values that are not positive whole numbers count as no clones. Columns are resolved per row with `locateColumn`.
  */
 export function locateWord(doc: Document, part: string, schema: FormSchema, extraRows: Record<string, number> = {}): Map<string, WordTarget> {
   const resolver = new Resolver(doc.documentElement);
-  const shifts = schema.rowGroups.flatMap((g) => shiftOf(g, part, extraRows[g.id] ?? 0) ?? []);
   const targets = new Map<string, WordTarget>();
+  const shifts: Shift[] = [];
+
+  const groups = schema.rowGroups
+    .flatMap((group) => {
+      const loc = parseLoc(group.loc);
+      return loc && loc.part === part && loc.paths.length === 1 && loc.paths[0].length > 0 ? [{ group, path: loc.paths[0] }] : [];
+    })
+    .sort((a, b) => compare(a.path, b.path));
+  for (const { group, path } of groups) {
+    const first = resolver.resolve(shifted(path, shifts));
+    if (!first || !(isEl(first, W, 'tr') || isItem(first))) continue;
+    const given = extraRows[group.id] ?? 0;
+    const extra = Number.isInteger(given) && given > 0 ? given : 0;
+    const { rows, lastOffset } = rowsFrom(first, group.capacity + extra, group.capacity);
+    if (extra > 0 && lastOffset !== undefined) shifts.push({ parent: path.slice(0, -1), last: path[path.length - 1] + lastOffset, extra });
+    if (rows.length !== group.capacity + extra) continue;
+    const section = first.parentNode?.parentNode;
+    targets.set(group.id, isItem(first) && isEl(section, W, 'sdt') ? { kind: 'group', rows, repeating: section } : { kind: 'group', rows });
+  }
 
   for (const field of schema.fields) {
     const loc = parseLoc(field.loc);
     if (!loc || loc.part !== part) continue;
     const target = targetOf(loc.paths.map((p) => resolver.resolve(shifted(p, shifts))), field);
     if (target) targets.set(field.id, target);
-  }
-
-  for (const group of schema.rowGroups) {
-    const loc = parseLoc(group.loc);
-    if (!loc || loc.part !== part || loc.paths.length !== 1) continue;
-    const first = resolver.resolve(shifted(loc.paths[0], shifts));
-    if (!first || !(isEl(first, W, 'tr') || isEl(first, W, 'sdt'))) continue;
-    const rows: Element[] = [];
-    const extra = extraRows[group.id] ?? 0;
-    const wanted = group.capacity + (extra > 0 ? extra : 0);
-    for (let node: Node | null = first; node && rows.length < wanted; node = node.nextSibling) {
-      if (node.nodeType !== 1) continue;
-      if (!isEl(node, W, first.localName)) break;
-      rows.push(node as Element);
-    }
-    if (rows.length !== wanted) continue;
-    const section = first.parentNode?.parentNode;
-    targets.set(group.id, isEl(first, W, 'sdt') && isEl(section, W, 'sdt') ? { kind: 'group', rows, repeating: section } : { kind: 'group', rows });
   }
   return targets;
 }

@@ -222,6 +222,18 @@ describe('detectWord', () => {
     expect(s.fields.map((f) => f.confidence)).toEqual([...Array(9).fill('high'), 'low']);
   });
 
+  it('names each checkbox of a line that starts with text by the words before it, never by a neighbour\'s', () => {
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const body = table(widths, [
+      row(widths, ['Gas free', { content: p(run('Yes ') + c.formCheckbox() + run(' No ') + c.formCheckbox()) }]),
+      row(widths, ['Work', { content: p(run('Hot work ') + c.formCheckbox() + run(' Cold work ') + c.formCheckbox()) }]),
+      row(widths, ['Kind', { content: p(c.formCheckbox() + run(' Hot work ') + c.formCheckbox() + run(' Cold work')) }]),
+    ]) + p(run('Done ') + c.formCheckbox() + run(' Pending ') + c.formCheckbox());
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Boxes', code: 'TST-97', revision: '0' }), body }));
+    expect(s.fields.map((f) => f.label)).toEqual(['Yes', 'No', 'Hot work', 'Cold work', 'Hot work', 'Cold work', 'Done', 'Pending']);
+  });
+
   it('takes tick headers in any case and box text symbols, and keeps going over a title row', () => {
     const c = new Controls();
     const widths = [5000, 1500, 1500];
@@ -417,6 +429,51 @@ describe('locateWord', () => {
     }
     // Without the clone counts, the addresses after the first group now miss.
     expect(fieldName(locateWord(doc, MAIN, s).get('f2'))).not.toBe('Text2');
+  });
+
+  it('counts rows and items past the markup between them, in detection and in locateWord, before and after clones', () => {
+    const c = new Controls();
+    const widths = [4000, 5638];
+    const mark = (id: number) => `<w:bookmarkStart w:id="${id}" w:name="mark${id}"/>`;
+    const markEnd = (id: number) => `<w:bookmarkEnd w:id="${id}"/>`;
+    const item = (content: string, id: number) => `<w:sdt><w:sdtPr><w:id w:val="${id}"/><w15:repeatingSectionItem/></w:sdtPr><w:sdtContent>${content}</w:sdtContent></w:sdt>`;
+    const logRow = () => row(widths, [{ content: p(c.formText()) }, { content: p(c.textControl({ alias: 'Note', tag: 'note', text: 'Click or tap here to enter text.', placeholder: true })) }]);
+    const section = `<w:sdt><w:sdtPr><w:alias w:val="Log"/><w:id w:val="100"/><w15:repeatingSection/></w:sdtPr><w:sdtContent>`
+      + `${item(logRow(), 101)}${mark(90)}${item(logRow(), 102)}${markEnd(90)}${item(logRow(), 103)}</w:sdtContent></w:sdt>`;
+    const [r1, r2, r3, r4] = emptyRows(widths, 4);
+    const body = table(widths, [headerRow(widths, ['Entry', 'Note']), section, row(widths, ['After log:', { content: p(c.formText()) }])])
+      + p()
+      + table(widths, [headerRow(widths, ['Name', 'Rank']), r1, r2, mark(91), r3, `<w:permStart w:id="92" w:edGrp="everyone"/>`, r4, markEnd(91), row(widths, ['Remarks:', { content: p(c.formText()) }])]);
+    const bytes = wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Marks', code: 'TST-98', revision: '0' }), body });
+    const s = detect(bytes);
+    expect(s.rowGroups.map((g) => [g.id, g.label, g.capacity, g.columns.map((col) => col.label)])).toEqual([
+      ['g1', 'Log', 3, ['Entry', 'Note']],
+      ['g2', 'Table 2', 4, ['Name', 'Rank']],
+    ]);
+    expect(s.fields.map((f) => f.label)).toEqual(['After log', 'Remarks']);
+
+    const doc = documentOf(bytes);
+    const before = locateWord(doc, MAIN, s);
+    expect([...before.keys()].sort()).toEqual(['f1', 'f2', 'g1', 'g2']);
+    const log = before.get('g1')!;
+    const people = before.get('g2')!;
+    if (log.kind !== 'group' || people.kind !== 'group') throw new Error('not groups');
+    expect(log.rows.map((r) => r.getElementsByTagNameNS(W, 'id')[0].getAttributeNS(W, 'val'))).toEqual(['101', '102', '103']);
+    expect(log.repeating!.getElementsByTagNameNS(W, 'alias')[0].getAttributeNS(W, 'val')).toBe('Log');
+    expect(people.rows.every((r) => r.localName === 'tr')).toBe(true);
+    expect(people.rows).toHaveLength(4);
+
+    const extraRows = { g1: 2, g2: 3 };
+    const clones = { g1: cloneAfter(log.rows.at(-1)!, 2), g2: cloneAfter(people.rows.at(-1)!, 3) };
+    const after = locateWord(doc, MAIN, s, extraRows);
+    for (const id of ['f1', 'f2']) expectSameNodes(nodesOf(after.get(id)!), nodesOf(before.get(id)!));
+    expect(['f1', 'f2'].map((id) => fieldName(after.get(id)))).toEqual(['Text4', 'Text5']);
+    for (const g of s.rowGroups) {
+      const target = after.get(g.id) as { rows: Element[] };
+      const id = g.id as 'g1' | 'g2';
+      expectSameNodes(target.rows, [...(before.get(id) as { rows: Element[] }).rows, ...clones[id]]);
+      for (const r of target.rows) for (const column of g.columns) expect(locateColumn(r, column)).toBeDefined();
+    }
   });
 
   it('still finds every id after the writer cloned items of a repeating section and rows of a plain table', () => {

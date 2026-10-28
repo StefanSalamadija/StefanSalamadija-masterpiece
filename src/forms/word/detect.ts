@@ -1,4 +1,5 @@
 import { NotAFormError } from '../errors';
+import { isSignatureLabel } from '../labels';
 import { partText } from '../package';
 import type { Package } from '../package';
 import type { FieldDef, FormSchema, RowGroupDef } from '../types';
@@ -6,7 +7,7 @@ import { parseXml } from '../xml';
 import { Addresser } from './address';
 import { hasWords, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
 import { otherStories } from './stories';
-import { W, Walker, child, clean, flatTokens, paragraphsIn, textOf, wVal } from './walk';
+import { W, Walker, child, clean, flatTokens, itemsOf, paragraphsIn, textOf, wVal } from './walk';
 import type { Block, Cell, Para, RawField, Repeat, Row, Table, Token } from './walk';
 
 export { locateColumn, locateWord } from './address';
@@ -161,15 +162,17 @@ class Detector {
   }
 
   /**
-   * The text that names a field from its own paragraph or cell: for a checkbox, the text after it on the same line
-   * (`☐ Hot work`), as a box comes before its words; else the text before it, back to the previous field or tick box.
+   * The text that names a field from its own paragraph or cell: the text before it, back to the previous field or
+   * tick box. A checkbox on a line that starts with a box (`☐ Hot work ☐ Cold work`) is named by the text after it on
+   * that line instead, as each box there comes before its words; on a line that starts with text
+   * (`Yes ☐ No ☐`) each box comes after its words. The text after it is also taken when nothing comes before.
    */
   private inlineLabel(tokens: readonly Token[], i: number, field: RawField): string | undefined {
-    if (isCheckbox(field)) {
+    const before = segment(tokens, i - 1, -1);
+    if (isCheckbox(field) && (lineStartsWithBox(tokens, i) || !hasWords(before))) {
       const after = segment(tokens, i + 1, 1, true);
       if (hasWords(after)) return after;
     }
-    const before = segment(tokens, i - 1, -1);
     return hasWords(before) ? before : undefined;
   }
 
@@ -263,10 +266,13 @@ class Detector {
     const first = ticks[0].grid;
     this.rowFields(rows, i, others.filter((c) => c.cell.grid < first), boxAbove);
     const n = this.fields.length + 1;
-    this.fields.push({
-      id: `f${n}`, kind: 'choice', label: labelCell ? labelText(labelCell.text) : `Field ${n}`, section: this.section,
+    const label = labelCell ? labelText(labelCell.text) : `Field ${n}`;
+    const choice: FieldDef = {
+      id: `f${n}`, kind: 'choice', label, section: this.section,
       loc: this.addr.loc(...tickCells.map((c) => c.cell.el)), options: ticks.map((col) => col.option), confidence: labelCell ? 'high' : 'low',
-    });
+    };
+    if (labelCell && isSignatureLabel(label)) choice.leftEmpty = true;
+    this.fields.push(choice);
     this.rowFields(rows, i, others.filter((c) => c.cell.grid > first), boxAbove);
     return true;
   }
@@ -281,7 +287,9 @@ class Detector {
    */
   private plainGroup(rows: RowInfo[], i: number, title: string | undefined): number {
     let end = i + 1;
-    while (end < rows.length && rows[end].empty && !rows[end].row.repeat && this.adjacent(rows[end - 1].row.el, rows[end].row.el)) end += 1;
+    // Rows under one parent with nothing but markup between them (a bookmark, a permission range), as `locateWord`
+    // counts the rows of a group: the row elements after the first, whatever else sits between them.
+    while (end < rows.length && rows[end].empty && !rows[end].row.repeat && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode) end += 1;
 
     const head: RowInfo[] = [];
     for (let r = i - 1; r >= 0 && isTextRow(rows[r]); r -= 1) head.unshift(rows[r]);
@@ -316,18 +324,13 @@ class Detector {
     return end;
   }
 
-  /** Whether `b` is the element just after `a` under the same parent. */
-  private adjacent(a: Element, b: Element): boolean {
-    return a.parentNode === b.parentNode && this.addr.indexOf(b) === this.addr.indexOf(a) + 1;
-  }
-
   /**
    * A repeating section of table rows (`rows[start..end)`): a group that grows. Its columns are the fields of the
    * first item, named like any field in a cell (the header row above names them), else by the control's alias.
    */
   private tableRepeat(rows: RowInfo[], start: number, end: number, title: string | undefined): void {
     const section = rows[start].row.repeat!.section;
-    const items = [...new Set(rows.slice(start, end).map((r) => r.row.repeat!.item))];
+    const items = itemsOf(section);
     const n = this.groups.length + 1;
     const columns: FieldDef[] = [];
     for (let i = start; i < end && rows[i].row.repeat!.item === items[0]; i += 1) {
@@ -366,6 +369,19 @@ class Detector {
       loc: this.addr.loc(items[0]), columns, capacity: items.length, growable: true, shape: 'rows',
     });
   }
+}
+
+/** Whether the paragraph of `tokens[i]` starts with a box: a checkbox field or a box symbol before any text. */
+function lineStartsWithBox(tokens: readonly Token[], i: number): boolean {
+  let start = i;
+  while (start > 0 && tokens[start - 1].t !== 'break') start -= 1;
+  for (let k = start; k <= i; k += 1) {
+    const t = tokens[k];
+    if (t.t === 'text' && t.s.trim() !== '') return false;
+    if (t.t === 'box') return true;
+    if (t.t === 'field') return isCheckbox(t.field);
+  }
+  return false;
 }
 
 /** A row of the head of a table: text, and nothing to fill. */

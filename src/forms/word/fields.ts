@@ -56,6 +56,12 @@ function dateHintOf(hint: string | undefined): string | undefined {
   return hint !== undefined && !/utc/i.test(hint) ? hint : undefined;
 }
 
+/** The kind a label asks for: `date` when it gives a date pattern, `time` when it names a time, else `text`. */
+function kindFromLabel(raw: string | undefined, hint: string | undefined): FieldKind {
+  if (dateHintOf(hint)) return 'date';
+  return raw !== undefined && isTimeLabel(labelText(raw)) ? 'time' : 'text';
+}
+
 /**
  * A list's entries without the first one when it is a prompt rather than a choice: blank, or starting with `_` or
  * `...` (`_ choose`, `...`), or Word's own `Choose an item.`.
@@ -82,7 +88,6 @@ function listItems(list: Element | undefined): string[] {
 /** The kind, options and format hint of a field, from its settings and its label (`raw`, the text that names it). */
 function describe(field: RawField, raw: string | undefined): Pick<FieldDef, 'kind' | 'options' | 'formatHint'> {
   const hint = raw === undefined ? undefined : formatHintOf(raw);
-  const byLabel = (): FieldKind => (dateHintOf(hint) ? 'date' : raw !== undefined && isTimeLabel(labelText(raw)) ? 'time' : 'text');
   if (field.kind === 'legacy') {
     switch (field.type) {
       case 'FORMCHECKBOX': return { kind: 'checkbox' };
@@ -97,7 +102,7 @@ function describe(field: RawField, raw: string | undefined): Pick<FieldDef, 'kin
         const input = child(field.ffData, W, 'textInput');
         const type = wVal(input, 'type');
         const own = wVal(input, 'format') || undefined;
-        const kind: FieldKind = type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'currentTime' ? 'time' : byLabel();
+        const kind: FieldKind = type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'currentTime' ? 'time' : kindFromLabel(raw, hint);
         // A date is written in the label's format when it gives one, else in the field's own (R2).
         const formatHint = kind === 'date' ? dateHintOf(hint) ?? own ?? hint : hint;
         return formatHint === undefined ? { kind } : { kind, formatHint };
@@ -145,6 +150,5 @@ export function makeColumn(o: { id: string; text: string | undefined; fallback: 
   const raw = hasWords(o.text) ? o.text : undefined;
   const label = raw === undefined ? o.fallback : labelText(raw);
   const hint = raw === undefined ? undefined : formatHintOf(raw);
-  const kind: FieldKind = dateHintOf(hint) ? 'date' : raw !== undefined && isTimeLabel(label) ? 'time' : 'text';
-  return definition({ ...o, label }, { kind, formatHint: hint }, raw);
+  return definition({ ...o, label }, { kind: kindFromLabel(raw, hint), formatHint: hint }, raw);
 }

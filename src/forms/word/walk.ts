@@ -13,7 +13,7 @@
 export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 export const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
 export const W15 = 'http://schemas.microsoft.com/office/word/2012/wordml';
-const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+export const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
 const WPS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const VML = 'urn:schemas-microsoft-com:vml';
 
@@ -113,6 +113,34 @@ export function kids(el: Element): Element[] {
   return out;
 }
 
+/**
+ * The child elements of `el` as a reader of this file sees them: an `mc:AlternateContent` is replaced by the children
+ * of its first `mc:Choice` (its `mc:Fallback`, the same content again for older readers, is never read).
+ */
+export function contentKids(el: Element): Element[] {
+  const out: Element[] = [];
+  for (const k of kids(el)) {
+    if (isEl(k, MC, 'AlternateContent')) {
+      const choice = child(k, MC, 'Choice');
+      if (choice) out.push(...contentKids(choice));
+    } else {
+      out.push(k);
+    }
+  }
+  return out;
+}
+
+/** The item controls (`w15:repeatingSectionItem`) of a repeating section's `w:sdt`, in order. */
+export function itemsOf(section: Element): Element[] {
+  const content = child(section, W, 'sdtContent');
+  return content ? kids(content).filter(isItem) : [];
+}
+
+/** Whether `el` is the `w:sdt` of an item of a repeating section. */
+export function isItem(el: Element): boolean {
+  return isEl(el, W, 'sdt') && !!child(child(el, W, 'sdtPr'), W15, 'repeatingSectionItem');
+}
+
 export function child(el: Element | undefined, ns: string, name: string): Element | undefined {
   if (!el) return undefined;
   for (let node = el.firstChild; node; node = node.nextSibling) if (isEl(node, ns, name)) return node;
@@ -176,12 +204,7 @@ export class Walker {
   /** The blocks of a container: `w:body`, `w:tc`, `w:sdtContent`, `w:txbxContent`, `w:hdr`, `w:ftr`. */
   blocks(container: Element): Block[] {
     const out: Block[] = [];
-    for (const el of kids(container)) {
-      if (el.namespaceURI === MC && el.localName === 'AlternateContent') {
-        const choice = child(el, MC, 'Choice');
-        if (choice) out.push(...this.blocks(choice));
-        continue;
-      }
+    for (const el of contentKids(container)) {
       if (el.namespaceURI !== W) continue;
       switch (el.localName) {
         case 'p': out.push({ t: 'p', p: this.paragraph(el) }); break;
@@ -191,7 +214,7 @@ export class Walker {
           const kind = classifySdt(el);
           const content = child(el, W, 'sdtContent');
           if (kind.as === 'field') out.push({ t: 'p', p: { el, tokens: [{ t: 'field', field: { kind: 'sdt', control: kind.type, sdt: el, sdtPr: kind.sdtPr } }], style: '' } });
-          else if (kind.as === 'repeat') out.push({ t: 'repeat', repeat: { section: el, items: this.items(content).map((item) => ({ el: item, blocks: this.blocks(child(item, W, 'sdtContent') ?? item) })) } });
+          else if (kind.as === 'repeat') out.push({ t: 'repeat', repeat: { section: el, items: itemsOf(el).map((item) => ({ el: item, blocks: this.blocks(child(item, W, 'sdtContent') ?? item) })) } });
           else if (content) out.push(...this.blocks(content));
           break;
         }
@@ -199,12 +222,6 @@ export class Walker {
       }
     }
     return out;
-  }
-
-  /** The item controls of a repeating section's content. */
-  private items(content: Element | undefined): Element[] {
-    if (!content) return [];
-    return kids(content).filter((el) => isEl(el, W, 'sdt') && !!child(child(el, W, 'sdtPr'), W15, 'repeatingSectionItem'));
   }
 
   paragraph(p: Element): Para {
@@ -215,12 +232,7 @@ export class Walker {
 
   /** The content of a paragraph or of anything that holds runs (a hyperlink, a run-level control). */
   private inline(parent: Element, tokens: Token[]): void {
-    for (const el of kids(parent)) {
-      if (el.namespaceURI === MC && el.localName === 'AlternateContent') {
-        const choice = child(el, MC, 'Choice');
-        if (choice) this.inline(choice, tokens);
-        continue;
-      }
+    for (const el of contentKids(parent)) {
       if (el.namespaceURI !== W) continue;
       switch (el.localName) {
         case 'r': this.run(el, tokens); break;
@@ -260,12 +272,7 @@ export class Walker {
   }
 
   private runContent(parent: Element, tokens: Token[], text: (s: string) => void): void {
-    for (const el of kids(parent)) {
-      if (el.namespaceURI === MC && el.localName === 'AlternateContent') {
-        const choice = child(el, MC, 'Choice');
-        if (choice) this.runContent(choice, tokens, text);
-        continue;
-      }
+    for (const el of contentKids(parent)) {
       if (el.namespaceURI !== W) continue;
       switch (el.localName) {
         case 't': text(el.textContent ?? ''); break;
@@ -326,7 +333,7 @@ export class Walker {
           const content = child(el, W, 'sdtContent');
           if (!content) continue;
           if (classifySdt(el).as === 'repeat') {
-            for (const item of this.items(content)) collect(child(item, W, 'sdtContent') ?? item, { section: el, item });
+            for (const item of itemsOf(el)) collect(child(item, W, 'sdtContent') ?? item, { section: el, item });
           } else {
             collect(content, repeat);
           }

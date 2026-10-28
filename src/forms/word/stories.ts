@@ -4,7 +4,7 @@ import type { Package } from '../package';
 import type { FormIdentity } from '../types';
 import { parseXml } from '../xml';
 import { hasWords, labelText, segment } from './fields';
-import { W, Walker, child, clean, isEl, kids, paragraphsIn, textOf, wVal } from './walk';
+import { MC, W, Walker, child, clean, isEl, kids, paragraphsIn, textOf, wVal } from './walk';
 import type { Block, Para, Token } from './walk';
 
 /*
@@ -12,7 +12,6 @@ import type { Block, Para, Token } from './walk';
  * that can't be filled here) and the floating text boxes of the body (fields that can't be filled here).
  */
 
-const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
 const HEADER_OR_FOOTER = /^word\/(header|footer)(\d*)\.xml$/;
 /** How much of a text box's text names it in the list of what can't be filled. */
 const SHORT = 40;
