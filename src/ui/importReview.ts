@@ -1,4 +1,5 @@
 import { CREW_DOC_TYPES, RANKS } from '../domain/catalogues';
+import { CREW_LIST_COLUMNS } from '../domain/crewList';
 import { docLabel } from '../domain/crewDocs';
 import { formatUtcMinute } from '../domain/dates';
 import { conflictKey, deepEqual } from '../domain/merge';
@@ -82,7 +83,7 @@ const PARTICULARS_LABELS: Record<string, string> = {
   name: 'Ship name', imo: 'IMO number', callSign: 'Call sign', mmsi: 'MMSI', flag: 'Flag', portOfRegistry: 'Port of registry',
   gt: 'GT', nt: 'NT', dwt: 'DWT (summer)', loa: 'LOA (m)', beam: 'Beam (m)', yearBuilt: 'Year built',
   owners: 'Owners', managers: 'Managers (ISM company)', pandi: 'P&I club', classSociety: 'Classification society',
-  maxMonthsOnboard: 'Maximum months onboard', crewImportMapping: 'Crew import settings',
+  maxMonthsOnboard: 'Maximum months onboard', crewImportMapping: 'Crew import settings', crewListColumns: 'Crew list columns',
 };
 const CERTIFICATE_LABELS: Record<string, string> = {
   name: 'Certificate name', number: 'Number', issuedBy: 'Issued by', issueDate: 'Issue date', expiryDate: 'Expiry date',
@@ -112,13 +113,23 @@ const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = { certificate
 function valuesOf(table: TableName, record: SyncRecord): Values {
   const raw = record as unknown as Values;
   const source: Values = table === 'ships'
-    ? { ...(isObject(raw.particulars) ? raw.particulars : {}), maxMonthsOnboard: raw.maxMonthsOnboard, crewImportMapping: raw.crewImportMapping }
+    ? {
+      ...(isObject(raw.particulars) ? raw.particulars : {}),
+      maxMonthsOnboard: raw.maxMonthsOnboard, crewImportMapping: raw.crewImportMapping, crewListColumns: raw.crewListColumns,
+    }
     : raw;
   const out: Values = {};
   for (const [key, value] of Object.entries(source)) {
     if (value !== undefined && !BOOKKEEPING.has(key) && !HIDDEN_OF[table]?.has(key)) out[key] = value;
   }
   return out;
+}
+
+/** The columns of a saved crew list choice by the labels of the print screen, in the order saved. What is not a column is shown as it is. */
+function columnsText(columns: unknown[]): string {
+  if (columns.length === 0) return 'None';
+  const names = columns.map((key) => CREW_LIST_COLUMNS.find((column) => column.key === key)?.label ?? String(key));
+  return plainText(names.join(', '), MAX_VALUE);
 }
 
 const ETA_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -136,6 +147,7 @@ function show(key: string, value: unknown): string {
     if (key === 'etaLocal' && ETA_LOCAL.test(value)) return value.replace('T', ' ');
     return plainText(value, MAX_VALUE) || EMPTY_VALUE;
   }
+  if (key === 'crewListColumns' && Array.isArray(value)) return columnsText(value);
   if (key === 'crewImportMapping' && isObject(value) && isObject(value.byHeader)) return `${Object.keys(value.byHeader).length} mapped columns`;
   return plainText(JSON.stringify(value), MAX_VALUE);
 }

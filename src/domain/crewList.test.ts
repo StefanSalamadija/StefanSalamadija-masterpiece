@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCrewList, CREW_LIST_COLUMNS, crewListColumnsOf, crewListFileName, DEFAULT_CREW_LIST_COLUMNS, masterName,
+  asText, buildCrewList, CREW_LIST_COLUMNS, crewListColumnsOf, crewListFileName, DEFAULT_CREW_LIST_COLUMNS, masterName, shownColumns,
 } from './crewList';
 import type { CrewListColumn, CrewDocument, CrewMember, ShipProfile } from './types';
 
@@ -59,7 +59,50 @@ describe('CREW_LIST_COLUMNS', () => {
   });
 });
 
+describe('the kind of each column', () => {
+  it('is a date for every date, a number for every number, and text for names and places', () => {
+    const kinds = Object.fromEntries(CREW_LIST_COLUMNS.map((c) => [c.key, c.kind]));
+    expect(kinds).toEqual({
+      no: 'number', surname: 'text', givenNames: 'text', rank: 'text', nationality: 'text', dateOfBirth: 'date', placeOfBirth: 'text',
+      passportNo: 'number', passportExpiry: 'date', seamansBookNo: 'number', seamansBookExpiry: 'date', signOnDate: 'date',
+      signOnPort: 'text', cocNumber: 'number', contractEnd: 'date',
+    });
+  });
+});
+
+describe('shownColumns', () => {
+  it('is the chosen columns, with their labels and kinds, in the order of the sheet', () => {
+    expect(shownColumns(['contractEnd', 'surname', 'no']).map((c) => [c.key, c.label, c.kind])).toEqual([
+      ['no', 'No.', 'number'], ['surname', 'Surname', 'text'], ['contractEnd', 'Contract end', 'date'],
+    ]);
+  });
+});
+
+describe('asText', () => {
+  it('is the text of a value, and an empty text for what is missing', () => {
+    expect(asText('Ivan')).toBe('Ivan');
+    expect(asText(42)).toBe('42');
+    expect(asText(undefined)).toBe('');
+    expect(asText(null)).toBe('');
+    expect(asText('')).toBe('');
+  });
+});
+
 describe('buildCrewList', () => {
+  it('turns a damaged record into text instead of failing: a missing field is empty, and a number is its digits', () => {
+    const damaged = member({
+      id: 'damaged', surname: undefined as unknown as string, givenNames: 7 as unknown as string, nationality: null as unknown as string,
+      placeOfBirth: 42 as unknown as string, dateOfBirth: 19850105 as unknown as string, passportExpiry: undefined as unknown as string,
+      rank: 'other', rankOther: 5 as unknown as string,
+    });
+    const t = buildCrewList({
+      crew: [damaged], docs: [document({ crewId: 'damaged', number: 123 as unknown as string })], asAt: '2026-10-25', filter: 'all',
+      columns: ['no', 'surname', 'givenNames', 'rank', 'nationality', 'dateOfBirth', 'placeOfBirth', 'passportExpiry', 'cocNumber'],
+    });
+    expect(t.rows).toEqual([['1', '', '7', 'Other', '', '19850105', '42', '', '123']]);
+    for (const cell of t.rows[0]) expect(typeof cell).toBe('string');
+  });
+
   it('builds the default columns for the crew onboard, in rank order, with the signed-off left out', () => {
     const t = buildCrewList({ crew: [ab, master, offSigned], docs: [cocDoc], columns: DEFAULTS, asAt: '2026-10-25', filter: 'onboard' });
     expect(t.headers).toEqual([
@@ -202,6 +245,11 @@ describe('crewListColumnsOf', () => {
 describe('masterName', () => {
   it('is the full name of the Master onboard on the date', () => {
     expect(masterName([ab, master, offSigned], '2026-10-25')).toBe('Ivan PETROVIĆ');
+  });
+
+  it('is the name of a Master whose record is damaged, without "undefined" in it', () => {
+    const nameless = member({ id: 'nameless', givenNames: undefined as unknown as string });
+    expect(masterName([nameless], '2026-10-25')).toBe('PETROVIĆ');
   });
 
   it('is blank when no Master is onboard on the date', () => {

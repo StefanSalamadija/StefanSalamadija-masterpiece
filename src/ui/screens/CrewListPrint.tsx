@@ -1,9 +1,9 @@
-import { useId, useRef, useState } from 'preact/hooks';
+import { useId, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { shareOrDownload } from '../../backup/share';
 import { listForShip, updateRecord } from '../../db/records';
-import { buildCrewList, CREW_LIST_COLUMNS, crewListColumnsOf, crewListFileName, masterName } from '../../domain/crewList';
+import { buildCrewList, CREW_LIST_COLUMNS, crewListColumnsOf, crewListFileName, masterName, shownColumns } from '../../domain/crewList';
 import { formatDisplayDate } from '../../domain/dates';
 import type { CrewDocument, CrewListColumn, CrewMember, ShipProfile, Voyage } from '../../domain/types';
 import { currentVoyage } from '../../domain/voyage';
@@ -15,6 +15,10 @@ const EXCEL_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.
 const LAST_COLUMN = 'Choose at least one column.';
 const EXPORTED = 'Crew list exported.';
 const EXPORT_CANCELLED = 'Export cancelled.';
+/** More columns than this are printed in a smaller type, to fit the width of an A4 page in landscape. */
+const MAX_COLUMNS_AT_FULL_SIZE = 11;
+/** On <html> while the sheet is open: what print.css keys the page of the sheet on (see there). */
+const PRINTING_CLASS = 'printing-crew-list';
 
 /** One detail of the sheet's heading, such as `Vessel MV OCEAN STAR`. */
 function Detail({ label, value }: { label: string; value: string }) {
@@ -60,6 +64,14 @@ function CrewListSheet({ ship }: { ship: ShipProfile }) {
   const saves = useRef<Promise<unknown>>(Promise.resolve());
   const titleId = useId();
 
+  // A layout effect, so that the class is in place before the first paint and gone as soon as the sheet is (an ordinary
+  // effect is cleaned up after the next paint).
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.add(PRINTING_CLASS);
+    return () => root.classList.remove(PRINTING_CLASS);
+  }, []);
+
   /** An option changed, so the file that was exported before is not the one the sheet shows now. */
   const edited = (): void => setStatus('');
 
@@ -67,6 +79,7 @@ function CrewListSheet({ ship }: { ship: ShipProfile }) {
   const date = resolveAsAt(dateText, shipToday);
   const port = (portText ?? data.nextPort).trim();
   const table = buildCrewList({ crew: data.crew, docs: data.docs, columns, asAt: date, filter: view });
+  const shown = shownColumns(columns); // the columns of `table`, whose kinds say how the cells may be broken
   const master = masterName(data.crew, date);
 
   function choose(key: CrewListColumn, on: boolean, box: HTMLInputElement): void {
@@ -149,13 +162,13 @@ function CrewListSheet({ ship }: { ship: ShipProfile }) {
           <Detail label="Date" value={formatDisplayDate(date)} />
         </p>
         <div class="sheet-table-wrap" role="region" aria-label="Crew list table" tabIndex={0}>
-          <table class="sheet-table" aria-labelledby={titleId}>
+          <table class={shown.length > MAX_COLUMNS_AT_FULL_SIZE ? 'sheet-table sheet-table-dense' : 'sheet-table'} aria-labelledby={titleId}>
             <thead>
               <tr>{table.headers.map((header) => <th key={header} scope="col">{header}</th>)}</tr>
             </thead>
             <tbody>
               {table.rows.map((row, i) => (
-                <tr key={i}>{row.map((text, j) => <td key={j}>{text}</td>)}</tr>
+                <tr key={i}>{row.map((text, j) => <td key={shown[j].key} class={`col-${shown[j].kind}`}>{text}</td>)}</tr>
               ))}
             </tbody>
           </table>

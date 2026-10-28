@@ -9,7 +9,7 @@ import { StorageFullError } from '../db/storage';
 import { conflictKey } from '../domain/merge';
 import { TABLE_NAMES } from '../domain/types';
 import type {
-  Certificate, ClockChange, CrewDocument, CrewDraft, CrewImportMapping, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage,
+  Certificate, ClockChange, CrewDocument, CrewDraft, CrewImportMapping, CrewListColumn, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage,
 } from '../domain/types';
 import { BackupError, DamagedFileError, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
@@ -406,6 +406,32 @@ describe('prepareImport and applyImport between two devices', () => {
     await applyImport(b, p, { conflicts: {}, applyDeletions: true });
     expect((await b.ships.get(a.ship.id))?.crewImportMapping).toEqual(crewImportMapping);
     expect((await prepareImport(b, text, PW)).plan.items).toEqual([]); // the same file again: nothing differs
+  });
+
+  it("carries a ship's crew list columns through a backup, in the order they were saved, and shows nothing new for the same file again", async () => {
+    const a = await deviceA();
+    const crewListColumns: CrewListColumn[] = ['no', 'surname', 'rank', 'passportNo', 'cocNumber'];
+    await updateRecord<ShipProfile>(a.db, 'ships', a.ship.id, { crewListColumns });
+    const b = freshDb();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect((await b.ships.get(a.ship.id))?.crewListColumns).toEqual(crewListColumns);
+    expect((await prepareImport(b, text, PW)).plan.items).toEqual([]);
+  });
+
+  it('takes a change to the ship\'s crew list columns as an update when only the other device made it', async () => {
+    const a = await deviceA();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await updateRecord<ShipProfile>(a.db, 'ships', a.ship.id, { crewListColumns: ['surname'] });
+    at('2026-10-25T11:00:00.000Z');
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.items.map((i) => [i.table, i.kind])).toEqual([['ships', 'update']]);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect((await b.ships.get(a.ship.id))?.crewListColumns).toEqual(['surname']);
   });
 
   it('shows zero changes, and creates no duplicates, when the same file is imported twice', async () => {

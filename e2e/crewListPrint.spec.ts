@@ -160,6 +160,11 @@ async function readExport(download: Download): Promise<{ sheetNames: string[]; r
   return { sheetNames: book.SheetNames, rows: rows.map((row) => withoutTrailingBlanks(row.map(String))) };
 }
 
+/** Whether `<html>` has the class that the print rules of the sheet key on. */
+function printingClass(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.documentElement.classList.contains('printing-crew-list'));
+}
+
 /** The size in points and the number of pages of what the browser prints of the screen it is on, on the page that screen asks for. */
 async function printedPages(page: Page): Promise<{ width: number; height: number; pages: number }> {
   const pdf = new TextDecoder('latin1').decode(await page.pdf({ preferCSSPageSize: true }));
@@ -235,6 +240,7 @@ test('print crew list and export to Excel', async ({ page }) => {
   ]);
 
   // Printing: only the sheet, and nothing of the screen's controls or bars.
+  expect(await printingClass(page)).toBe(true);                           // what the print rules key on, with no `:has()`
   await page.emulateMedia({ media: 'print' });
   await expect(page.getByRole('button', { name: 'Print', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Export to Excel' })).toBeHidden();
@@ -253,6 +259,8 @@ test('print crew list and export to Excel', async ({ page }) => {
   expect(printed.pages).toBe(1);
   // ...which is this sheet's only: the crew list prints on the browser's own page.
   await page.goto('./#/ship/crew');
+  await expect(page.getByRole('button', { name: 'Print crew list' })).toBeVisible();
+  expect(await printingClass(page)).toBe(false);                          // gone with the sheet: it is not left on the other screens
   const other = await printedPages(page);
   expect(other.height).toBeGreaterThan(other.width);
   await page.emulateMedia({ media: 'print' });
@@ -362,6 +370,19 @@ test('at least one column stays ticked; the choice is saved with the ship, and a
   await expect(page.getByRole('alert')).toHaveText('Choose at least one column.');
   await expect(sheetOf(page).getByRole('columnheader')).toHaveText(['Surname']);
   await expect.poll(() => storedColumns(page)).toEqual(['surname']);
+  // The file has that one column, under the same header block.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export to Excel' }).click();
+  expect((await readExport(await download)).rows).toEqual([
+    ['CREW LIST'],
+    ['Vessel', 'MV OCEAN STAR', 'IMO', '9074729'],
+    ['Call sign', '9HAB2', 'Flag', 'Malta'],
+    ['Port', 'Rotterdam', 'Date', '25-OCT-2026'],
+    [],
+    ['Surname'],
+    ['PETROVIĆ'],
+    ['KOVAČ'],
+  ]);
 
   // Ticking a column again takes the message away; the columns come in the order of the sheet, not of the ticking.
   await columns.getByLabel('CoC no.', { exact: true }).check();
@@ -449,4 +470,74 @@ test('the sheet fits a phone: the options do not scroll the page, and a wide tab
   expect(scrollWidth).toBeGreaterThan(clientWidth);                       // wider than the phone, so it scrolls in its box
   await box.focus();
   await expect(box).toBeFocused();                                        // and a keyboard can scroll it
+});
+
+test('a date or a number is never broken over two lines when printed, a name may be', async ({ page }) => {
+  await setUpCrew(page);
+  await page.goto('./#/ship/crew/print');
+  const columns = page.getByRole('group', { name: 'Columns' });
+  for (const label of ["Seaman's book no.", "Seaman's book expiry", 'CoC no.', 'Contract end']) await columns.getByLabel(label, { exact: true }).check();
+  // Narrow, so that the columns have to give way; what is printed has no scroll box to hide the breaks in.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.emulateMedia({ media: 'print' });
+  const lines = await sheetOf(page).locator('td').evaluateAll((cells) =>
+    cells.map((cell) => {
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+      return { kind: cell.className, text: cell.textContent ?? '', lines: tops.size, white: getComputedStyle(cell).whiteSpace };
+    }),
+  );
+  const dates = lines.filter((cell) => cell.kind === 'col-date' && cell.text !== '');
+  const numbers = lines.filter((cell) => cell.kind === 'col-number' && cell.text !== '');
+  expect(dates.map((cell) => cell.text)).toContain('05-JAN-1985');
+  expect(numbers.map((cell) => cell.text)).toContain('012345678');
+  for (const cell of [...dates, ...numbers]) {
+    expect(cell.lines, cell.text).toBe(1);
+    expect(cell.white, cell.text).toBe('nowrap');
+  }
+  for (const cell of lines.filter((c) => c.kind === 'col-text')) expect(cell.white, cell.text).toBe('normal');   // names and places may wrap
+});
+
+test('on a laptop-wide screen the 11 default columns fit the table\'s box; on a phone it scrolls', async ({ page }) => {
+  await setUpCrew(page);
+  await page.goto('./#/ship/crew/print');
+  await expect(sheetOf(page).getByRole('columnheader')).toHaveCount(11);
+  const box = sheetOf(page).getByRole('region', { name: 'Crew list table' });
+  const widths = () => box.evaluate((element) => [element.scrollWidth, element.clientWidth]);
+
+  await page.setViewportSize({ width: 900, height: 800 });
+  const [wide, wideBox] = await widths();
+  expect(wide).toBeLessThanOrEqual(wideBox);                              // no sideways scrolling at 900 px
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(900);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const [roomy, roomyBox] = await widths();
+  expect(roomy).toBeLessThanOrEqual(roomyBox);
+
+  await page.setViewportSize({ width: 360, height: 740 });
+  const [narrow, narrowBox] = await widths();
+  expect(narrow).toBeGreaterThan(narrowBox);                              // on a phone the cells keep to one line and the box scrolls
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+});
+
+test('the printed table fits the width of an A4 page in landscape, with 11 columns and with all 15', async ({ page }) => {
+  await setUpCrew(page, {
+    ...MASTER, surname: 'PETROVIĆ-ŠAŠIĆ', givenNames: 'Ivan Marko', nationality: 'Montenegrin', passportNo: 'P1234567890123',
+    seamansBookNo: 'SB-99887766554433', contractMonths: '6',
+  });
+  await page.goto('./#/ship/crew/print');
+  await expect(sheetOf(page).getByRole('columnheader')).toHaveCount(11);
+  // The width of the page's print area: 297 mm less the two 10 mm margins, which is 1047 CSS pixels.
+  await page.setViewportSize({ width: 1047, height: 800 });
+  await page.emulateMedia({ media: 'print' });
+  const box = sheetOf(page).locator('.sheet-table-wrap');
+  const fits = () => box.evaluate((element) => element.scrollWidth <= element.clientWidth);
+  expect(await fits()).toBe(true);
+
+  await page.emulateMedia({ media: null });
+  for (const label of ["Seaman's book no.", "Seaman's book expiry", 'CoC no.', 'Contract end']) await page.getByLabel(label, { exact: true }).check();
+  await expect(sheetOf(page).getByRole('columnheader')).toHaveCount(15);
+  await page.emulateMedia({ media: 'print' });
+  expect(await fits()).toBe(true);
+  expect(await sheetOf(page).locator('td.col-date').first().evaluate((cell) => getComputedStyle(cell).whiteSpace)).toBe('nowrap');
 });

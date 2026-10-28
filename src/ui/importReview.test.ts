@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CREW_LIST_COLUMNS } from '../domain/crewList';
 import { conflictKey, computeMerge, resolveMerge } from '../domain/merge';
 import type { MergeItem, MergePlan } from '../domain/merge';
 import type { SyncRecord, TableName, Tables } from '../domain/types';
@@ -204,6 +205,33 @@ describe('changedFields', () => {
       .toEqual([{ label: 'Maximum months onboard', local: '9', incoming: '11' }]);
   });
 
+  it("names a ship's crew list columns by the words of the print screen, not by their keys, in the order they are saved", () => {
+    const ship = (columns?: unknown[]): SyncRecord => rec({ particulars: { name: 'S' }, ...(columns && { crewListColumns: columns }) });
+    expect(changedFields('ships', ship(), ship(['surname', 'rank', 'passportNo'])))
+      .toEqual([{ label: 'Crew list columns', local: EMPTY_VALUE, incoming: 'Surname, Rank, Passport no.' }]);
+    expect(changedFields('ships', ship(['surname', 'rank']), ship(['seamansBookNo', 'cocNumber', 'contractEnd'])))
+      .toEqual([{ label: 'Crew list columns', local: 'Surname, Rank', incoming: "Seaman's book no., CoC no., Contract end" }]);
+    expect(changedFields('ships', ship(['surname', 'rank']), ship(['rank', 'surname'])))
+      .toEqual([{ label: 'Crew list columns', local: 'Surname, Rank', incoming: 'Rank, Surname' }]);
+  });
+
+  it('shows a crew list column choice that is damaged as text, and one that is empty as None, so that a change never looks like none', () => {
+    const ship = (columns: unknown): SyncRecord => rec({ particulars: { name: 'S' }, crewListColumns: columns });
+    expect(changedFields('ships', ship(['surname']), ship([])))
+      .toEqual([{ label: 'Crew list columns', local: 'Surname', incoming: 'None' }]);
+    expect(changedFields('ships', ship(['surname']), ship(['shoeSize', 7, 'rank'])))
+      .toEqual([{ label: 'Crew list columns', local: 'Surname', incoming: 'shoeSize, 7, Rank' }]);
+    expect(changedFields('ships', ship(['surname']), ship('surname')))
+      .toEqual([{ label: 'Crew list columns', local: 'Surname', incoming: 'surname' }]);
+  });
+
+  it('shows every crew list column without cutting the line', () => {
+    const everything = CREW_LIST_COLUMNS.map((c) => c.key);
+    const [change] = changedFields('ships', rec({ particulars: { name: 'S' } }), rec({ particulars: { name: 'S' }, crewListColumns: everything }));
+    expect(change.incoming).toBe(CREW_LIST_COLUMNS.map((c) => c.label).join(', '));
+    expect(change.incoming).not.toContain('…');
+  });
+
   it('summarises the saved crew import settings of a ship instead of dumping them', () => {
     const ship = (mapping?: object): SyncRecord => rec({ particulars: { name: 'S' }, ...(mapping && { crewImportMapping: mapping }) });
     expect(changedFields('ships', ship(), ship({ byHeader: { a: 'surname', b: 'rank' }, dateFormat: 'day-first' })))
@@ -356,7 +384,7 @@ describe('conflictViews', () => {
   });
 });
 
-describe("a merge of the contract length, the planned relief and the ship's limit", () => {
+describe("a merge of the contract length, the planned relief, the ship's limit and its crew list columns", () => {
   const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], ...extra });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');
@@ -395,6 +423,30 @@ describe("a merge of the contract length, the planned relief and the ship's limi
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Maximum months onboard', local: '9', incoming: '11' }]);
     expect(decide(merged, 'incoming')[0].record).toMatchObject({ maxMonthsOnboard: 11, particulars: { name: 'MV OCEAN STAR' } });
     expect(decide(merged, 'local')[0].record).toMatchObject({ maxMonthsOnboard: 9 });
+  });
+
+  const shipAt = (extra: object, updatedAt: string): SyncRecord => rec({ particulars: { name: 'MV OCEAN STAR' }, ...extra, updatedAt });
+
+  it('is a conflict for a ship that differs only in its crew list columns, which names them, and never says the two versions look the same', () => {
+    const merged = computeMerge(
+      tables({ ships: [shipAt({ crewListColumns: ['surname', 'rank'] }, '2026-03-01T00:00:00.000Z')] }),
+      tables({ ships: [shipAt({ crewListColumns: ['surname', 'rank', 'passportNo'] }, '2026-04-01T00:00:00.000Z')] }),
+      undefined,
+    );
+    expect(conflictViews(merged)[0].changes).toEqual([
+      { label: 'Crew list columns', local: 'Surname, Rank', incoming: 'Surname, Rank, Passport no.' },
+    ]);
+    expect(decide(merged, 'incoming')[0].record).toMatchObject({ crewListColumns: ['surname', 'rank', 'passportNo'] });
+    expect(decide(merged, 'local')[0].record).toMatchObject({ crewListColumns: ['surname', 'rank'] });
+  });
+
+  it('shows the columns a file has chosen where this device has none', () => {
+    const merged = computeMerge(
+      tables({ ships: [shipAt({}, '2026-03-01T00:00:00.000Z')] }),
+      tables({ ships: [shipAt({ crewListColumns: ['surname'] }, '2026-04-01T00:00:00.000Z')] }),
+      undefined,
+    );
+    expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Crew list columns', local: EMPTY_VALUE, incoming: 'Surname' }]);
   });
 });
 

@@ -970,6 +970,25 @@ textarea {
   font-weight: 600;
 }
 
+/* A date or a number is never broken, wherever the sheet is drawn: `05-JAN-1985` would split at its hyphens. Names and places may wrap. */
+.sheet-table td.col-date,
+.sheet-table td.col-number {
+  white-space: nowrap;
+}
+
+/* Room for the 11 default columns on a screen of a laptop or a tablet: the text wraps, and the table fits its box. A phone scrolls it. */
+@media (min-width: 900px) {
+  .sheet-table {
+    font-size: 13px;
+  }
+
+  .sheet-table th,
+  .sheet-table td {
+    padding: 5px 6px;
+    white-space: normal;
+  }
+}
+
 .sheet-sign {
   display: flex;
   flex-wrap: wrap;

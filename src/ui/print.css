@@ -47,18 +47,22 @@
   }
 
   /*
-   * The crew list prints as the sheet alone: not the header, and no frame, padding or minimum height around it that would
-   * push its last lines onto a page of their own. (The navigation bars, the update banner and the error toast are .no-print.)
+   * The crew list prints as the sheet alone: not the header, and no minimum height or padding around it that would push its
+   * last lines onto a page of their own. (The navigation bars, the update banner and the error toast are .no-print.) The
+   * screen puts `printing-crew-list` on <html> while it is open, which is a class and not `:has()`, because a browser that
+   * does not know `:has()` drops the whole rule and prints the header on a page of its own, before and after the sheet.
    */
-  .shell:has(.crew-list-sheet) {
+  :root.printing-crew-list .shell {
     min-height: 0;
   }
 
-  .shell:has(.crew-list-sheet) .app-header {
+  :root.printing-crew-list .app-header {
     display: none;
   }
 
-  .shell:has(.crew-list-sheet) .page {
+  /* The sheet has the whole width of the page, and not the 960 px that the screens are limited to. */
+  :root.printing-crew-list .page {
+    max-width: none;
     padding: 0;
   }
 
@@ -92,6 +96,16 @@
 
   .sheet-table th {
     background: none;
+  }
+
+  /* More than 11 columns: a date or a number never wraps, so the type is made smaller for the 15 of them to fit the page. */
+  .sheet-table-dense {
+    font-size: 7.5pt;
+  }
+
+  .sheet-table-dense th,
+  .sheet-table-dense td {
+    padding: 3px;
   }
 
   .sheet-table tr,

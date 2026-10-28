@@ -88,6 +88,51 @@ describe('crewListWorkbook', () => {
     expect(rows[3]).toEqual(['Port', 'Rotterdam', 'Date']);
   });
 
+  it('writes a sheet from a damaged record and a ship with details missing, as text: a missing value is blank and a number is its digits', async () => {
+    const bare = { ...ship, particulars: { ...ship.particulars, imo: undefined as unknown as string, callSign: 9 as unknown as string } };
+    const damaged = { headers: ['Surname', 'Given names', 'Place of birth'], rows: [[undefined, 7, 'Kotor'], [null, 'Ivan', 42]] as unknown as string[][] };
+    const { rows } = await read(crewListWorkbook({ ship: bare, port: undefined as unknown as string, date: '2026-10-25', table: damaged }));
+    expect(rows.slice(0, 4)).toEqual([['CREW LIST'], ['Vessel', 'MV OCEAN STAR', 'IMO'], ['Call sign', '9', 'Flag', 'Malta'], ['Port', null, 'Date', '25-OCT-2026']]);
+    expect(rows.slice(5)).toEqual([['Surname', 'Given names', 'Place of birth'], [null, '7', 'Kotor'], [null, 'Ivan', '42']]);
+  });
+
+  describe('the cells in the file', () => {
+    /** The XML of the first sheet and the shared strings, taken out of the zip as the file is, without SheetJS reading any cell. */
+    function parts(workbook: ArrayBuffer): { sheet: string; strings: string } {
+      const zip = XLSX.CFB.read(new Uint8Array(workbook), { type: 'array' });
+      const text = (name: string): string => {
+        const part = XLSX.CFB.find(zip, `/${name}`);
+        return part ? new TextDecoder().decode(part.content as Uint8Array) : '';
+      };
+      return { sheet: text('xl/worksheets/sheet1.xml'), strings: text('xl/sharedStrings.xml') };
+    }
+
+    const nasty = '=HYPERLINK("http://example.com","x")';
+    const workbook = crewListWorkbook({
+      ship: { ...ship, particulars: { ...ship.particulars, name: nasty } }, port: '+SUM(A1)', date: '2026-10-25',
+      table: buildCrewList({ crew: [member({ surname: nasty, givenNames: '@SUM(A1)' })], docs: [], columns: DEFAULTS, asAt: '2026-10-25', filter: 'onboard' }),
+    });
+
+    it('are shared-string cells (t="s"), with no formula (<f>) and no formula-result string (t="str") or inline string', () => {
+      const { sheet } = parts(workbook);
+      expect(sheet).not.toMatch(/<f[\s>/]/);
+      expect(sheet).not.toContain('t="str"');
+      expect(sheet).not.toContain('t="inlineStr"');
+      expect(sheet).not.toMatch(/<is>/);
+      const types = [...sheet.matchAll(/<c [^>]*t="([^"]+)"/g)].map((match) => match[1]);
+      expect(types.length).toBeGreaterThan(20);
+      expect(new Set(types)).toEqual(new Set(['s']));
+      expect(sheet).not.toMatch(/<c (?![^>]*t="s")[^>]*>/);              // every cell has a type, and it is s
+    });
+
+    it('keep the text of a formula in the shared strings, as text', () => {
+      const { strings } = parts(workbook);
+      expect(strings).toContain('=HYPERLINK(&quot;http://example.com&quot;,&quot;x&quot;)');
+      expect(strings).toContain('+SUM(A1)');
+      expect(strings).toContain('@SUM(A1)');
+    });
+  });
+
   describe('formulas', () => {
     const risky = ['=HYPERLINK("http://example.com","x")', '=1+1', '+SUM(A1)', '-2+3', '@SUM(A1)', '=cmd|\' /C calc\'!A0'];
 
