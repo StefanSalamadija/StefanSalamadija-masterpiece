@@ -84,6 +84,12 @@ export interface RowGroupDef {
   /** The text already in the first column of each row (item names, day numbers). */
   rowLabels?: string[];
   /**
+   * Rows that are already filled in the template, between the table's header row and the group's first row: reference
+   * rows such as alarm limits (`Alarm 1 | 19.5 | 25 | 5`). They are not rows of the group and are never written.
+   * `label` is the row's first-cell text; `cells` are the texts under the group's columns, in column order.
+   */
+  fixedRows?: { label: string; cells: string[] }[];
+  /**
    * What the rows are:
    * - `rows`: a plain list, such as participants or an inventory;
    * - `dayGrid`: one row for each day of the month;
