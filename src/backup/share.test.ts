@@ -59,6 +59,24 @@ describe('shareOrDownload', () => {
     expect(revoke).toHaveBeenCalledWith('blob:test');
   });
 
+  it('shares a Blob as a file of its own type, and a text as a file of unknown type', async () => {
+    const share = vi.fn(async () => {});
+    stubBrowser({ canShare: () => true, share });
+    const sheet = new Blob([new Uint8Array([80, 75, 3, 4])], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    expect(await shareOrDownload('crew.xlsx', sheet)).toBe('shared');
+    const arg = (share.mock.calls[0] as unknown as [{ files: File[] }])[0];
+    expect(arg.files[0]).toMatchObject({ name: 'crew.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    expect(arg.files[0].size).toBe(4);
+  });
+
+  it('downloads a Blob that has no type as a file of unknown type', async () => {
+    const { link, create } = stubBrowser({});
+    expect(await shareOrDownload('crew.xlsx', new Blob([new Uint8Array([1, 2, 3])]))).toBe('downloaded');
+    const file = create.mock.calls[0][0] as File;
+    expect(file).toMatchObject({ name: 'crew.xlsx', type: 'application/octet-stream', size: 3 });
+    expect(link).toMatchObject({ download: 'crew.xlsx' });
+  });
+
   it('downloads when canShare says the file cannot be shared', async () => {
     const share = vi.fn(async () => {});
     const { link } = stubBrowser({ canShare: () => false, share });

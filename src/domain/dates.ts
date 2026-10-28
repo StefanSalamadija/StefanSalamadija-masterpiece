@@ -27,6 +27,19 @@ export function isValidIsoDate(s: string): boolean {
   return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(y, m);
 }
 
+const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+
+/**
+ * A date as it is printed and exported: `05-JAN-1985`, with the month in capitals. An empty date stays empty. Text that is
+ * not a real date (a record from a damaged file may hold any) is given back as it is: a sheet must show what is stored, and
+ * never throw or make a date up.
+ */
+export function formatDisplayDate(iso: string): string {
+  if (!isValidIsoDate(iso)) return iso;
+  const [y, m, d] = parts(iso);
+  return `${String(d).padStart(2, '0')}-${MONTH_NAMES[m - 1]}-${String(y).padStart(4, '0')}`;
+}
+
 const LOCAL_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** True only for a real calendar date and a real time written exactly as `YYYY-MM-DDTHH:mm`, as a `datetime-local` input gives it. */

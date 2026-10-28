@@ -865,6 +865,155 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* ---- Printed crew list ---- */
+
+.crew-sheet-actions {
+  margin-bottom: 16px;
+}
+
+.crew-list-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.crew-list-options h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.column-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.column-picker legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.column-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: 0 16px;
+}
+
+.column-picker .field-error {
+  margin-top: 8px;
+}
+
+/* The sheet is drawn as the paper it becomes; print.css takes the frame away and sets the page. */
+.crew-list-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.sheet-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 24px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sheet-key {
+  color: var(--muted);
+}
+
+/* A wide table scrolls inside its own box, never the page. */
+.sheet-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.sheet-table th,
+.sheet-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+:root[data-theme='contrast'] .sheet-table th,
+:root[data-theme='contrast'] .sheet-table td {
+  border-color: var(--text);
+}
+
+.sheet-table th {
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.sheet-sign {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.sheet-master {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.sheet-master-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The space above the line is where the Master signs. */
+.sheet-signature {
+  margin: 44px 0 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--text);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sheet-stamp {
+  flex: 0 1 220px;
+  min-height: 110px;
+  padding: 6px 8px;
+  border: 1px solid var(--text);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sheet-footer {
+  margin: 8px 0 0;
+  font-size: 11px;
+  text-align: right;
+  color: var(--muted);
+}
+
 /* ---- Certificates ---- */
 
 .cert-row,

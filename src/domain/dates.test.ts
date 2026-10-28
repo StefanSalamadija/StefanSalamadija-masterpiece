@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, addMonths, formatUtcMinute, isValidIsoDate, isValidLocalDateTime } from './dates';
+import { addDays, addMonths, formatDisplayDate, formatUtcMinute, isValidIsoDate, isValidLocalDateTime } from './dates';
 
 describe('isValidIsoDate', () => {
   it('accepts real calendar dates', () => {
@@ -88,5 +88,28 @@ describe('formatUtcMinute', () => {
 
   it('is undefined for a year that has no four-digit form', () => {
     expect(formatUtcMinute('+275760-09-13T00:00:00.000Z')).toBeUndefined();
+  });
+});
+
+describe('formatDisplayDate', () => {
+  it('writes a date as DD-MMM-YYYY with the month in capitals', () => {
+    expect(formatDisplayDate('1985-01-05')).toBe('05-JAN-1985');
+    expect(formatDisplayDate('2026-10-25')).toBe('25-OCT-2026');
+    expect(formatDisplayDate('2028-02-29')).toBe('29-FEB-2028');
+  });
+
+  it('names every month', () => {
+    const months = Array.from({ length: 12 }, (_, i) => formatDisplayDate(`2026-${String(i + 1).padStart(2, '0')}-01`).slice(3, 6));
+    expect(months).toEqual(['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']);
+  });
+
+  it('leaves an empty date empty', () => {
+    expect(formatDisplayDate('')).toBe('');
+  });
+
+  it('gives back text that is not a real date as it is, so a damaged record is shown and never made up', () => {
+    expect(formatDisplayDate('05.01.1985')).toBe('05.01.1985');
+    expect(formatDisplayDate('2026-02-30')).toBe('2026-02-30');
+    expect(formatDisplayDate('soon')).toBe('soon');
   });
 });

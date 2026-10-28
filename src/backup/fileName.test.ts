@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backupFileName } from './fileName';
+import { backupFileName, slugify } from './fileName';
 
 describe('backupFileName', () => {
   it('turns a ship name with a slash into a safe lowercase slug', () => {
@@ -35,5 +35,17 @@ describe('backupFileName', () => {
 
   it('keeps a name of exactly 60 characters whole', () => {
     expect(backupFileName('full', 'z'.repeat(60), '2026-10-25T09:05')).toContain(`-${'z'.repeat(60)}-`);
+  });
+});
+
+describe('slugify', () => {
+  it('makes a lowercase, file-system-safe word list of any text', () => {
+    expect(slugify('M/V Ocean Star')).toBe('m-v-ocean-star');
+    expect(slugify('Đuro Šašić')).toBe('duro-sasic');
+  });
+
+  it('is empty when nothing usable is left', () => {
+    expect(slugify('///')).toBe('');
+    expect(slugify('')).toBe('');
   });
 });

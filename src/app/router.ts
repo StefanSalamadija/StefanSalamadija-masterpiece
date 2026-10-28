@@ -10,6 +10,7 @@ const ROUTES = [
   '/ship/crew',
   '/ship/crew/new',
   '/ship/crew/import',
+  '/ship/crew/print',
   '/ship/crew/:id',
   '/ship/crew/:id/documents/new',
   '/ship/crew/:id/documents/:docId',

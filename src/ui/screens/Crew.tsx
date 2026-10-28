@@ -210,6 +210,11 @@ function CrewList({ shipId }: { shipId: string }) {
           </button>
         </div>
       </div>
+      {/* Both open the sheet, which carries the date and the filter over and has the port and the columns to choose. */}
+      <div class="head-actions crew-sheet-actions">
+        <button type="button" class="btn btn-outline btn-small" onClick={() => navigate('/ship/crew/print')}>Print crew list</button>
+        <button type="button" class="btn btn-outline btn-small" onClick={() => navigate('/ship/crew/print')}>Export to Excel</button>
+      </div>
       {crew?.length === 0 && <p class="empty">No crew yet. Add a crew member, or import your crew list from Excel.</p>}
       {crew && crew.length > 0 && rows?.length === 0 && <p class="empty">Nobody is onboard on {asAt}.</p>}
       {rows && rows.length > 0 && (

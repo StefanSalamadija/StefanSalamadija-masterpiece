@@ -11,6 +11,7 @@ import { Crew } from '../ui/screens/Crew';
 import { CrewDocumentEdit } from '../ui/screens/CrewDocumentEdit';
 import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
+import { CrewListPrint } from '../ui/screens/CrewListPrint';
 import { Expiring } from '../ui/screens/Expiring';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
@@ -37,6 +38,7 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/crew': Crew,
   '/ship/crew/new': CrewEdit,
   '/ship/crew/import': CrewImport,
+  '/ship/crew/print': CrewListPrint,
   '/ship/crew/:id': CrewEdit,
   '/ship/crew/:id/documents/new': CrewDocumentEdit,
   '/ship/crew/:id/documents/:docId': CrewDocumentEdit,

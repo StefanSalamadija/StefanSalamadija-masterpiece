@@ -4,8 +4,8 @@ const SPECIAL_LETTERS: Record<string, string> = { đ: 'd', Đ: 'D' };
 /** Longest slug kept, so a long ship name cannot make a path that some file systems or apps refuse. */
 const MAX_SLUG = 60;
 
-/** A lowercase, file-system-safe version of a ship name: accents removed, anything else but letters and digits becomes one `-`. */
-function slug(name: string): string {
+/** A lowercase, file-system-safe version of a name: accents removed, anything else but letters and digits becomes one `-`. Empty when nothing usable is left. */
+export function slugify(name: string): string {
   return name
     .replace(/[đĐ]/g, (c) => SPECIAL_LETTERS[c])
     .normalize('NFD')
@@ -20,5 +20,5 @@ function slug(name: string): string {
 /** `masterpiece-full-m-v-ocean-star-2026-10-25-1432.mpbak`: `shipLocalDateTime` is the ship's `YYYY-MM-DDTHH:mm`. */
 export function backupFileName(kind: 'full' | 'handover', shipName: string, shipLocalDateTime: string): string {
   const stamp = shipLocalDateTime.replace('T', '-').replace(':', '');
-  return `masterpiece-${kind}-${slug(shipName) || 'ship'}-${stamp}.mpbak`;
+  return `masterpiece-${kind}-${slugify(shipName) || 'ship'}-${stamp}.mpbak`;
 }

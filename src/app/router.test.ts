@@ -8,7 +8,7 @@ describe('matchRoute', () => {
 
   it('matches every fixed route', () => {
     const fixed = [
-      '/ship/particulars', '/ship/crew', '/ship/crew/new', '/ship/crew/import', '/ship/certificates',
+      '/ship/particulars', '/ship/crew', '/ship/crew/new', '/ship/crew/import', '/ship/crew/print', '/ship/certificates',
       '/ship/certificates/new', '/ship/reliefs', '/ship/expiring', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
     ];
     for (const path of fixed) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
@@ -19,6 +19,7 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/certificates/9c')).toEqual({ path: '/ship/certificates/:id', params: { id: '9c' } });
     expect(matchRoute('#/ship/crew/new').path).toBe('/ship/crew/new');
     expect(matchRoute('#/ship/crew/import').path).toBe('/ship/crew/import');
+    expect(matchRoute('#/ship/crew/print').path).toBe('/ship/crew/print');
   });
 
   it('picks the crew member and the document out of the document routes, and the fixed word new before the document id', () => {
@@ -35,6 +36,7 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/crew/')).toEqual({ path: '/ship/crew', params: {} });
     expect(matchRoute('#/ship/crew?sort=rank')).toEqual({ path: '/ship/crew', params: {} });
     expect(matchRoute('#/ship/crew/abc?x=1')).toEqual({ path: '/ship/crew/:id', params: { id: 'abc' } });
+    expect(matchRoute('#/ship/crew/print?asAt=2026-10-01')).toEqual({ path: '/ship/crew/print', params: {} });
   });
 
   it('decodes percent-escapes in the id', () => {

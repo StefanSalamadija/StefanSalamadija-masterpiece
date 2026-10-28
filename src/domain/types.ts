@@ -9,10 +9,15 @@ export type DateFormat = 'day-first' | 'year-first';
 /** How a crew list is read, saved with the ship; headers are normalised (see `normaliseHeader`). `ignored` lists the headers the
  *  user left out although they would be mapped by their name, so that they stay out on the next import. */
 export interface CrewImportMapping { byHeader: Record<string, CrewField>; dateFormat: DateFormat; ignored?: string[] }
+/** A column of the printed and exported crew list. */
+export type CrewListColumn = 'no' | 'surname' | 'givenNames' | 'rank' | 'nationality' | 'dateOfBirth' | 'placeOfBirth' | 'passportNo'
+  | 'passportExpiry' | 'seamansBookNo' | 'seamansBookExpiry' | 'signOnDate' | 'signOnPort' | 'cocNumber' | 'contractEnd';
 export interface ShipProfile extends BaseRecord {
   particulars: Particulars; crewImportMapping?: CrewImportMapping;
   /** The most months a crew member may stay onboard (1 to 11); absent means the default of 11. */
   maxMonthsOnboard?: number;
+  /** The columns the ship's crew list is printed and exported with; absent means the default columns. */
+  crewListColumns?: CrewListColumn[];
 }
 export type RankKey = 'master' | 'chiefOfficer' | 'secondOfficer' | 'thirdOfficer' | 'deckCadet' | 'bosun' | 'ab' | 'os'
   | 'chiefEngineer' | 'secondEngineer' | 'thirdEngineer' | 'fourthEngineer' | 'eto' | 'engineCadet' | 'fitter' | 'oiler'

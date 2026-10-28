@@ -17,6 +17,13 @@ const FAST = { iterations: 1000 };
 let db: MasterpieceDB;
 let shipId: string;
 
+/** The text of the backup file that `shareOrDownload` was given: a backup is always shared as text. */
+function sharedText(call: Parameters<typeof shareOrDownload>): string {
+  const [, data] = call;
+  if (typeof data !== 'string') throw new Error('The backup was not shared as text.');
+  return data;
+}
+
 beforeEach(async () => {
   share.mockReset();
   forgetPassword();
@@ -28,10 +35,10 @@ describe('exportAndShare, a full backup', () => {
   it.each(['shared', 'downloaded'] as const)('records the backup once the file has been %s', async (outcome) => {
     share.mockResolvedValue(outcome);
     expect(await exportAndShare(db, { kind: 'full', password: PW, shipId, remember: true, ...FAST })).toBe(outcome);
-    const [fileName, text] = share.mock.calls[0];
+    const [fileName] = share.mock.calls[0];
     expect(fileName).toMatch(/^masterpiece-full-mv-ocean-star-\d{4}-\d{2}-\d{2}-\d{4}\.mpbak$/);
     const settings = await getSettings(db);
-    expect(settings.lastExportAt).toBe(readHeader(text).exportedAt);
+    expect(settings.lastExportAt).toBe(readHeader(sharedText(share.mock.calls[0])).exportedAt);
     expect(settings.firstExportDone).toBe(true);
   });
 
@@ -102,8 +109,8 @@ describe('exportAndShare, a handover file', () => {
   it('shares a handover file named after the ship', async () => {
     share.mockResolvedValue('downloaded');
     await exportAndShare(db, { kind: 'handover', password: 'relief-pass-1', shipId, remember: false, ...FAST });
-    const [fileName, text] = share.mock.calls[0];
+    const [fileName] = share.mock.calls[0];
     expect(fileName).toMatch(/^masterpiece-handover-mv-ocean-star-/);
-    expect(readHeader(text).kind).toBe('handover');
+    expect(readHeader(sharedText(share.mock.calls[0])).kind).toBe('handover');
   });
 });

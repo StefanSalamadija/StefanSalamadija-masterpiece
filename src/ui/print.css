@@ -1,6 +1,15 @@
 /*
  * Printing is always black on white, whatever the theme. This file is loaded after theme.css, so these rules win.
+ *
+ * Only the printed crew list sets a page of its own (A4 landscape): every other screen prints on the browser's default page.
  */
+
+/* The page of the crew list sheet, which `page: crew-list` below puts the sheet on. */
+@page crew-list {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
 @media print {
   :root,
   :root[data-theme] {
@@ -35,5 +44,58 @@
 
   .no-print {
     display: none !important;
+  }
+
+  /*
+   * The crew list prints as the sheet alone: not the header, and no frame, padding or minimum height around it that would
+   * push its last lines onto a page of their own. (The navigation bars, the update banner and the error toast are .no-print.)
+   */
+  .shell:has(.crew-list-sheet) {
+    min-height: 0;
+  }
+
+  .shell:has(.crew-list-sheet) .app-header {
+    display: none;
+  }
+
+  .shell:has(.crew-list-sheet) .page {
+    padding: 0;
+  }
+
+  .crew-list-sheet {
+    page: crew-list;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    font-size: 10pt;
+  }
+
+  .sheet-title {
+    font-size: 16pt;
+  }
+
+  .sheet-table-wrap {
+    overflow: visible;
+  }
+
+  .sheet-table {
+    font-size: 9pt;
+  }
+
+  .sheet-table th,
+  .sheet-table td {
+    padding: 3px 5px;
+    border-color: #000000;
+    white-space: normal;
+  }
+
+  .sheet-table th {
+    background: none;
+  }
+
+  .sheet-table tr,
+  .sheet-sign {
+    break-inside: avoid;
   }
 }
