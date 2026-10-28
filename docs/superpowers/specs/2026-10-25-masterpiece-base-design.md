@@ -33,7 +33,7 @@ At sign-off they can give the relief a ship-only handover file.
 ## 3. Roadmap (each piece gets its own spec → plan → build)
 
 1. **Base:** this spec.
-2. **SMS forms engine** (user decision 2026-10-27: built right after the base, before the Library, because these forms are used daily): fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. The user's sample forms have arrived (15, Word legacy form fields and Excel sheets). They are company documents: they stay on the user's devices and are never committed to this public repository.
+2. **SMS forms engine** (user decision 2026-10-27: built right after the base, before the Library, because these forms are used daily; designed in `2026-10-28-masterpiece-sms-forms-design.md`): fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. The user's sample forms have arrived (15, Word legacy form fields and Excel sheets). They are company documents: they stay on the user's devices and are never committed to this public repository.
 3. **Library** (user request):
    - **Document shelf:** about 100 of the user's own PDF/Word/Excel files (SMS manuals, circulars, stability booklet, their own legal copies of codes), stored offline, with folders and tags, full-text search inside the documents, favourites, and optional inclusion in the ship handover.
    - **Built-in quick-reference cards:** only original or public-domain content (for example Beaufort scale, phonetic alphabet, flag signals, COLREG lights and shapes, formulas, unit tables). No copyrighted IMO or other publisher texts are bundled.
