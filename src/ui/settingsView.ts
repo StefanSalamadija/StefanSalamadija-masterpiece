@@ -49,6 +49,7 @@ export function snapshotDate(createdAt: string): string {
 const COUNT_WORDS: readonly (readonly [TableName, string, string])[] = [
   ['ships', 'ship', 'ships'],
   ['crew', 'crew', 'crew'],
+  ['crewDocuments', 'crew document', 'crew documents'],
   ['voyages', 'voyage', 'voyages'],
   ['certificates', 'certificate', 'certificates'],
   ['clockChanges', 'clock change', 'clock changes'],
@@ -58,6 +59,11 @@ const COUNT_WORDS: readonly (readonly [TableName, string, string])[] = [
 export function snapshotCountsText(counts: Record<TableName, number>): string {
   const parts = COUNT_WORDS.filter(([table]) => counts[table] > 0).map(([table, one, many]) => `${counts[table]} ${counts[table] === 1 ? one : many}`);
   return parts.length > 0 ? parts.join(' · ') : 'No records';
+}
+
+/** What a restore does, said in the dialog that asks for it: what it puts back, from which snapshot, in place of what. */
+export function restoreExplanation(snapshot: Pick<Snapshot, 'createdAt' | 'reason' | 'note'>): string {
+  return `This puts back the ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`;
 }
 
 /**

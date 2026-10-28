@@ -118,6 +118,14 @@ describe('recordTitle', () => {
     expect(recordTitle('voyages', rec({ shipId: 's1', voyageNo: 'V-2611' }))).toBe('Voyage: V-2611');
     expect(recordTitle('certificates', rec({ shipId: 's1', name: 'International Load Line' }))).toBe('Certificate: International Load Line');
     expect(recordTitle('clockChanges', rec({ shipId: 's1', effectiveAt: '2026-10-25T09:00:00.000Z' }))).toBe('Clock change: 2026-10-25 09:00 UTC');
+    expect(recordTitle('crewDocuments', rec({ shipId: 's1', crewId: 'c1', type: 'medical' }))).toBe('Document: Medical fitness certificate');
+    expect(recordTitle('crewDocuments', rec({ shipId: 's1', crewId: 'c1', type: 'other', typeOther: ' Tanker familiarisation ' }))).toBe('Document: Tanker familiarisation');
+  });
+
+  it('names a crew document of a type it does not know, or of a damaged record, as plain text', () => {
+    expect(recordTitle('crewDocuments', rec({ shipId: 's1', crewId: 'c1', type: 'other' }))).toBe('Document: Other');
+    expect(recordTitle('crewDocuments', rec({ shipId: 's1', crewId: 'c1', type: 'drone', typeOther: '<b>Drone</b>\u202E' }))).toBe('Document: <b>Drone</b>');
+    expect(recordTitle('crewDocuments', rec({ shipId: 's1', type: { a: 1 }, typeOther: 7 }))).toBe('Document: Other');
   });
 
   it('has a name for a record that has none', () => {
@@ -268,6 +276,29 @@ describe('changedFields', () => {
     expect(changedFields('crew', crew(), crew({ updatedBy: 'device-b' }))).toEqual([]);
   });
 
+  it('shows a crew document by the words of the document form, the type by its name, and not the contract it belongs to', () => {
+    const document = (extra: object): SyncRecord => rec({
+      shipId: 's1', crewId: 'c1', type: 'coc', grade: 'Master (unlimited)', number: 'CoC-1', issuedBy: 'Croatia', issueDate: '2024-05-01',
+      expiryDate: '2029-05-01', remarks: '', ...extra,
+    });
+    expect(changedFields('crewDocuments', document({}), document({ remarks: 'Sighted', expiryDate: '2030-05-01', number: 'CoC-2', crewId: 'c2' })))
+      .toEqual([
+        { label: 'Number', local: 'CoC-1', incoming: 'CoC-2' },
+        { label: 'Expiry date', local: '2029-05-01', incoming: '2030-05-01' },
+        { label: 'Remarks', local: EMPTY_VALUE, incoming: 'Sighted' },
+      ]);
+    expect(changedFields('crewDocuments', document({}), document({ type: 'other', typeOther: 'Tanker familiarisation', grade: '' })))
+      .toEqual([
+        { label: 'Document', local: 'Certificate of Competency (CoC)', incoming: 'Other' },
+        { label: 'Document name', local: EMPTY_VALUE, incoming: 'Tanker familiarisation' },
+        { label: 'Grade / capacity', local: 'Master (unlimited)', incoming: EMPTY_VALUE },
+      ]);
+    expect(changedFields('crewDocuments', document({}), document({ type: 'drone' })))
+      .toEqual([{ label: 'Document', local: 'Certificate of Competency (CoC)', incoming: 'drone' }]);
+    expect(changedFields('crewDocuments', document({}), document({ deleted: true })))
+      .toEqual([{ label: 'Status', local: 'Active', incoming: 'Deleted' }]);
+  });
+
   it('does not take a certificate catalogue key for a change of its own: the name says it', () => {
     const cert = (extra: object): SyncRecord => rec({ shipId: 's1', key: 'loadLine', name: 'International Load Line', ...extra });
     expect(changedFields('certificates', cert({}), cert({ key: 'iopp', name: 'IOPP' })))
@@ -317,8 +348,8 @@ describe('conflictViews', () => {
   });
 
   it('works on a plan the merge made', () => {
-    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [] };
-    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [] };
+    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
+    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
@@ -326,7 +357,7 @@ describe('conflictViews', () => {
 });
 
 describe("a merge of the contract length, the planned relief and the ship's limit", () => {
-  const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], ...extra });
+  const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], ...extra });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');
   const planned = { reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };

@@ -26,7 +26,7 @@ function cert(id: string, updatedAt: string, patch: Partial<Certificate> = {}): 
   };
 }
 
-const EMPTY: Tables = { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] };
+const EMPTY: Tables = { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
 const T = (crew: SyncRecord[]): Tables => ({ ...EMPTY, crew });
 
 describe('computeMerge', () => {

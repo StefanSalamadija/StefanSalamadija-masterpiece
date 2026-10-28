@@ -1,4 +1,4 @@
-import type { CrewMember, RankKey } from './types';
+import type { CrewDocType, CrewMember, RankKey } from './types';
 
 export const RANKS: readonly { key: RankKey; label: string }[] = [
   { key: 'master', label: 'Master' },
@@ -78,4 +78,41 @@ export const CERTIFICATES: readonly { key: string; name: string; group: string }
   { key: 'sanitation', name: 'Ship Sanitation Control (Exemption) Certificate', group: HEALTH },
 
   { key: 'other', name: 'Other', group: 'Other' },
+];
+
+const COMPETENCY = 'Competency';
+const CREW_HEALTH = 'Health';
+const STCW = 'STCW courses';
+const VISAS = 'Visas';
+
+/**
+ * The papers a crew member can hold, in the order of the document form's select. `graded` is true for the ones that
+ * name a grade or capacity (the rank or limits the holder may serve in).
+ */
+export const CREW_DOC_TYPES: readonly { key: CrewDocType; label: string; group: string; graded: boolean }[] = [
+  { key: 'coc', label: 'Certificate of Competency (CoC)', group: COMPETENCY, graded: true },
+  { key: 'endorsement', label: 'Flag endorsement', group: COMPETENCY, graded: true },
+  { key: 'gmdss', label: 'GMDSS certificate', group: COMPETENCY, graded: true },
+
+  { key: 'medical', label: 'Medical fitness certificate', group: CREW_HEALTH, graded: false },
+  { key: 'yellowFever', label: 'Yellow fever certificate', group: CREW_HEALTH, graded: false },
+
+  { key: 'bst', label: 'Basic safety training', group: STCW, graded: false },
+  { key: 'aff', label: 'Advanced fire fighting', group: STCW, graded: false },
+  { key: 'pscrb', label: 'Survival craft and rescue boats', group: STCW, graded: false },
+  { key: 'frb', label: 'Fast rescue boats', group: STCW, graded: false },
+  { key: 'mfa', label: 'Medical first aid', group: STCW, graded: false },
+  { key: 'medicalCare', label: 'Medical care', group: STCW, graded: false },
+  { key: 'securityAwareness', label: 'Security awareness', group: STCW, graded: false },
+  { key: 'dsd', label: 'Designated security duties', group: STCW, graded: false },
+  { key: 'sso', label: 'Ship security officer', group: STCW, graded: false },
+  { key: 'ecdis', label: 'ECDIS', group: STCW, graded: false },
+  { key: 'brm', label: 'Bridge resource management', group: STCW, graded: false },
+  { key: 'erm', label: 'Engine-room resource management', group: STCW, graded: false },
+  { key: 'highVoltage', label: 'High voltage', group: STCW, graded: false },
+
+  { key: 'usVisa', label: 'US C1/D visa', group: VISAS, graded: false },
+  { key: 'schengenVisa', label: 'Schengen visa', group: VISAS, graded: false },
+
+  { key: 'other', label: 'Other', group: 'Other', graded: false },
 ];

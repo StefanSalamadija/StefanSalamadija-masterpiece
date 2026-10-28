@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { certificateBand, certificateExpiryBand, crewDocBand, crewDocExpiryBand, expiryBand, worstBand } from './expiry';
+import {
+  certificateBand, certificateExpiryBand, crewCertificateExpiryBand, crewDocBand, crewDocExpiryBand, expiryBand, worstBand,
+} from './expiry';
 import type { CrewDraft } from './types';
 
 const REF = '2026-10-25';
@@ -89,5 +91,15 @@ describe('crewDocExpiryBand and certificateExpiryBand', () => {
     expect(certificateExpiryBand('2027-01-24', REF)).toBe('ok');
     expect(certificateExpiryBand('2026-10-24', REF)).toBe('red');
     expect(certificateExpiryBand(undefined, REF)).toBe('none');
+  });
+});
+
+describe('crewCertificateExpiryBand', () => {
+  it('is amber from 90 days out, that day included, red once past, ok after the window', () => {
+    expect(crewCertificateExpiryBand('2027-01-23', REF)).toBe('amber');
+    expect(crewCertificateExpiryBand('2027-01-24', REF)).toBe('ok');
+    expect(crewCertificateExpiryBand('2026-10-24', REF)).toBe('red');
+    expect(crewCertificateExpiryBand('2026-10-25', REF)).toBe('amber');
+    expect(crewCertificateExpiryBand(undefined, REF)).toBe('none');
   });
 });

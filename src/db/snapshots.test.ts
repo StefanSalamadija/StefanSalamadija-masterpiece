@@ -24,7 +24,7 @@ function at(hour: number) {
   vi.setSystemTime(new Date(Date.UTC(2026, 9, 25, hour)));
 }
 
-const emptyTables = (): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] });
+const emptyTables = (): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] }); // fake-indexeddb needs the real timers
@@ -145,8 +145,8 @@ describe('listSnapshots', () => {
     const second = await takeSnapshot(db, 'before-update');
     const list = await listSnapshots(db);
     expect(list).toEqual([
-      { id: second.id, createdAt: second.createdAt, reason: 'before-update', counts: { ships: 1, crew: 2, voyages: 0, certificates: 0, clockChanges: 1 } },
-      { id: first.id, createdAt: first.createdAt, reason: 'manual', note: 'first', counts: { ships: 1, crew: 2, voyages: 0, certificates: 0, clockChanges: 1 } },
+      { id: second.id, createdAt: second.createdAt, reason: 'before-update', counts: { ships: 1, crew: 2, voyages: 0, certificates: 0, clockChanges: 1, crewDocuments: 0 } },
+      { id: first.id, createdAt: first.createdAt, reason: 'manual', note: 'first', counts: { ships: 1, crew: 2, voyages: 0, certificates: 0, clockChanges: 1, crewDocuments: 0 } },
     ]);
     for (const item of list) expect(item).not.toHaveProperty('data');
   });
@@ -163,7 +163,30 @@ describe('listSnapshots', () => {
     const db = freshDb();
     const { voyages: _voyages, ...withoutVoyages } = emptyTables();
     await db.snapshots.put({ id: 'old', createdAt: '2026-01-01T00:00:00.000Z', reason: 'manual', data: withoutVoyages as Tables });
-    expect((await listSnapshots(db))[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0 });
+    expect((await listSnapshots(db))[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0 });
+  });
+
+  it('counts the crew documents, tombstones included', async () => {
+    const db = freshDb();
+    const ship = await createShip(db, 'MV OCEAN STAR', 0);
+    const document = { shipId: ship.id, crewId: 'c-1', type: 'medical' as const, grade: '', number: 'M-1', issuedBy: '', issueDate: '2025-01-01', remarks: '' };
+    await createRecord(db, 'crewDocuments', document);
+    const gone = await createRecord(db, 'crewDocuments', { ...document, type: 'bst' as const });
+    await softDelete(db, 'crewDocuments', gone.id);
+    await takeSnapshot(db, 'manual');
+    expect((await listSnapshots(db))[0].counts.crewDocuments).toBe(2);
+  });
+
+  it('restores a snapshot that was taken before crew documents existed with no crew documents', async () => {
+    const db = freshDb();
+    const ship = await createShip(db, 'MV OCEAN STAR', 0);
+    const { crewDocuments: _none, ...before } = await allTables(db);
+    await db.snapshots.put({ id: 'old', createdAt: '2026-01-01T00:00:00.000Z', reason: 'manual', data: before as Tables });
+    await createRecord(db, 'crewDocuments', { shipId: ship.id, crewId: 'c-1', type: 'bst', grade: '', number: 'B-1', issuedBy: '', issueDate: '2025-01-01', remarks: '' });
+    at(1);
+    await restoreSnapshot(db, 'old');
+    expect(await db.crewDocuments.count()).toBe(0);
+    expect((await allTables(db)).ships.map((s) => s.id)).toEqual([ship.id]);
   });
 });
 
@@ -337,7 +360,7 @@ describe('restoreSnapshot', () => {
 });
 
 describe('snapshotInUpgrade', () => {
-  async function v1WithOneShip() {
+  async function storedWithOneShip() {
     const name = 'mig-' + crypto.randomUUID();
     const v1 = openDb(name);
     const ship = await createShip(v1, 'MV OCEAN STAR', 0);
@@ -346,23 +369,23 @@ describe('snapshotInUpgrade', () => {
     return { name, ship, before };
   }
 
-  /** The v1 database with a `version(2)` that changes the crew index and snapshots in its upgrade. */
+  /** The current database with a later version that changes the crew index and snapshots in its upgrade. */
   const upgradedDb = (name: string, run: (tx: Parameters<typeof snapshotInUpgrade>[0]) => Promise<void>) =>
     new (class extends MasterpieceDB {
       constructor() {
         super(name);
-        this.version(2).stores({ crew: 'id, shipId, surname' }).upgrade(run);
+        this.version(3).stores({ crew: 'id, shipId, surname' }).upgrade(run);
       }
     })();
 
   it('keeps a full copy of the data as it was before the upgrade', async () => {
-    const { name, ship, before } = await v1WithOneShip();
+    const { name, ship, before } = await storedWithOneShip();
     const v2 = upgradedDb(name, (tx) => snapshotInUpgrade(tx));
     await v2.open();
     const snaps = await listSnapshots(v2);
     expect(snaps).toHaveLength(1);
     expect(snaps[0].reason).toBe('before-update');
-    expect(snaps[0].counts).toEqual({ ships: 1, crew: 0, voyages: 0, certificates: 0, clockChanges: 1 });
+    expect(snaps[0].counts).toEqual({ ships: 1, crew: 0, voyages: 0, certificates: 0, clockChanges: 1, crewDocuments: 0 });
     const stored = (await v2.snapshots.get(snaps[0].id)) as Snapshot;
     expect(stored.data).toEqual(before);
     expect(stored.data.ships[0].id).toBe(ship.id);
@@ -374,7 +397,7 @@ describe('snapshotInUpgrade', () => {
   });
 
   it('uses the reason it is given', async () => {
-    const { name } = await v1WithOneShip();
+    const { name } = await storedWithOneShip();
     const v2 = upgradedDb(name, (tx) => snapshotInUpgrade(tx, 'before-import'));
     expect((await listSnapshots(v2))[0].reason).toBe('before-import');
     v2.close();
@@ -415,11 +438,11 @@ describe('snapshotInUpgrade', () => {
     const next = new Dexie(name);
     next.version(1).stores({ ships: 'id', settings: 'key', snapshots: 'id, createdAt' });
     next.version(2).upgrade((tx) => snapshotInUpgrade(tx));
-    next.version(3).stores({ crew: 'id, shipId', voyages: 'id, shipId', certificates: 'id, shipId', clockChanges: 'id, shipId' });
+    next.version(3).stores({ crew: 'id, shipId', voyages: 'id, shipId', certificates: 'id, shipId', clockChanges: 'id, shipId', crewDocuments: 'id, shipId, crewId' });
     await next.open();
     const [snap] = await next.table<Snapshot>('snapshots').toArray();
     expect(snap.data).toEqual({ ...emptyTables(), ships: [{ id: 'ship-1', deleted: false }] });
-    expect(next.tables.map((t) => t.name).sort()).toEqual(['certificates', 'clockChanges', 'crew', 'settings', 'ships', 'snapshots', 'voyages']);
+    expect(next.tables.map((t) => t.name).sort()).toEqual(['certificates', 'clockChanges', 'crew', 'crewDocuments', 'settings', 'ships', 'snapshots', 'voyages']);
     next.close();
   });
 });
@@ -432,7 +455,7 @@ describe('a snapshot you can roll back to', () => {
     const before = await allTables(v1);
     v1.close();
     class V2 extends MasterpieceDB {
-      constructor() { super(name); this.version(2).stores({ crew: 'id, shipId, surname' }).upgrade((tx) => snapshotInUpgrade(tx)); }
+      constructor() { super(name); this.version(3).stores({ crew: 'id, shipId, surname' }).upgrade((tx) => snapshotInUpgrade(tx)); }
     }
     const v2 = new V2();
     await v2.open();

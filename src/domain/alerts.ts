@@ -1,23 +1,24 @@
 import { contractBand, contractEndDate, onboardLimitBand, onboardLimitDate, validMaxMonths } from './contracts';
 import { fullName, onboardAt } from './crew';
+import { docBand, docLabel } from './crewDocs';
 import { certificateExpiryBand, crewDocExpiryBand } from './expiry';
-import type { Band, Certificate, CrewMember } from './types';
+import type { Band, Certificate, CrewDocument, CrewMember } from './types';
 
 /** What an alert is about. A new source of dates adds its kind here and a collector below. */
-export type AlertKind = 'crewDoc' | 'certificate' | 'contract' | 'onboardLimit';
+export type AlertKind = 'crewDoc' | 'certificate' | 'crewCertificate' | 'contract' | 'onboardLimit';
 
 /** The two bands that warn; a date that is ok, or that is not there, makes no alert. */
 type Warning = 'amber' | 'red';
 
 /** One thing to look at on the Home screen. The dates in `detail` are shown as kept, year first. */
 export interface Alert {
-  /** Tells the alert from every other, whoever else has the same name and dates: the kind and the id of the record (`contract:<crew id>`). */
+  /** Tells the alert from every other, whoever else has the same name and dates: the kind and the id of the record (`contract:<crew id>`, `crewCertificate:<document id>`). */
   key: string;
   kind: AlertKind;
   band: Warning;
-  /** Who or what: a person's full name, a certificate's name. */
+  /** Who or what: a person's full name (also for their documents), a certificate's name. */
   title: string;
-  /** What is wrong and when: `Passport expires 2027-01-10`, `Survey overdue 2026-10-02`, `Contract ends 2026-12-01`. */
+  /** What is wrong and when: `Passport expires 2027-01-10`, `Survey overdue 2026-10-02`, `Contract ends 2026-12-01`, `Medical fitness certificate expired 2026-09-01`. */
   detail: string;
   /** The screen that edits the record; for a contract or an onboard limit, the reliefs, where the crew to relieve are listed. */
   href: string;
@@ -95,6 +96,24 @@ function crewDocAlerts(crew: CrewMember[], today: string): Dated[] {
   );
 }
 
+/**
+ * Documents (CoC, medical, courses, visas) of the crew onboard on `today`: one alert for each document that expires
+ * within 90 days or has expired, named by the person and the document (`Medical fitness certificate expires 2026-12-24`).
+ */
+function crewCertificateAlerts(crew: CrewMember[], docs: CrewDocument[], today: string): Dated[] {
+  const onboard = new Map(onboardAt(crew, today).map((m) => [m.id, m]));
+  return docs
+    .filter((d) => !d.deleted)
+    .flatMap((d) => {
+      const member = onboard.get(d.crewId);
+      if (!member) return [];
+      const words: Words = { amber: `${docLabel(d)} expires`, red: `${docLabel(d)} expired` };
+      return alertFrom(flag(d.expiryDate, docBand(d, today), words), {
+        key: `crewCertificate:${d.id}`, kind: 'crewCertificate', title: fullName(member), href: `#/ship/crew/${encodeURIComponent(member.id)}`,
+      });
+    });
+}
+
 /** Expiries and next surveys of the certificates that are not deleted: one alert for each certificate that has either to look at. */
 function certificateAlerts(certificates: Certificate[], today: string): Dated[] {
   return certificates
@@ -157,12 +176,16 @@ function compareDated(a: Dated, b: Dated): number {
  * What needs looking at on `today` (the ship's date, `YYYY-MM-DD`), worst first: red before amber, and by date inside
  * each. A record with two dates that warn makes one alert, for the worse band, or the earlier date of the same band;
  * the exception is a crew member's contract end and onboard limit (`maxMonthsOnboard`, the ship's), which are two alerts.
- * Crew who are not onboard on `today`, and deleted records, make none.
+ * Each crew document has an alert of its own. Crew who are not onboard on `today` (nor their documents), and deleted
+ * records, make none.
  */
-export function collectAlerts(input: { crew: CrewMember[]; certificates: Certificate[]; today: string; maxMonthsOnboard: number }): Alert[] {
-  const { crew, certificates, today, maxMonthsOnboard } = input;
+export function collectAlerts(
+  input: { crew: CrewMember[]; certificates: Certificate[]; crewDocuments: CrewDocument[]; today: string; maxMonthsOnboard: number },
+): Alert[] {
+  const { crew, certificates, crewDocuments, today, maxMonthsOnboard } = input;
   return [
     ...crewDocAlerts(crew, today),
+    ...crewCertificateAlerts(crew, crewDocuments, today),
     ...certificateAlerts(certificates, today),
     ...contractAlerts(crew, today),
     ...onboardLimitAlerts(crew, today, maxMonthsOnboard),

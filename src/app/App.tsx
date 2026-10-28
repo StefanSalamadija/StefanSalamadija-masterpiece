@@ -8,8 +8,10 @@ import { UpdateBanner } from '../ui/components/UpdateBanner';
 import { CertificateEdit } from '../ui/screens/CertificateEdit';
 import { Certificates } from '../ui/screens/Certificates';
 import { Crew } from '../ui/screens/Crew';
+import { CrewDocumentEdit } from '../ui/screens/CrewDocumentEdit';
 import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
+import { Expiring } from '../ui/screens/Expiring';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { Home } from '../ui/screens/Home';
 import { ImportBackup } from '../ui/screens/ImportBackup';
@@ -36,10 +38,13 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/crew/new': CrewEdit,
   '/ship/crew/import': CrewImport,
   '/ship/crew/:id': CrewEdit,
+  '/ship/crew/:id/documents/new': CrewDocumentEdit,
+  '/ship/crew/:id/documents/:docId': CrewDocumentEdit,
   '/ship/certificates': Certificates,
   '/ship/certificates/new': CertificateEdit,
   '/ship/certificates/:id': CertificateEdit,
   '/ship/reliefs': Reliefs,
+  '/ship/expiring': Expiring,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
   '/profiles': Profiles,

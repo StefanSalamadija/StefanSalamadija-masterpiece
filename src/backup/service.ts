@@ -78,7 +78,9 @@ function assertWellFormed(tables: Tables): void {
       const r = record as unknown as Record<string, unknown>;
       const ok = (r.scope === 'ship' || r.scope === 'personal') && typeof r.deleted === 'boolean'
         && isTimestamp(r.createdAt) && isTimestamp(r.updatedAt)
-        && (name === 'ships' ? isObject(r.particulars) : typeof r.shipId === 'string');
+        && (name === 'ships' ? isObject(r.particulars) : typeof r.shipId === 'string')
+        // A document is found by its contract; without one it would belong to nobody.
+        && (name !== 'crewDocuments' || typeof r.crewId === 'string');
       if (!ok) throw new DamagedFileError();
     }
   }

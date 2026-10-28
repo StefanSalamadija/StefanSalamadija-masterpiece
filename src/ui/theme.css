@@ -683,6 +683,8 @@ textarea {
 .crew-list,
 .cert-list,
 .relief-list,
+.expiring-list,
+.document-list,
 .voyage-list,
 .history-list {
   display: flex;
@@ -723,6 +725,7 @@ textarea {
 .particulars-form,
 .crew-form,
 .certificate-form,
+.crew-document-form,
 .voyage-form {
   display: flex;
   flex-direction: column;
@@ -865,13 +868,17 @@ textarea {
 /* ---- Certificates ---- */
 
 .cert-row,
-.relief-row {
+.relief-row,
+.expiring-row,
+.document-row {
   padding: 0;
 }
 
-/* The whole card is the link to the certificate, or to the crew member. */
+/* The whole card is the link to the certificate, the crew member or the document. */
 .cert-link,
-.relief-link {
+.relief-link,
+.expiring-link,
+.document-link {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -883,7 +890,9 @@ textarea {
 }
 
 .cert-details,
-.relief-details {
+.relief-details,
+.expiring-details,
+.document-details {
   display: flex;
   flex-wrap: wrap;
   gap: 2px 16px;
@@ -892,8 +901,54 @@ textarea {
 }
 
 .cert-details > span,
-.relief-details > span {
+.relief-details > span,
+.expiring-details > span,
+.document-details > span {
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Crew documents and the Expiring screen ---- */
+
+/* The label on the left, the warning on the right, wrapping under it on a phone. */
+.document-head,
+.expiring-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.document-label {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.crew-documents {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.crew-documents h3,
+.crew-documents .empty {
+  margin: 0;
+}
+
+.crew-documents-note {
+  margin-top: 32px;
+}
+
+.crew-documents .btn {
+  align-self: flex-start;
+}
+
+.expiring-window {
+  margin: 0 0 16px;
   overflow-wrap: anywhere;
 }
 

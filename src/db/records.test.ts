@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TABLE_NAMES } from '../domain/types';
-import type { ClockChange, CrewDraft, CrewMember, ShipProfile, SyncRecord, Tables, Voyage } from '../domain/types';
+import type { ClockChange, CrewDocument, CrewDraft, CrewMember, ShipProfile, SyncRecord, Tables, Voyage } from '../domain/types';
 import { getDb, openDb } from './schema';
 import { getSettings, guessDeviceName, updateSettings } from './settings';
 import {
-  allTables, createRecord, listForShip, putRecords, replaceAllTables, softDelete, updateRecord,
+  allTables, createRecord, deleteCrewMember, listForShip, putRecords, rejoinCrewMember, replaceAllTables, softDelete,
+  updateRecord,
 } from './records';
 import { createShip } from './ships';
 import { StorageFullError, requestPersistentStorage } from './storage';
@@ -26,12 +27,14 @@ afterEach(() => {
 });
 
 describe('database', () => {
-  it('declares schema version 1 with the syncable tables, settings and snapshots', () => {
+  it('declares schema version 2 with the syncable tables, settings and snapshots', () => {
     const db = freshDb();
-    expect(db.verno).toBe(1);
+    expect(db.verno).toBe(2);
     expect(db.tables.map((t) => t.name).sort()).toEqual(
-      ['certificates', 'clockChanges', 'crew', 'settings', 'ships', 'snapshots', 'voyages'],
+      ['certificates', 'clockChanges', 'crew', 'crewDocuments', 'settings', 'ships', 'snapshots', 'voyages'],
     );
+    expect(db.crewDocuments.schema.primKey.name).toBe('id');
+    expect(db.crewDocuments.schema.idxByName).toHaveProperty('crewId');
     expect(db.crew.schema.primKey.name).toBe('id');
     expect(db.crew.schema.idxByName).toHaveProperty('shipId');
     expect(db.snapshots.schema.idxByName).toHaveProperty('createdAt');
@@ -250,7 +253,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
   it('returns every syncable table, deleted records included, in primary-key order', async () => {
     const { db, ship, crew } = await seeded();
     const t = await allTables(db);
-    expect(Object.keys(t).sort()).toEqual(['certificates', 'clockChanges', 'crew', 'ships', 'voyages']);
+    expect(Object.keys(t).sort()).toEqual(['certificates', 'clockChanges', 'crew', 'crewDocuments', 'ships', 'voyages']);
     expect(t.ships.map((r) => r.id)).toEqual([ship.id]);
     expect(t.crew.map((r) => r.id)).toEqual(crew.map((m) => m.id).sort());
     expect(t.crew.filter((r) => r.deleted)).toHaveLength(1);
@@ -293,7 +296,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
     const before = await getSettings(db);
     await db.snapshots.put({ id: 'snap-1', createdAt: '2026-10-25T00:00:00.000Z', reason: 'manual', data: await allTables(db) });
     const incoming: Tables = {
-      ships: [], voyages: [], certificates: [], clockChanges: [],
+      ships: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
       crew: [{ id: 'm-1', createdAt: 'x', updatedAt: 'x', updatedBy: 'x', deleted: true, scope: 'ship', shipId: 'gone', ...draft } as CrewMember],
     };
     await replaceAllTables(db, incoming);
@@ -391,5 +394,141 @@ describe('requestPersistentStorage', () => {
     vi.stubGlobal('navigator', { storage: { persist } });
     expect(await requestPersistentStorage()).toBe(expected);
     expect(persist).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('crew documents with their contract', () => {
+  const medical = { type: 'medical' as const, grade: '', number: 'M-1', issuedBy: 'Port Health', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '' };
+
+  async function withDocuments() {
+    const db = freshDb();
+    const ship = await createShip(db, 'MV OCEAN STAR', 180);
+    const ivan = await createRecord<CrewMember>(db, 'crew', { shipId: ship.id, ...draft, signOffDate: '2026-10-26', signOffPort: 'Santos' });
+    const other = await createRecord<CrewMember>(db, 'crew', { shipId: ship.id, ...draft, surname: 'Šašić', passportNo: 'P77' });
+    const docs = {
+      medical: await createRecord<CrewDocument>(db, 'crewDocuments', { shipId: ship.id, crewId: ivan.id, ...medical }),
+      bst: await createRecord<CrewDocument>(db, 'crewDocuments', { shipId: ship.id, crewId: ivan.id, type: 'bst', grade: '', number: 'B-1', issuedBy: '', issueDate: '2020-01-01', remarks: '' }),
+      expired: await createRecord<CrewDocument>(db, 'crewDocuments', { shipId: ship.id, crewId: ivan.id, ...medical, type: 'usVisa', number: 'V-1', expiryDate: '2026-09-01' }),
+      removed: await createRecord<CrewDocument>(db, 'crewDocuments', { shipId: ship.id, crewId: ivan.id, ...medical, type: 'ecdis', number: 'E-1' }),
+      others: await createRecord<CrewDocument>(db, 'crewDocuments', { shipId: ship.id, crewId: other.id, ...medical, number: 'O-1' }),
+    };
+    await softDelete(db, 'crewDocuments', docs.removed.id);
+    return { db, ship, ivan, other, docs };
+  }
+
+  describe('rejoinCrewMember', () => {
+    it('creates the new contract and a copy of every document still valid on the sign-on day', async () => {
+      const { db, ship, ivan } = await withDocuments();
+      const { deviceId } = await getSettings(db);
+      const created = await rejoinCrewMember(db, ivan, '2026-11-01', 'Rotterdam');
+      expect(created).toMatchObject({
+        shipId: ship.id, surname: 'Petrović', signOnDate: '2026-11-01', signOnPort: 'Rotterdam', deleted: false, updatedBy: deviceId,
+      });
+      expect('signOffDate' in created).toBe(false);
+      expect(await db.crew.get(created.id)).toEqual(created);
+
+      const carried = (await db.crewDocuments.where('crewId').equals(created.id).toArray()).sort((a, b) => a.number.localeCompare(b.number));
+      expect(carried.map((d) => [d.type, d.number])).toEqual([['bst', 'B-1'], ['medical', 'M-1']]);
+      for (const d of carried) {
+        expect(d).toMatchObject({ shipId: ship.id, crewId: created.id, scope: 'ship', deleted: false, updatedBy: deviceId });
+        expect(d.id).toMatch(/^[0-9a-f-]{36}$/);
+      }
+      expect(carried[1]).toMatchObject({ issuedBy: 'Port Health', issueDate: '2025-01-01', expiryDate: '2027-01-01' });
+      expect('expiryDate' in carried[0]).toBe(false);
+    });
+
+    it('leaves the old contract and its documents exactly as they were', async () => {
+      const { db, ivan } = await withDocuments();
+      const before = await allTables(db);
+      const created = await rejoinCrewMember(db, ivan, '2026-11-01', 'Rotterdam');
+      const after = await allTables(db);
+      expect(after.crew.filter((r) => r.id !== created.id)).toEqual(before.crew);
+      const newDocIds = new Set(after.crewDocuments.filter((r) => (r as CrewDocument).crewId === created.id).map((r) => r.id));
+      expect(after.crewDocuments.filter((r) => !newDocIds.has(r.id))).toEqual(before.crewDocuments);
+    });
+
+    it('creates the contract alone when there is nothing to carry over', async () => {
+      const { db, other } = await withDocuments();
+      await db.crewDocuments.where('crewId').equals(other.id).delete();
+      const created = await rejoinCrewMember(db, { ...other, signOffDate: '2026-10-26' }, '2026-11-01', '');
+      expect(await db.crew.get(created.id)).toBeDefined();
+      expect(await db.crewDocuments.where('crewId').equals(created.id).count()).toBe(0);
+    });
+
+    it('writes nothing when a document cannot be written: not the contract, nor the documents before it', async () => {
+      const { db, ivan } = await withDocuments();
+      const before = await allTables(db);
+      const real = db.crewDocuments.put.bind(db.crewDocuments);
+      // The contract and the first document are written; the second document fails.
+      vi.spyOn(db.crewDocuments, 'put').mockImplementationOnce(real).mockRejectedValueOnce(new Error('boom'));
+      await expect(rejoinCrewMember(db, ivan, '2026-11-01', 'Rotterdam')).rejects.toThrow('boom');
+      expect(await allTables(db)).toEqual(before);
+    });
+
+    it('reports a full disk as such, and writes nothing', async () => {
+      const { db, ivan } = await withDocuments();
+      const before = await allTables(db);
+      vi.spyOn(db.crewDocuments, 'put').mockRejectedValue(new DOMException('full', 'QuotaExceededError'));
+      await expect(rejoinCrewMember(db, ivan, '2026-11-01', 'Rotterdam')).rejects.toBeInstanceOf(StorageFullError);
+      expect(await allTables(db)).toEqual(before);
+    });
+  });
+
+  describe('deleteCrewMember', () => {
+    it('soft-deletes the contract and its live documents together, stamped with the time and device', async () => {
+      const { db, ivan, docs } = await withDocuments();
+      const { deviceId } = await getSettings(db);
+      vi.useFakeTimers({ now: new Date('2026-11-05T09:00:00Z'), toFake: ['Date'] });
+      await deleteCrewMember(db, ivan.id);
+      vi.useRealTimers();
+      const stamp = { deleted: true, updatedAt: '2026-11-05T09:00:00.000Z', updatedBy: deviceId };
+      expect(await db.crew.get(ivan.id)).toMatchObject(stamp);
+      for (const id of [docs.medical.id, docs.bst.id, docs.expired.id]) expect(await db.crewDocuments.get(id), id).toMatchObject(stamp);
+      expect(await listForShip(db, 'crewDocuments', ivan.shipId)).toEqual([docs.others]);
+    });
+
+    it('keeps the deletion time of a document that was already deleted, and leaves other contracts alone', async () => {
+      const { db, ivan, other, docs } = await withDocuments();
+      const tombstone = await db.crewDocuments.get(docs.removed.id);
+      const othersContract = await db.crew.get(other.id);
+      await deleteCrewMember(db, ivan.id);
+      expect(await db.crewDocuments.get(docs.removed.id)).toEqual(tombstone);
+      expect(await db.crewDocuments.get(docs.others.id)).toEqual(docs.others);
+      expect(await db.crew.get(other.id)).toEqual(othersContract);
+    });
+
+    it('keeps the deletion time of a contract that was already deleted', async () => {
+      const { db, ivan } = await withDocuments();
+      vi.useFakeTimers({ now: new Date('2026-10-30T00:00:00Z'), toFake: ['Date'] });
+      await deleteCrewMember(db, ivan.id);
+      vi.setSystemTime(new Date('2026-11-05T09:00:00Z'));
+      await deleteCrewMember(db, ivan.id);
+      expect((await db.crew.get(ivan.id))?.updatedAt).toBe('2026-10-30T00:00:00.000Z');
+    });
+
+    it('writes nothing when the documents cannot be deleted: the contract stays', async () => {
+      const { db } = await withDocuments();
+      const before = await allTables(db);
+      const ivan = before.crew.find((m) => (m as CrewMember).surname === 'Petrović') as CrewMember;
+      vi.spyOn(db.crewDocuments, 'bulkPut').mockRejectedValue(new Error('boom'));
+      await expect(deleteCrewMember(db, ivan.id)).rejects.toThrow('boom');
+      expect(await allTables(db)).toEqual(before);
+    });
+
+    it('reports a full disk as such, and writes nothing', async () => {
+      const { db, ivan } = await withDocuments();
+      const before = await allTables(db);
+      vi.spyOn(db.crewDocuments, 'bulkPut').mockRejectedValue(new DOMException('full', 'QuotaExceededError'));
+      await expect(deleteCrewMember(db, ivan.id)).rejects.toBeInstanceOf(StorageFullError);
+      expect(await allTables(db)).toEqual(before);
+    });
+
+    it('refuses a contract that does not exist, and writes nothing', async () => {
+      const { db } = await withDocuments();
+      const before = await allTables(db);
+      await expect(deleteCrewMember(db, 'missing')).rejects.toThrow(/missing/);
+      expect(await allTables(db)).toEqual(before);
+    });
   });
 });

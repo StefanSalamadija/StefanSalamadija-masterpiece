@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CERTIFICATES, RANKS, rankLabel } from './catalogues';
+import { CERTIFICATES, CREW_DOC_TYPES, RANKS, rankLabel } from './catalogues';
 
 describe('RANKS', () => {
   it('lists the 20 ranks in spec order, ending with Other', () => {
@@ -53,5 +53,39 @@ describe('CERTIFICATES', () => {
       'Registry and tonnage', 'Statutory safety', 'Pollution and environment', 'Management and security',
       'Class', 'Cargo', 'Liability and insurance', 'Health', 'Other',
     ]);
+  });
+});
+
+describe('CREW_DOC_TYPES', () => {
+  it('lists the 21 papers in spec order, ending with Other', () => {
+    expect(CREW_DOC_TYPES.map((t) => t.key)).toEqual([
+      'coc', 'endorsement', 'gmdss', 'medical', 'yellowFever', 'bst', 'aff', 'pscrb', 'frb', 'mfa', 'medicalCare',
+      'securityAwareness', 'dsd', 'sso', 'ecdis', 'brm', 'erm', 'highVoltage', 'usVisa', 'schengenVisa', 'other',
+    ]);
+    expect(CREW_DOC_TYPES).toHaveLength(21);
+  });
+
+  it('names them as the document form shows them', () => {
+    expect(CREW_DOC_TYPES.map((t) => t.label)).toEqual([
+      'Certificate of Competency (CoC)', 'Flag endorsement', 'GMDSS certificate', 'Medical fitness certificate',
+      'Yellow fever certificate', 'Basic safety training', 'Advanced fire fighting', 'Survival craft and rescue boats',
+      'Fast rescue boats', 'Medical first aid', 'Medical care', 'Security awareness', 'Designated security duties',
+      'Ship security officer', 'ECDIS', 'Bridge resource management', 'Engine-room resource management', 'High voltage',
+      'US C1/D visa', 'Schengen visa', 'Other',
+    ]);
+  });
+
+  it('groups them as Competency, Health, STCW courses, Visas and Other', () => {
+    expect([...new Set(CREW_DOC_TYPES.map((t) => t.group))]).toEqual(['Competency', 'Health', 'STCW courses', 'Visas', 'Other']);
+    const group = (name: string) => CREW_DOC_TYPES.filter((t) => t.group === name).map((t) => t.key);
+    expect(group('Competency')).toEqual(['coc', 'endorsement', 'gmdss']);
+    expect(group('Health')).toEqual(['medical', 'yellowFever']);
+    expect(group('STCW courses')).toHaveLength(13);
+    expect(group('Visas')).toEqual(['usVisa', 'schengenVisa']);
+    expect(CREW_DOC_TYPES[CREW_DOC_TYPES.length - 1]).toEqual({ key: 'other', label: 'Other', group: 'Other', graded: false });
+  });
+
+  it('has a grade only for the certificates of competency, endorsements and GMDSS', () => {
+    expect(CREW_DOC_TYPES.filter((t) => t.graded).map((t) => t.key)).toEqual(['coc', 'endorsement', 'gmdss']);
   });
 });

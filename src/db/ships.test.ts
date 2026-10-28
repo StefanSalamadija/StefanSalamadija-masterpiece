@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Certificate, ClockChange, CrewDraft, CrewMember, ShipProfile, Voyage } from '../domain/types';
+import type { Certificate, ClockChange, CrewDocument, CrewDraft, CrewMember, ShipProfile, Voyage } from '../domain/types';
 import { allTables, createRecord, listForShip, softDelete, updateRecord } from './records';
 import { openDb } from './schema';
 import { getSettings, updateSettings } from './settings';
@@ -142,6 +142,21 @@ describe('deleteShip', () => {
       expect(t[name].filter((r) => !ofA(r))).toEqual(otherBefore[name].filter((r) => !ofA(r)));
     }
     expect(await deleteSummary(db, a.id)).toEqual({ crew: 0, certificates: 0, voyages: 0, clockChanges: 0 });
+  });
+
+  it('soft-deletes the crew documents of the ship too, and none of another ship', async () => {
+    const { db, a, b } = await twoShips();
+    const { deviceId } = await getSettings(db);
+    const document = (shipId: string, crewId: string) => ({
+      shipId, crewId, type: 'medical' as const, grade: '', number: 'M-1', issuedBy: '', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '',
+    });
+    const mine = await createRecord<CrewDocument>(db, 'crewDocuments', document(a.id, 'c-1'));
+    const theirs = await createRecord<CrewDocument>(db, 'crewDocuments', document(b.id, 'c-2'));
+    vi.useFakeTimers({ now: new Date('2026-11-05T09:00:00Z'), toFake: ['Date'] });
+    await deleteShip(db, a.id);
+    vi.useRealTimers();
+    expect(await db.crewDocuments.get(mine.id)).toMatchObject({ deleted: true, updatedAt: '2026-11-05T09:00:00.000Z', updatedBy: deviceId });
+    expect(await db.crewDocuments.get(theirs.id)).toEqual(theirs);
   });
 
   it('keeps the original deletion time of records that were already deleted', async () => {

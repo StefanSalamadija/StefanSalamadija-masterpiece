@@ -5,7 +5,7 @@ import {
   openBackup, readHeader, sealBackup, validatePassword,
 } from './envelope';
 import type { BackupHeader, BackupPayload } from './envelope';
-import type { CrewMember } from '../domain/types';
+import type { CrewDocument, CrewMember } from '../domain/types';
 
 const PW = 'lozinka-ćevapi';
 const FAST = { iterations: 1000 };
@@ -21,10 +21,22 @@ function crewRec(patch: Partial<CrewMember> = {}): CrewMember {
   };
 }
 
+function docRec(patch: Partial<CrewDocument> = {}): CrewDocument {
+  return {
+    id: 'doc-1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'dev-A', deleted: false,
+    scope: 'ship', shipId: 'ship-1', crewId: 'crew-1', type: 'medical', grade: '', number: 'M-ŠĆ-1', issuedBy: 'Lučka uprava',
+    issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '', ...patch,
+  };
+}
+
 const H: BackupHeader = {
   format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-A', deviceName: 'Android device', exportedAt: '2026-10-25T10:00:00.000Z',
 };
-const P: BackupPayload = { tables: { ships: [], crew: [crewRec({ surname: 'Šašić' })], voyages: [], certificates: [], clockChanges: [] } };
+const P: BackupPayload = {
+  tables: { ships: [], crew: [crewRec({ surname: 'Šašić' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [docRec()] },
+};
+/** The tables of a backup made before crew documents existed. */
+const { crewDocuments: _added, ...VERSION_1_TABLES } = P.tables;
 
 /** Replace one character in the middle of a base64 string with a different base64 character. */
 function flipChar(s: string): string {
@@ -291,6 +303,34 @@ describe('sealBackup / openBackup', () => {
 
     it('rejects a decrypted payload that is not JSON', async () => {
       await expect(openBackup(await fileWithPlaintext('not json'), PW)).rejects.toBeInstanceOf(DamagedFileError);
+    });
+
+    it('opens a payload that has no crewDocuments, which an older file lacks, with that table empty', async () => {
+      const old = await sealBackup(H, { tables: { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] } } as never, 'pw-12345678', { iterations: 1000 });
+      expect((await openBackup(old, 'pw-12345678')).payload.tables.crewDocuments).toEqual([]);
+      const withCrew = await sealBackup(H, { tables: VERSION_1_TABLES } as never, PW, FAST);
+      expect((await openBackup(withCrew, PW)).payload.tables).toEqual({ ...VERSION_1_TABLES, crewDocuments: [] });
+    });
+
+    it('keeps the crew documents of a file that has them', async () => {
+      const opened = await openBackup(await sealedText(), PW);
+      expect(opened.payload.tables.crewDocuments).toEqual([docRec()]);
+    });
+
+    it.each([
+      ['crewDocuments that is not an array', JSON.stringify({ tables: { ...VERSION_1_TABLES, crewDocuments: {} } })],
+      ['crewDocuments that is null', JSON.stringify({ tables: { ...VERSION_1_TABLES, crewDocuments: null } })],
+      ['a crew document without an id', JSON.stringify({ tables: { ...VERSION_1_TABLES, crewDocuments: [{ updatedAt: 'x' }] } })],
+      ['a crew document that is null', JSON.stringify({ tables: { ...VERSION_1_TABLES, crewDocuments: [null] } })],
+    ])('rejects %s', async (_label, plain) => {
+      await expect(openBackup(await fileWithPlaintext(plain), PW)).rejects.toBeInstanceOf(DamagedFileError);
+    });
+
+    it('still rejects a payload with a table of the first version missing', async () => {
+      for (const missing of ['ships', 'crew', 'voyages', 'certificates', 'clockChanges'] as const) {
+        const { [missing]: _left, ...rest } = P.tables;
+        await expect(openBackup(await sealBackup(H, { tables: rest } as never, PW, FAST), PW), missing).rejects.toBeInstanceOf(DamagedFileError);
+      }
     });
 
     it('rejects a payload with a missing table', async () => {

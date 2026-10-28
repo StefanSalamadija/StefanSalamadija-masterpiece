@@ -9,7 +9,7 @@ describe('matchRoute', () => {
   it('matches every fixed route', () => {
     const fixed = [
       '/ship/particulars', '/ship/crew', '/ship/crew/new', '/ship/crew/import', '/ship/certificates',
-      '/ship/certificates/new', '/ship/reliefs', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
+      '/ship/certificates/new', '/ship/reliefs', '/ship/expiring', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
     ];
     for (const path of fixed) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
   });
@@ -19,6 +19,16 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/certificates/9c')).toEqual({ path: '/ship/certificates/:id', params: { id: '9c' } });
     expect(matchRoute('#/ship/crew/new').path).toBe('/ship/crew/new');
     expect(matchRoute('#/ship/crew/import').path).toBe('/ship/crew/import');
+  });
+
+  it('picks the crew member and the document out of the document routes, and the fixed word new before the document id', () => {
+    expect(matchRoute('#/ship/crew/3f2a/documents/new')).toEqual({ path: '/ship/crew/:id/documents/new', params: { id: '3f2a' } });
+    expect(matchRoute('#/ship/crew/3f2a/documents/d9')).toEqual({ path: '/ship/crew/:id/documents/:docId', params: { id: '3f2a', docId: 'd9' } });
+    expect(matchRoute('#/ship/crew/a%20b/documents/c%2Fd').params).toEqual({ id: 'a b', docId: 'c/d' });
+  });
+
+  it('knows the Expiring route', () => {
+    expect(matchRoute('#/ship/expiring')).toEqual({ path: '/ship/expiring', params: {} });
   });
 
   it('ignores a trailing slash and a query string', () => {
@@ -32,7 +42,7 @@ describe('matchRoute', () => {
   });
 
   it('falls back to Home for unknown routes and bad escapes', () => {
-    for (const hash of ['#/nowhere', '#/ship', '#/ship/crew/abc/extra', '#/ship/crew/%E0%A4%A', '#/settings/import/x']) {
+    for (const hash of ['#/nowhere', '#/ship', '#/ship/crew/abc/extra', '#/ship/crew/abc/documents', '#/ship/crew/abc/documents/d/extra', '#/ship/crew/abc/other/d', '#/ship/crew/%E0%A4%A', '#/settings/import/x']) {
       expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
     }
   });

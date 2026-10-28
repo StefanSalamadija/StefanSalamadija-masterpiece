@@ -3,11 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { takeFlash } from '../../app/flash';
 import { navigate } from '../../app/router';
-import { createRecord, listForShip, softDelete, updateRecord } from '../../db/records';
+import { deleteCrewMember, listForShip, rejoinCrewMember, updateRecord } from '../../db/records';
 import { rankLabel } from '../../domain/catalogues';
-import { fullName, rejoinableIds, rejoinDraft, visibleCrew } from '../../domain/crew';
-import { crewDocBand } from '../../domain/expiry';
-import type { CrewMember, FieldError } from '../../domain/types';
+import { fullName, rejoinableIds, visibleCrew } from '../../domain/crew';
+import { crewMemberBand } from '../../domain/crewDocs';
+import type { CrewDocument, CrewMember, FieldError } from '../../domain/types';
 import { BandBadge } from '../components/BandBadge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
@@ -105,9 +105,9 @@ function RejoinDialog({ member, crew, onClose, ...dialog }: DialogProps) {
       {...dialog} onClose={onClose} title={`Re-join ${fullName(member)}`} confirmLabel="Re-join"
       dateLabel="Sign-on date" portLabel="Sign-on port" initialDate={shipToday} initialPort=""
       check={(date) => rejoinProblem(member, date, shipToday, crew)}
-      // A new contract; the signed-off one stays as it is, and so does its row.
+      // A new contract, with a copy of each document that is still valid; the signed-off one stays as it is, and so does its row.
       onSubmit={async (date, port) => {
-        await createRecord<CrewMember>(db, 'crew', { shipId: member.shipId, ...rejoinDraft(member, date, port) });
+        await rejoinCrewMember(db, member, date, port);
         onClose();
       }}
     />
@@ -122,8 +122,13 @@ function DeleteCrewDialog({ member, onClose, focusFallback }: DialogProps) {
       title={`Delete ${fullName(member)}?`} confirmLabel="Delete crew member" danger
       busy={busy} error={failure} focusFallback={focusFallback}
       // The screen closes this dialog when the contract leaves the list, which is after its row is gone.
-      onConfirm={() => void run(() => softDelete(db, 'crew', member.id))} onCancel={onClose}
-      body={<p>This removes this contract from the crew list on this device.</p>}
+      onConfirm={() => void run(() => deleteCrewMember(db, member.id))} onCancel={onClose}
+      body={
+        <>
+          <p>This removes this contract from the crew list on this device.</p>
+          <p>Its documents are removed with it.</p>
+        </>
+      }
     />
   );
 }
@@ -143,7 +148,18 @@ function contractText(m: CrewMember, signOffShown: boolean): string {
 
 function CrewList({ shipId }: { shipId: string }) {
   const { db, shipToday } = useAppState();
-  const crew = useLive(() => listForShip<CrewMember>(db, 'crew', shipId), [db, shipId]);
+  // Read together, so that the warning of a row is never drawn before the documents it counts are there.
+  const records = useLive(
+    async () => {
+      const [people, documents] = await Promise.all([
+        listForShip<CrewMember>(db, 'crew', shipId),
+        listForShip<CrewDocument>(db, 'crewDocuments', shipId),
+      ]);
+      return { crew: people, documents };
+    },
+    [db, shipId],
+  );
+  const crew = records?.crew;
   const [looking, setLooking] = useState(crewListView);
   // What the screen before left to say, such as the import's "Imported 3 crew.": taken once, when this screen opens.
   const [flash, setFlashText] = useState('');
@@ -210,7 +226,7 @@ function CrewList({ shipId }: { shipId: string }) {
                   </div>
                   {signedOff
                     ? <span class="crew-signed-off">{`Signed off ${m.signOffDate}`}</span>
-                    : <BandBadge band={crewDocBand(m, asAt)} kind="crew" />}
+                    : <BandBadge band={crewMemberBand(m, records.documents, asAt)} kind="crew" />}
                 </div>
                 <p class="crew-row-meta">{contractText(m, signedOff)}</p>
                 <div class="row-actions">

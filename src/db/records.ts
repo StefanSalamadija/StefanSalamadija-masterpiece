@@ -1,5 +1,7 @@
+import { rejoinDraft } from '../domain/crew';
+import { carryOverDocuments } from '../domain/crewDocs';
 import { TABLE_NAMES } from '../domain/types';
-import type { BaseRecord, SyncRecord, TableName, Tables } from '../domain/types';
+import type { BaseRecord, CrewDocument, CrewMember, SyncRecord, TableName, Tables } from '../domain/types';
 import type { MasterpieceDB } from './schema';
 import { syncTable, syncTables } from './schema';
 import { getSettings } from './settings';
@@ -111,6 +113,45 @@ export async function putRecords(db: MasterpieceDB, items: { table: TableName; r
   await guardWrite(() =>
     db.transaction('rw', tables, async () => {
       for (const { table, record } of items) await syncTable(db, table).put(record);
+    }),
+  );
+}
+
+/**
+ * A new contract for a returning crew member (see `rejoinDraft`), with a copy of each of their documents that is still
+ * valid on the sign-on day (see `carryOverDocuments`). The contract and the copies are one transaction: if one cannot
+ * be written, none is. The signed-off contract and its documents are not touched.
+ */
+export async function rejoinCrewMember(
+  db: MasterpieceDB, member: CrewMember, signOnDate: string, signOnPort: string,
+): Promise<CrewMember> {
+  return guardWrite(() =>
+    // `settings` is in the scope because `createRecord` reads the device id from it.
+    db.transaction('rw', [db.crew, db.crewDocuments, db.settings], async () => {
+      const created = await createRecord<CrewMember>(db, 'crew', { shipId: member.shipId, ...rejoinDraft(member, signOnDate, signOnPort) });
+      const documents = await db.crewDocuments.where('crewId').equals(member.id).toArray();
+      for (const carried of carryOverDocuments(documents, member.id, signOnDate)) {
+        await createRecord<CrewDocument>(db, 'crewDocuments', { ...carried, crewId: created.id });
+      }
+      return created;
+    }),
+  );
+}
+
+/**
+ * Soft-deletes a crew member's contract and every live document of it, in one transaction. A contract or a document
+ * that was already deleted keeps its own deletion time. Refuses a contract that does not exist.
+ */
+export async function deleteCrewMember(db: MasterpieceDB, id: string): Promise<void> {
+  const { deviceId } = await getSettings(db);
+  await guardWrite(() =>
+    db.transaction('rw', [db.crew, db.crewDocuments], async () => {
+      const member = await db.crew.get(id);
+      if (!member) throw new Error(`There is no crew record with id ${id}.`);
+      const stamp = { deleted: true, updatedAt: new Date().toISOString(), updatedBy: deviceId };
+      if (!member.deleted) await db.crew.put({ ...member, ...stamp });
+      const live = await db.crewDocuments.where('crewId').equals(id).filter((d) => !d.deleted).toArray();
+      await db.crewDocuments.bulkPut(live.map((d) => ({ ...d, ...stamp })));
     }),
   );
 }

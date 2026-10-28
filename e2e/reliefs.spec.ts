@@ -127,7 +127,7 @@ test('the Reliefs chip follows Crew, and the screen lists the onboard crew by co
   await shipChips(page).getByRole('link', { name: 'Reliefs' }).click();
   await expect(page).toHaveURL(/#\/ship\/reliefs$/);
   await expect(page.getByRole('heading', { name: 'Reliefs' })).toBeVisible();
-  await expect(shipChips(page).getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Certificates', 'Voyage', "Ship's time"]);
+  await expect(shipChips(page).getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Expiring', 'Certificates', 'Voyage', "Ship's time"]);
   await expect(shipChips(page).getByRole('link', { name: 'Reliefs' })).toHaveAttribute('aria-current', 'page');
   await expect(reliefList(page).getByRole('listitem')).toHaveText([/Soon SOONER/, /Late LATER/, /No NOLENGTH/]);
   await expect(reliefRow(page, 'Soon SOONER')).toContainText('Contract ends 2026-12-01');

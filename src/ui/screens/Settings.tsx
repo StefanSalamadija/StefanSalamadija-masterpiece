@@ -16,7 +16,7 @@ import { Field } from '../components/Field';
 import { PasswordDialog } from '../components/PasswordDialog';
 import {
   cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, oldestRemovedNote, parseReminderDays, REMINDER_ERROR,
-  snapshotCountsText, snapshotDate, snapshotReason,
+  restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from '../settingsView';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
@@ -119,7 +119,7 @@ function RestoreDialog({ snapshot, removalNote, onClose, onRestored, focusFallba
       body={
         <>
           <p>
-            {`This puts back the ships, crew, certificates, voyages and clock changes of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`}
+            {restoreExplanation(snapshot)}
           </p>
           <p>Your current data is saved as a snapshot first, so the restore can be undone.</p>
           {removalNote && <p>{removalNote}</p>}

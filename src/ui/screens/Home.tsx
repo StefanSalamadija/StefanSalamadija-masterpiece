@@ -4,13 +4,13 @@ import { takeFlash } from '../../app/flash';
 import { listForShip } from '../../db/records';
 import { collectAlerts } from '../../domain/alerts';
 import { maxMonthsOnboardOf } from '../../domain/contracts';
-import type { Certificate, CrewMember } from '../../domain/types';
+import type { Certificate, CrewDocument, CrewMember } from '../../domain/types';
 import { BandBadge } from '../components/BandBadge';
 import { alertBadgeKind, backupReminder, clockChangeText, PERSISTENCE_DENIED_NOTICE } from '../homeView';
 import { useLive } from '../useLive';
 
 /**
- * What needs looking at on the ship's date: crew documents and certificates that are about to run out or have, and
+ * What needs looking at on the ship's date: crew documents (passports, books, certificates) and ship certificates that are about to run out or have, and
  * contracts that are about to end or have, and crew who are near the limit of months onboard or past it. The status is a
  * badge in words as well as colour, so that a printout, which has no colour, carries it too.
  */
@@ -18,11 +18,12 @@ function Alerts({ shipId, maxMonthsOnboard }: { shipId: string; maxMonthsOnboard
   const { db, shipToday } = useAppState();
   const records = useLive(
     async () => {
-      const [crew, certificates] = await Promise.all([
+      const [crew, certificates, crewDocuments] = await Promise.all([
         listForShip<CrewMember>(db, 'crew', shipId),
         listForShip<Certificate>(db, 'certificates', shipId),
+        listForShip<CrewDocument>(db, 'crewDocuments', shipId),
       ]);
-      return { crew, certificates };
+      return { crew, certificates, crewDocuments };
     },
     [db, shipId],
   );

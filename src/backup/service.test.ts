@@ -8,7 +8,9 @@ import { listSnapshots, takeSnapshot } from '../db/snapshots';
 import { StorageFullError } from '../db/storage';
 import { conflictKey } from '../domain/merge';
 import { TABLE_NAMES } from '../domain/types';
-import type { Certificate, ClockChange, CrewDraft, CrewImportMapping, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage } from '../domain/types';
+import type {
+  Certificate, ClockChange, CrewDocument, CrewDraft, CrewImportMapping, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage,
+} from '../domain/types';
 import { BackupError, DamagedFileError, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
 import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
@@ -47,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const emptyTables = (): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] });
+const emptyTables = (): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] });
 
 /** Device A as the tests use it: two ships, and on the first one crew (one of them deleted), a voyage, a certificate and a personal-scope record. */
 async function deviceA() {
@@ -94,6 +96,10 @@ describe('collectHandover', () => {
       voyages: [rec('v1', { shipId: 's1' }), rec('v2', { shipId: 's2' })],
       certificates: [rec('x1', { shipId: 's2' })],
       clockChanges: [rec('k1', { shipId: 's1' })],
+      crewDocuments: [
+        rec('d1', { shipId: 's1', crewId: 'c1' }), rec('d2', { shipId: 's2', crewId: 'c2' }), rec('d3', { shipId: 's1', crewId: 'c1' }, 'personal'),
+        rec('d4', { shipId: 's1', crewId: 'c4' }, 'ship', true),
+      ],
     };
     const h = collectHandover(t, 's1');
     expect(h.ships.map((r) => r.id)).toEqual(['s1']);
@@ -101,6 +107,7 @@ describe('collectHandover', () => {
     expect(h.voyages.map((r) => r.id)).toEqual(['v1']);
     expect(h.certificates).toEqual([]);
     expect(h.clockChanges.map((r) => r.id)).toEqual(['k1']);
+    expect(h.crewDocuments.map((r) => r.id)).toEqual(['d1', 'd4']);
   });
 
   it('does not match a record of another table on its id, and leaves the input alone', () => {
@@ -112,6 +119,73 @@ describe('collectHandover', () => {
 
   it('is empty for an unknown ship', () => {
     expect(collectHandover({ ...emptyTables(), ships: [rec('s1', {})] }, 'nope')).toEqual(emptyTables());
+  });
+});
+
+/** Device A with crew documents on both of its ships: two for the first ship's crew (one deleted), one for the other ship's. */
+async function deviceAWithDocuments() {
+  const a = await deviceA();
+  const document = (shipId: string, crewId: string, number: string) => ({
+    shipId, crewId, type: 'medical' as const, grade: '', number, issuedBy: 'Lučka kapetanija', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '',
+  });
+  const mine = await createRecord<CrewDocument>(a.db, 'crewDocuments', document(a.ship.id, a.crew.id, 'M-ŠĆ-1'));
+  const removed = await createRecord<CrewDocument>(a.db, 'crewDocuments', document(a.ship.id, a.crew.id, 'M-ŠĆ-2'));
+  await softDelete(a.db, 'crewDocuments', removed.id);
+  const theirs = await createRecord<CrewDocument>(a.db, 'crewDocuments', document(a.other.id, a.otherCrew.id, 'M-OB-1'));
+  return { ...a, mine, removed, theirs };
+}
+
+describe('crew documents in a backup', () => {
+  it('go into a full backup with their tombstones, and are carried to a device that imports it', async () => {
+    const a = await deviceAWithDocuments();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    expect(payload.tables.crewDocuments.map((r) => r.id).sort()).toEqual([a.mine.id, a.removed.id, a.theirs.id].sort());
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    expect((await allTables(b)).crewDocuments).toEqual((await allTables(a.db)).crewDocuments);
+    expect(await b.crewDocuments.get(a.mine.id)).toMatchObject({ number: 'M-ŠĆ-1', crewId: a.crew.id });
+  });
+
+  it('go into a handover of their own ship only, tombstones included', async () => {
+    const a = await deviceAWithDocuments();
+    const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    expect(payload.tables.crewDocuments.map((r) => r.id).sort()).toEqual([a.mine.id, a.removed.id].sort());
+    const other = await exportBackup(a.db, 'handover', PW, { shipId: a.other.id, ...FAST });
+    expect((await openBackup(other.text, PW)).payload.tables.crewDocuments.map((r) => r.id)).toEqual([a.theirs.id]);
+  });
+
+  it('are imported again without a change: the second import shows nothing new', async () => {
+    const a = await deviceAWithDocuments();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    const again = await prepareImport(b, text, PW);
+    expect(again.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 0 });
+  });
+
+  it('come in as a change to review when the other device edited one', async () => {
+    const a = await deviceAWithDocuments();
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-26T08:00:00.000Z');
+    await updateRecord<CrewDocument>(a.db, 'crewDocuments', a.mine.id, { number: 'M-ŠĆ-9' });
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const prepared = await prepareImport(b, text, PW);
+    expect(prepared.plan.items.map((i) => [i.table, i.id, i.kind])).toEqual([['crewDocuments', a.mine.id, 'update']]);
+  });
+
+  it('are left out of nothing by an old file: a backup made before they existed imports with none', async () => {
+    const a = await deviceA();
+    const { crewDocuments: _none, ...firstVersion } = await allTables(a.db);
+    const header: BackupHeader = { format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-old', deviceName: 'Old phone', exportedAt: '2026-10-20T00:00:00.000Z' };
+    const old = await sealBackup(header, { tables: firstVersion } as never, PW, FAST);
+    const b = freshDb();
+    const prepared = await prepareImport(b, old, PW);
+    expect(prepared.plan.items.every((i) => i.table !== 'crewDocuments')).toBe(true);
+    await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
+    expect((await allTables(b)).crewDocuments).toEqual([]);
+    expect((await allTables(b)).ships).toHaveLength(2);
   });
 });
 
@@ -317,7 +391,7 @@ describe('prepareImport and applyImport between two devices', () => {
     expect((await getSettings(b)).lastSync[(await getSettings(a.db)).deviceId]).toBe(p.header.exportedAt);
     const snapshots = await listSnapshots(b);
     expect(snapshots[0].reason).toBe('before-import');
-    expect(snapshots[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0 });
+    expect(snapshots[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0 });
   });
 
   it("carries a ship's crew import mapping, with the columns it ignores, through a backup", async () => {
@@ -786,6 +860,7 @@ describe('prepareImport rejects what it cannot trust', () => {
     voyages: { ...base, id: 'voy-1', shipId: 'ship-1', voyageNo: '1' },
     certificates: { ...base, id: 'cert-1', shipId: 'ship-1', key: 'loadLine' },
     clockChanges: { ...base, id: 'clk-1', shipId: 'ship-1', effectiveAt: '2026-01-01T00:00:00.000Z', toOffsetMinutes: 0 },
+    crewDocuments: { ...base, id: 'doc-1', shipId: 'ship-1', crewId: 'crew-1', type: 'medical', number: 'M-1' },
   };
 
   /** A correctly sealed file in which one record of `table` carries `patch`; a key set to undefined is left out of the file. */
@@ -799,7 +874,7 @@ describe('prepareImport rejects what it cannot trust', () => {
   it('accepts a file whose records are all well formed, personal ones included', async () => {
     const b = freshDb();
     const p = await prepareImport(b, await fileWith('crew', { scope: 'personal' }), PW);
-    expect(p.plan.summary.added).toBe(6);
+    expect(p.plan.summary.added).toBe(7);
   });
 
   it.each([
@@ -815,6 +890,12 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a voyage has no shipId', 'voyages', { shipId: undefined }],
     ['a certificate has no shipId', 'certificates', { shipId: undefined }],
     ['a clock change has no shipId', 'clockChanges', { shipId: undefined }],
+    ['a crew document has no shipId', 'crewDocuments', { shipId: undefined }],
+    ['a crew document has no crewId', 'crewDocuments', { crewId: undefined }],
+    ['a crew document has a crewId that is not a string', 'crewDocuments', { crewId: 7 }],
+    ['a crew document has a bad scope', 'crewDocuments', { scope: 'team' }],
+    ['a crew document is not marked deleted or not', 'crewDocuments', { deleted: 'no' }],
+    ['a crew document was created at no time', 'crewDocuments', { createdAt: 'yesterday' }],
     ['a shipId is not a string', 'crew', { shipId: 7 }],
     ['a ship has no particulars', 'ships', { particulars: undefined }],
     ['a ship has particulars that are not an object', 'ships', { particulars: 'MV X' }],

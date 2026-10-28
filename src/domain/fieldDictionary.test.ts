@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FIELD_NAMES, resolveField, type FieldContext } from './fieldDictionary';
-import type { Certificate, ClockChange, CrewMember, ShipProfile, Voyage } from './types';
+import type { Certificate, ClockChange, CrewDocument, CrewMember, ShipProfile, Voyage } from './types';
 
 const base = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'test-device', deleted: false, scope: 'ship' as const, shipId: 'ship-1' };
 let seq = 0;
@@ -40,10 +40,19 @@ const clock: ClockChange = {
   ...base, id: id(), effectiveAt: '2026-10-01T00:00:00.000Z', toOffsetMinutes: 180,
 };
 
+function crewDoc(over: Partial<CrewDocument>): CrewDocument {
+  return {
+    ...base, id: id(), crewId: newMaster.id, type: 'coc', grade: 'Master (unlimited)', number: 'CoC-123', issuedBy: 'Croatia',
+    issueDate: '2024-05-01', expiryDate: '2029-05-01', remarks: '', ...over,
+  };
+}
+
+const coc = crewDoc({});
 const ctx: FieldContext = {
-  ship, crew: [oldMaster, newMaster], voyages: [voyage], certificates: [loadLine], clockChanges: [clock],
+  ship, crew: [oldMaster, newMaster], voyages: [voyage], certificates: [loadLine], clockChanges: [clock], crewDocuments: [],
   nowUtc: new Date('2026-10-25T22:30:00Z'),
 };
+const ctxWithDocs: FieldContext = { ...ctx, crewDocuments: [coc] };
 
 describe('resolveField: vessel', () => {
   it('reads particulars', () => {
@@ -134,6 +143,48 @@ describe('resolveField: contract length, end and days onboard', () => {
   it('is undefined when nobody of that rank is onboard on the date', () => {
     expect(resolveField('crew.byRank.chiefOfficer.contractEndDate', withContract, { asAt: '2026-05-31' })).toBeUndefined();
     expect(resolveField('crew.byRank.chiefOfficer.daysOnboard', withContract, { asAt: '2026-05-31' })).toBeUndefined();
+  });
+});
+
+describe('resolveField: crew documents', () => {
+  it('reads a field of a document of the person of that rank', () => {
+    expect(resolveField('crew.byRank.master.doc.coc.number', ctxWithDocs)).toBe('CoC-123');
+    expect(resolveField('crew.byRank.master.doc.coc.grade', ctxWithDocs)).toBe('Master (unlimited)');
+    expect(resolveField('crew.byRank.master.doc.coc.issuedBy', ctxWithDocs)).toBe('Croatia');
+    expect(resolveField('crew.byRank.master.doc.coc.issueDate', ctxWithDocs)).toBe('2024-05-01');
+    expect(resolveField('crew.byRank.master.doc.coc.expiryDate', ctxWithDocs)).toBe('2029-05-01');
+  });
+  it('takes the documents of the person onboard on the reference date', () => {
+    const oldCoc = crewDoc({ crewId: oldMaster.id, number: 'OLD-1' });
+    const both = { ...ctx, crewDocuments: [coc, oldCoc] };
+    expect(resolveField('crew.byRank.master.doc.coc.number', both, { asAt: '2026-08-15' })).toBe('OLD-1');
+    expect(resolveField('crew.byRank.master.doc.coc.number', both, { asAt: '2026-09-02' })).toBe('CoC-123');
+  });
+  it('takes the latest document of that type: by issue date, then by creation time', () => {
+    const older = crewDoc({ number: 'OLDER', issueDate: '2019-05-01' });
+    const newer = crewDoc({ number: 'NEWER', issueDate: '2025-05-01' });
+    expect(resolveField('crew.byRank.master.doc.coc.number', { ...ctx, crewDocuments: [newer, older, coc] })).toBe('NEWER');
+    const sameDay = crewDoc({ number: 'LATER-ENTRY', issueDate: '2024-05-01', createdAt: '2026-05-01T00:00:00.000Z' });
+    expect(resolveField('crew.byRank.master.doc.coc.number', { ...ctx, crewDocuments: [sameDay, coc] })).toBe('LATER-ENTRY');
+  });
+  it('ignores deleted documents, other types and the documents of other people', () => {
+    const deletedNewer = crewDoc({ number: 'DELETED', issueDate: '2026-01-01', deleted: true });
+    expect(resolveField('crew.byRank.master.doc.coc.number', { ...ctx, crewDocuments: [coc, deletedNewer] })).toBe('CoC-123');
+    expect(resolveField('crew.byRank.master.doc.medical.number', ctxWithDocs)).toBeUndefined();
+    const bosunDoc = crewDoc({ crewId: 'nobody-here' });
+    expect(resolveField('crew.byRank.master.doc.coc.number', { ...ctx, crewDocuments: [bosunDoc] })).toBeUndefined();
+  });
+  it('is undefined for a missing rank, a field that is unset, and names it does not know', () => {
+    expect(resolveField('crew.byRank.bosun.doc.coc.number', ctxWithDocs)).toBeUndefined();
+    expect(resolveField('crew.byRank.master.doc.coc.number', ctx)).toBeUndefined();
+    const noExpiry = { ...ctx, crewDocuments: [crewDoc({ expiryDate: undefined })] };
+    expect(resolveField('crew.byRank.master.doc.coc.expiryDate', noExpiry)).toBeUndefined();
+    for (const field of ['remarks', 'id', 'type', 'crewId', 'constructor', 'deleted']) {
+      expect(resolveField(`crew.byRank.master.doc.coc.${field}`, ctxWithDocs), field).toBeUndefined();
+    }
+    expect(resolveField('crew.byRank.master.doc.coc', ctxWithDocs)).toBeUndefined();
+    expect(resolveField('crew.byRank.master.docs.coc.number', ctxWithDocs)).toBeUndefined();
+    expect(resolveField('crew.byRank.master.doc.__proto__.number', ctxWithDocs)).toBeUndefined();
   });
 });
 

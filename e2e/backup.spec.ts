@@ -332,7 +332,7 @@ test('snapshot restore', async ({ browser }) => {
     await snapshotRow(b, 'Before import').getByRole('button', { name: 'Restore' }).click();
     const dialog = b.getByRole('dialog');
     await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
-    await expect(dialog.getByText(/ships, crew, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:\d\d UTC \(Before import\)/)).toBeVisible();
+    await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:\d\d UTC \(Before import\)/)).toBeVisible();
     await expect(dialog.getByText('is removed to make room')).toHaveCount(0); // there is room: two snapshots at most here
     await dialog.getByRole('button', { name: 'Restore' }).click();
     await expect(dialog).toHaveCount(0);
@@ -631,7 +631,7 @@ test('restore says when it will push the oldest snapshot out', async ({ page }) 
   // Four are kept, so there is room for the one the restore takes.
   const dialog = page.getByRole('dialog');
   await snapshotRow(page, 'Seed 14').getByRole('button', { name: 'Restore' }).click();
-  await expect(dialog.getByText(/ships, crew, certificates, voyages and clock changes of the snapshot from 2026-10-14 08:15 UTC \(Seed 14\)/)).toBeVisible();
+  await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-14 08:15 UTC \(Seed 14\)/)).toBeVisible();
   await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
   await expect(dialog.getByText('is removed to make room')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Cancel' }).click();

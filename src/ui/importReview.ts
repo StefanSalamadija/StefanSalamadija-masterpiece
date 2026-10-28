@@ -1,9 +1,10 @@
-import { RANKS } from '../domain/catalogues';
+import { CREW_DOC_TYPES, RANKS } from '../domain/catalogues';
+import { docLabel } from '../domain/crewDocs';
 import { formatUtcMinute } from '../domain/dates';
 import { conflictKey, deepEqual } from '../domain/merge';
 import type { MergeItem, MergePlan } from '../domain/merge';
 import { formatOffset, isValidOffset } from '../domain/shipTime';
-import type { SyncRecord, TableName } from '../domain/types';
+import type { CrewDocType, SyncRecord, TableName } from '../domain/types';
 import { MAPPING_FIELDS } from './crewImportView';
 
 /*
@@ -91,16 +92,21 @@ const VOYAGE_LABELS: Record<string, string> = {
   voyageNo: 'Voyage no.', lastPort: 'Last port', nextPort: 'Next port', etaLocal: 'ETA (local)', etaOffsetMinutes: 'ETA UTC offset',
   cargo: 'Cargo', charterers: 'Charterers', agents: 'Agents at next port', active: 'Current voyage',
 };
+const CREW_DOCUMENT_LABELS: Record<string, string> = {
+  type: 'Document', typeOther: 'Document name', grade: 'Grade / capacity', number: 'Number', issuedBy: 'Issued by',
+  issueDate: 'Issue date', expiryDate: 'Expiry date', remarks: 'Remarks',
+};
 // A clock change is stored as an instant; the form's "Change at (ship's time)" is that instant on the ship's clock.
 const CLOCK_LABELS: Record<string, string> = { effectiveAt: 'Change at (UTC)', toOffsetMinutes: 'New offset', note: 'Note' };
 
 const LABELS: Record<TableName, Record<string, string>> = {
   ships: PARTICULARS_LABELS, crew: CREW_LABELS, voyages: VOYAGE_LABELS, certificates: CERTIFICATE_LABELS, clockChanges: CLOCK_LABELS,
+  crewDocuments: CREW_DOCUMENT_LABELS,
 };
 
-/** Bookkeeping that is never a change to show. A certificate's catalogue key is told by its name. */
+/** Bookkeeping that is never a change to show. A certificate's catalogue key is told by its name; the contract a document belongs to is not something the person edits. */
 const BOOKKEEPING: ReadonlySet<string> = new Set(['id', 'createdAt', 'updatedAt', 'updatedBy', 'scope', 'shipId', 'deleted']);
-const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = { certificates: new Set(['key']) };
+const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = { certificates: new Set(['key']), crewDocuments: new Set(['crewId']) };
 
 /** The fields of a record that the review compares, by the name they have in the file. A ship's particulars are at the top level, with its other settings. */
 function valuesOf(table: TableName, record: SyncRecord): Values {
@@ -125,6 +131,7 @@ function show(key: string, value: unknown): string {
   }
   if (typeof value === 'string') {
     if (key === 'rank') return RANKS.find((rank) => rank.key === value)?.label ?? plainText(value, MAX_VALUE);
+    if (key === 'type') return CREW_DOC_TYPES.find((entry) => entry.key === value)?.label ?? plainText(value, MAX_VALUE);
     if (key === 'effectiveAt') return formatUtcMinute(value) ?? plainText(value, MAX_VALUE);
     if (key === 'etaLocal' && ETA_LOCAL.test(value)) return value.replace('T', ' ');
     return plainText(value, MAX_VALUE) || EMPTY_VALUE;
@@ -175,6 +182,10 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
     case 'voyages': return `Voyage: ${nameOf(r.voyageNo, '(no number)')}`;
     case 'certificates': return `Certificate: ${nameOf(r.name, '(no name)')}`;
     case 'clockChanges': return `Clock change: ${(typeof r.effectiveAt === 'string' && formatUtcMinute(r.effectiveAt)) || '(unknown time)'}`;
+    case 'crewDocuments': {
+      const typeOther = typeof r.typeOther === 'string' ? r.typeOther : undefined;
+      return `Document: ${nameOf(docLabel({ type: r.type as CrewDocType, typeOther }), '(no name)')}`;
+    }
   }
 }
 

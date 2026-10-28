@@ -39,6 +39,7 @@ const SHIP_LINKS = [
   { label: 'Particulars', href: '#/ship/particulars' },
   { label: 'Crew', href: '#/ship/crew' },
   { label: 'Reliefs', href: '#/ship/reliefs' },
+  { label: 'Expiring', href: '#/ship/expiring' },
   { label: 'Certificates', href: '#/ship/certificates' },
   { label: 'Voyage', href: '#/ship/voyage' },
   { label: "Ship's time", href: '#/ship/time' },

@@ -94,3 +94,19 @@ export function validateCertificate(
   checkDate('nextSurveyDue', c.nextSurveyDue, out);
   return out;
 }
+
+/**
+ * A crew document: one has to be chosen, and Other needs its name; dates are optional but must be real, and expiry
+ * can't precede issue. `type` is the catalogue key, or empty while none is chosen.
+ */
+export function validateCrewDocument(
+  d: { type: string; typeOther?: string; issueDate: string; expiryDate?: string },
+): FieldError[] {
+  const out: FieldError[] = [];
+  if (d.type === '') out.push(error('type', 'Document is required.'));
+  else if (d.type === 'other' && !d.typeOther?.trim()) out.push(error('typeOther', 'Document name is required.'));
+  const issue = checkDate('issueDate', d.issueDate, out);
+  const expiry = checkDate('expiryDate', d.expiryDate, out);
+  if (issue && expiry && expiry < issue) out.push(error('expiryDate', "Expiry date can't be before the issue date."));
+  return out;
+}

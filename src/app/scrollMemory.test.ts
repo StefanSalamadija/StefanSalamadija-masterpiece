@@ -7,6 +7,8 @@ describe('scroll memory', () => {
     memory.remember('/ship/crew', 1200);
     memory.remember('/ship/certificates', 300);
     memory.remember('/ship/reliefs', 700);
+    memory.remember('/ship/expiring', 450);
+    expect(memory.positionFor('/ship/expiring')).toBe(450);
     expect(memory.positionFor('/ship/crew')).toBe(1200);
     expect(memory.positionFor('/ship/certificates')).toBe(300);
     expect(memory.positionFor('/ship/reliefs')).toBe(700);

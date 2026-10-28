@@ -45,10 +45,12 @@ export function clockChangeText(changes: ClockChange[], now: Date): string | und
   return `Clock change ${day} ${MONTHS[Number(month) - 1]} ${time} → ${formatOffset(next.toOffsetMinutes)}`;
 }
 
-const BADGE_KIND: Record<AlertKind, BadgeKind> = { crewDoc: 'crew', certificate: 'certificate', contract: 'contract', onboardLimit: 'limit' };
+const BADGE_KIND: Record<AlertKind, BadgeKind> = {
+  crewDoc: 'crew', crewCertificate: 'crew', certificate: 'certificate', contract: 'contract', onboardLimit: 'limit',
+};
 
 /**
- * Which words the badge of an alert uses: `Expires soon` and `Expired` for crew, `Due soon` and `Overdue` for
+ * Which words the badge of an alert uses: `Expires soon` and `Expired` for crew (a passport, a seaman's book or a document), `Due soon` and `Overdue` for
  * certificates, `Relief due soon` and `Relief overdue` for a contract, `Near onboard limit` and `Onboard limit reached`.
  */
 export function alertBadgeKind(kind: AlertKind): BadgeKind {

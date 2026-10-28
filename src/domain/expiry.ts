@@ -5,6 +5,7 @@ const BAND_RANK: Record<Band, number> = { none: 0, ok: 1, amber: 2, red: 3 };
 
 const CREW_DOC_WINDOW = { months: 6 };
 const CERTIFICATE_WINDOW = { days: 90 };
+const CREW_CERTIFICATE_WINDOW = { days: 90 };
 
 /**
  * Red if `expiry` is before `ref`; amber if it falls on or before `ref` plus the window
@@ -30,6 +31,11 @@ export function crewDocExpiryBand(expiry: string | undefined, ref: string): Band
 /** One certificate date's band (an expiry or a next survey), amber from 90 days out. */
 export function certificateExpiryBand(date: string | undefined, ref: string): Band {
   return expiryBand(date, ref, CERTIFICATE_WINDOW);
+}
+
+/** One crew certificate's expiry (a CoC, a medical, a course, a visa), amber from 90 days out. Passports and seaman's books have the longer `crewDocExpiryBand`. */
+export function crewCertificateExpiryBand(expiry: string | undefined, ref: string): Band {
+  return expiryBand(expiry, ref, CREW_CERTIFICATE_WINDOW);
 }
 
 /** Worst of passport and seaman's book. */

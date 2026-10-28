@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TableName } from '../domain/types';
 import {
   cleanDeviceName, DEVICE_NAME_MAX, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, parseReminderDays, PASSWORD_MISMATCH,
-  oldestRemovedNote, passwordProblems, REMINDER_ERROR, snapshotCountsText, snapshotDate, snapshotReason,
+  oldestRemovedNote, passwordProblems, REMINDER_ERROR, restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from './settingsView';
 
 describe('parseReminderDays', () => {
@@ -120,15 +120,26 @@ describe('snapshotDate', () => {
 
 describe('snapshotCountsText', () => {
   const counts = (over: Partial<Record<TableName, number>>): Record<TableName, number> =>
-    ({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, ...over });
+    ({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, ...over });
 
   it('lists what the snapshot holds, with the right plural', () => {
     expect(snapshotCountsText(counts({ ships: 1, crew: 12, voyages: 1, certificates: 30, clockChanges: 2 })))
       .toBe('1 ship · 12 crew · 1 voyage · 30 certificates · 2 clock changes');
   });
 
+  it('counts the crew documents after the crew', () => {
+    expect(snapshotCountsText(counts({ ships: 1, crew: 12, crewDocuments: 40, voyages: 1 })))
+      .toBe('1 ship · 12 crew · 40 crew documents · 1 voyage');
+    expect(snapshotCountsText(counts({ crewDocuments: 1 }))).toBe('1 crew document');
+  });
+
   it('leaves out what it does not hold', () => {
     expect(snapshotCountsText(counts({ ships: 1, clockChanges: 1 }))).toBe('1 ship · 1 clock change');
+  });
+
+  it('does not fail on a count a snapshot taken before a table existed does not have', () => {
+    const { crewDocuments: _none, ...before } = counts({ ships: 1 });
+    expect(snapshotCountsText(before as Record<TableName, number>)).toBe('1 ship');
   });
 
   it('says so when there is nothing', () => {
@@ -162,5 +173,17 @@ describe('oldestRemovedNote', () => {
 
   it('does not fail on a time that cannot be read', () => {
     expect(oldestRemovedNote([at(13), { createdAt: 'long ago' }], 2)).toBe('The oldest snapshot (Unknown date) is removed to make room.');
+  });
+});
+
+describe('restoreExplanation', () => {
+  it('says what a restore puts back, the crew documents included, and from which snapshot', () => {
+    expect(restoreExplanation({ createdAt: '2026-10-25T09:05:59.000Z', reason: 'before-import' })).toBe(
+      'This puts back the ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:05 UTC (Before import), in place of what is on this device now.',
+    );
+  });
+
+  it('names a manual snapshot by its note', () => {
+    expect(restoreExplanation({ createdAt: '2026-10-14T08:15:00.000Z', reason: 'manual', note: 'Seed 14' })).toContain('(Seed 14)');
   });
 });

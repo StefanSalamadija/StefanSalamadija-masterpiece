@@ -1,7 +1,7 @@
 import { matchRoute } from './router';
 
 /** The lists, which are returned to at the place they were left. Every other screen starts at the top. */
-const RESTORED_ROUTES: ReadonlySet<string> = new Set(['/ship/crew', '/ship/certificates', '/ship/reliefs']);
+const RESTORED_ROUTES: ReadonlySet<string> = new Set(['/ship/crew', '/ship/certificates', '/ship/reliefs', '/ship/expiring']);
 
 export interface ScrollMemory {
   /** Notes where `path` (a route pattern) is scrolled to. Only the list routes are kept. */

@@ -2,8 +2,9 @@ import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type {
-  Certificate, ClockChange, CrewMember, Settings, ShipProfile, Snapshot, SyncRecord, TableName, Voyage,
+  Certificate, ClockChange, CrewDocument, CrewMember, Settings, ShipProfile, Snapshot, SyncRecord, TableName, Voyage,
 } from '../domain/types';
+import { snapshotInUpgrade } from './snapshots';
 
 const APP_DB_NAME = 'masterpiece';
 
@@ -21,6 +22,7 @@ export class MasterpieceDB extends Dexie {
   declare voyages: Table<Voyage, string>;
   declare certificates: Table<Certificate, string>;
   declare clockChanges: Table<ClockChange, string>;
+  declare crewDocuments: Table<CrewDocument, string>;
   declare settings: Table<Settings, 'device'>;
   declare snapshots: Table<Snapshot, string>;
 
@@ -34,6 +36,10 @@ export class MasterpieceDB extends Dexie {
       clockChanges: 'id, shipId',
       settings: 'key',
       snapshots: 'id, createdAt',
+    });
+    // Crew documents. The upgrade saves the data as it was before this version touched it; the tables of version 1 stay as they are.
+    this.version(2).stores({ crewDocuments: 'id, shipId, crewId' }).upgrade(async (tx) => {
+      await snapshotInUpgrade(tx);
     });
   }
 }

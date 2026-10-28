@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  isValidImo, isValidMmsi, normaliseImo, validateCertificate, validateCrewMember, validateMaxMonthsOnboard,
-  validateParticulars,
+  isValidImo, isValidMmsi, normaliseImo, validateCertificate, validateCrewDocument, validateCrewMember,
+  validateMaxMonthsOnboard, validateParticulars,
 } from './validation';
 import type { CrewDraft, Particulars } from './types';
 
@@ -246,5 +246,43 @@ describe('validateCertificate', () => {
       .toEqual([{ field: 'expiryDate', severity: 'error', message: 'Enter a valid date.' }]);
     expect(validateCertificate({ ...cert, issueDate: 'bad', expiryDate: '2026-04-01', nextSurveyDue: 'bad' }).map(f => f.field))
       .toEqual(['issueDate', 'nextSurveyDue']);
+  });
+});
+
+describe('validateCrewDocument', () => {
+  const document = { type: 'medical', issueDate: '2026-05-01' };
+
+  it('rejects expiry before issue', () => {
+    expect(validateCrewDocument({ ...document, expiryDate: '2026-04-01' }))
+      .toEqual([{ field: 'expiryDate', severity: 'error', message: "Expiry date can't be before the issue date." }]);
+  });
+
+  it('accepts expiry on or after issue, and no expiry at all', () => {
+    expect(validateCrewDocument({ ...document, expiryDate: '2026-05-01' })).toEqual([]);
+    expect(validateCrewDocument({ ...document, expiryDate: '2031-04-30' })).toEqual([]);
+    expect(validateCrewDocument(document)).toEqual([]);
+  });
+
+  it('does not require an issue date', () => {
+    expect(validateCrewDocument({ type: 'bst', issueDate: '', expiryDate: '2026-10-01' })).toEqual([]);
+  });
+
+  it('requires a document to be chosen', () => {
+    expect(validateCrewDocument({ ...document, type: '' }))
+      .toEqual([{ field: 'type', severity: 'error', message: 'Document is required.' }]);
+  });
+
+  it('requires a name for Other, and only for Other', () => {
+    expect(validateCrewDocument({ ...document, type: 'other', typeOther: '  ' }))
+      .toEqual([{ field: 'typeOther', severity: 'error', message: 'Document name is required.' }]);
+    expect(validateCrewDocument({ ...document, type: 'other' }).map((f) => f.field)).toEqual(['typeOther']);
+    expect(validateCrewDocument({ ...document, type: 'other', typeOther: 'Tanker familiarisation' })).toEqual([]);
+    expect(validateCrewDocument({ ...document, type: 'medical', typeOther: '' })).toEqual([]);
+  });
+
+  it('flags invalid dates and skips the order check when one is invalid', () => {
+    expect(validateCrewDocument({ ...document, expiryDate: '2026-02-30' }))
+      .toEqual([{ field: 'expiryDate', severity: 'error', message: 'Enter a valid date.' }]);
+    expect(validateCrewDocument({ ...document, issueDate: 'bad', expiryDate: '2026-04-01' }).map((f) => f.field)).toEqual(['issueDate']);
   });
 });
