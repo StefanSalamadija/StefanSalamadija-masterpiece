@@ -2,6 +2,7 @@ import type { ConnectionProblem } from '../db/connection';
 import { isQuotaExceeded, STORAGE_FULL_MESSAGE, StorageFullError } from '../db/storage';
 
 export const OUTDATED_MESSAGE = 'Masterpiece was updated in another tab. Reload to continue.';
+export const ERASED_MESSAGE = "Masterpiece's data was erased in another tab. Reload to continue.";
 export const BLOCKED_MESSAGE = 'Close Masterpiece in your other tabs to finish the update.';
 export const OPEN_FAILED_MESSAGE = "Masterpiece couldn't open its data. Restart the app; if it keeps happening, free some storage.";
 
@@ -22,11 +23,12 @@ export interface StartupNotice {
 }
 
 /**
- * What stands in the way of the app, if anything, most serious first: the database was updated by another tab (nothing may
- * go on in this one), the data could not be opened, an upgrade waits for other tabs to let go. Once the app is open an
- * upgrade is no longer waited for.
+ * What stands in the way of the app, if anything, most serious first: the database was erased or updated by another tab
+ * (nothing may go on in this one), the data could not be opened, an upgrade waits for other tabs to let go. Once the
+ * app is open an upgrade is no longer waited for.
  */
 export function startupNotice(problem: ConnectionProblem | undefined, startup: StartupState): StartupNotice | undefined {
+  if (problem === 'erased') return { message: ERASED_MESSAGE, action: 'Reload', urgent: true };
   if (problem === 'outdated') return { message: OUTDATED_MESSAGE, action: 'Reload', urgent: true };
   if (startup.status === 'failed') return { message: startup.message, action: 'Try again', urgent: true };
   if (problem === 'blocked' && startup.status === 'opening') return { message: BLOCKED_MESSAGE, urgent: false };

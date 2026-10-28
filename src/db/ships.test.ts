@@ -103,7 +103,7 @@ describe('deleteShip', () => {
   it('counts what would be removed and then soft-deletes the ship and everything of it', async () => {
     const { db, a, b } = await twoShips();
     await createRecord(db, 'crew', { shipId: a.id, ...draft });
-    expect(await deleteSummary(db, a.id)).toEqual({ crew: 1, certificates: 0, voyages: 0, clockChanges: 1 });
+    expect(await deleteSummary(db, a.id)).toEqual({ crew: 1, certificates: 0, voyages: 0, crewDocuments: 0, clockChanges: 1 });
     await deleteShip(db, a.id);
     expect((await listShips(db)).map((s) => s.particulars.name)).toEqual(['MV SEA BREEZE']);
     expect((await getSettings(db)).activeShipId).toBe(b.id);
@@ -141,7 +141,7 @@ describe('deleteShip', () => {
     for (const name of ['ships', 'crew', 'voyages', 'certificates', 'clockChanges'] as const) {
       expect(t[name].filter((r) => !ofA(r))).toEqual(otherBefore[name].filter((r) => !ofA(r)));
     }
-    expect(await deleteSummary(db, a.id)).toEqual({ crew: 0, certificates: 0, voyages: 0, clockChanges: 0 });
+    expect(await deleteSummary(db, a.id)).toEqual({ crew: 0, certificates: 0, voyages: 0, crewDocuments: 0, clockChanges: 0 });
   });
 
   it('soft-deletes the crew documents of the ship too, and none of another ship', async () => {
@@ -157,6 +157,20 @@ describe('deleteShip', () => {
     vi.useRealTimers();
     expect(await db.crewDocuments.get(mine.id)).toMatchObject({ deleted: true, updatedAt: '2026-11-05T09:00:00.000Z', updatedBy: deviceId });
     expect(await db.crewDocuments.get(theirs.id)).toEqual(theirs);
+  });
+
+  it('counts the crew documents of the ship in the summary, live ones only, and none of another ship', async () => {
+    const { db, a, b } = await twoShips();
+    const document = (shipId: string, crewId: string) => ({
+      shipId, crewId, type: 'medical' as const, grade: '', number: 'M-1', issuedBy: '', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '',
+    });
+    await createRecord<CrewDocument>(db, 'crewDocuments', document(a.id, 'c-1'));
+    await createRecord<CrewDocument>(db, 'crewDocuments', document(a.id, 'c-1'));
+    const gone = await createRecord<CrewDocument>(db, 'crewDocuments', document(a.id, 'c-2'));
+    await softDelete(db, 'crewDocuments', gone.id);
+    await createRecord<CrewDocument>(db, 'crewDocuments', document(b.id, 'c-3'));
+    expect((await deleteSummary(db, a.id)).crewDocuments).toBe(2);
+    expect((await deleteSummary(db, b.id)).crewDocuments).toBe(1);
   });
 
   it('keeps the original deletion time of records that were already deleted', async () => {

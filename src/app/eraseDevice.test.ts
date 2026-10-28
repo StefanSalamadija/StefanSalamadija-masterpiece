@@ -4,7 +4,7 @@ import { openDb } from '../db/schema';
 import { getSettings, updateSettings } from '../db/settings';
 import { createShip, listShips } from '../db/ships';
 import { THEME_STORAGE_KEY } from '../ui/theme';
-import { ERASE_BLOCKED_MESSAGE, eraseDeviceData } from './eraseDevice';
+import { ERASE_WAITING_MESSAGE, eraseDeviceData } from './eraseDevice';
 
 const name = () => 't-' + crypto.randomUUID();
 
@@ -98,13 +98,37 @@ describe('eraseDeviceData', () => {
       });
     }
 
-    function withLateResult() {
-      let resolve!: () => void;
-      const done = new Promise<void>((r) => { resolve = r; });
-      return { resolve, done };
+    /** Starts an erase and resolves with how it is settling once `onBlocked` has been called. */
+    async function eraseUntilBlocked(db: ReturnType<typeof openDb>) {
+      let settled: 'pending' | 'resolved' | 'rejected' = 'pending';
+      let blocked!: () => void;
+      const wasBlocked = new Promise<void>((resolve) => { blocked = resolve; });
+      const onBlocked = vi.fn(blocked);
+      const erase = eraseDeviceData(db, { onBlocked }).then(
+        () => { settled = 'resolved'; },
+        () => { settled = 'rejected'; },
+      );
+      await wasBlocked;
+      return { erase, onBlocked, state: () => settled };
     }
 
-    it('says so, in these words, at once, and leaves the password and the theme alone', async () => {
+    it('tells the caller it is waiting, in these words, and goes on waiting: it cannot be cancelled, so it does not fail', async () => {
+      expect(ERASE_WAITING_MESSAGE).toBe('The erase will finish when Masterpiece is closed in your other tabs.');
+      const dbName = name();
+      const db = openDb(dbName);
+      await createShip(db, 'MV OCEAN STAR', 180);
+      const other = await stubbornConnection(dbName);
+
+      const { erase, onBlocked, state } = await eraseUntilBlocked(db);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(onBlocked).toHaveBeenCalledTimes(1);
+      expect(state()).toBe('pending'); // not rejected: a "try again" would queue a second delete behind the first
+      other.close();
+      await erase;
+      expect(state()).toBe('resolved');
+    });
+
+    it('leaves the password and the theme alone while it waits, and does not open the database again behind the delete', async () => {
       const removed: string[] = [];
       vi.stubGlobal('localStorage', { removeItem: (key: string) => removed.push(key) });
       rememberPassword('lozinka-ćevapi');
@@ -113,31 +137,15 @@ describe('eraseDeviceData', () => {
       await createShip(db, 'MV OCEAN STAR', 180);
       const other = await stubbornConnection(dbName);
 
-      const later = withLateResult();
-      await expect(eraseDeviceData(db, { onErasedLater: later.resolve })).rejects.toThrow('Close Masterpiece in other tabs, then try again.');
-      expect(ERASE_BLOCKED_MESSAGE).toBe('Close Masterpiece in other tabs, then try again.');
+      const { erase } = await eraseUntilBlocked(db);
       expect(getRememberedPassword()).toBe('lozinka-ćevapi');
       expect(removed).toEqual([]);
+      expect(db.isOpen()).toBe(false);
       other.close();
-      await later.done; // the delete that was asked for still goes through; wait for it so that it does not run into the next test
+      await erase;
     });
 
-    it('does not wait for the database to open again (it opens behind the delete), so the dialog is free at once', async () => {
-      const dbName = name();
-      const db = openDb(dbName);
-      await getSettings(db);
-      const other = await stubbornConnection(dbName);
-      const later = withLateResult();
-      const settled = await Promise.race([
-        eraseDeviceData(db, { onErasedLater: later.resolve }).then(() => 'done', () => 'rejected'),
-        new Promise((resolve) => setTimeout(() => resolve('hung'), 2000)),
-      ]);
-      expect(settled).toBe('rejected');
-      other.close();
-      await later.done;
-    });
-
-    it('goes through when the other tab lets go: the password and the theme are then forgotten and the caller is told to start again', async () => {
+    it('goes through when the other tab lets go: the promise then resolves, and the password and the theme are forgotten', async () => {
       const removed: string[] = [];
       vi.stubGlobal('localStorage', { removeItem: (key: string) => removed.push(key) });
       rememberPassword('lozinka-ćevapi');
@@ -145,27 +153,21 @@ describe('eraseDeviceData', () => {
       const db = openDb(dbName);
       await createShip(db, 'MV OCEAN STAR', 180);
       const other = await stubbornConnection(dbName);
-      let erasedLater!: Promise<void>;
-      const first = await new Promise<unknown>((blockedResult) => {
-        erasedLater = new Promise<void>((resolve) => {
-          eraseDeviceData(db, { onErasedLater: resolve }).then(() => blockedResult('done'), (err: unknown) => blockedResult(err));
-        });
-      });
-      expect(first).toBeInstanceOf(Error);
-      expect(removed).toEqual([]); // not yet: the delete is waiting for the other page
+
+      const { erase } = await eraseUntilBlocked(db);
       other.close();
-      await erasedLater;
+      await erase;
       expect(getRememberedPassword()).toBeUndefined();
       expect(removed).toEqual([THEME_STORAGE_KEY]);
       expect(await listShips(openDb(dbName))).toEqual([]);
     });
 
-    it('does not call onErasedLater when the delete simply went through', async () => {
-      const onErasedLater = vi.fn();
+    it('does not call onBlocked when the delete simply went through', async () => {
+      const onBlocked = vi.fn();
       const db = openDb(name());
       await getSettings(db);
-      await eraseDeviceData(db, { onErasedLater });
-      expect(onErasedLater).not.toHaveBeenCalled();
+      await eraseDeviceData(db, { onBlocked });
+      expect(onBlocked).not.toHaveBeenCalled();
     });
   });
 });

@@ -31,6 +31,37 @@ test('theme cycles, persists, and prints black on white', async ({ page }) => {
   expect(await page.evaluate(() => getComputedStyle(document.body).color)).toBe('rgb(0, 0, 0)');
 });
 
+test('the Theme select in Settings and the header button are one setting, and a reload keeps it', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/settings');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  const select = page.getByLabel('Theme', { exact: true });
+  const html = page.locator('html');
+  await expect(select.locator('option')).toHaveText(['Day', 'Night', 'High contrast']);
+  await expect(select).toHaveValue('day');
+  await expect(html).toHaveAttribute('data-theme', 'day');
+
+  await select.selectOption({ label: 'Night' });
+  await expect(html).toHaveAttribute('data-theme', 'night');
+  await expect(page.getByRole('button', { name: 'Theme: Night' })).toBeVisible();
+  await page.reload();
+  await expect(html).toHaveAttribute('data-theme', 'night');
+  await expect(page.getByRole('button', { name: 'Theme: Night' })).toBeVisible();
+  await expect(select).toHaveValue('night');
+
+  await select.selectOption({ label: 'High contrast' });
+  await expect(html).toHaveAttribute('data-theme', 'contrast');
+  await expect(page.getByRole('button', { name: 'Theme: High contrast' })).toBeVisible();
+
+  // The header button changes the same setting, and the select follows it.
+  await page.getByRole('button', { name: 'Theme: High contrast' }).click();
+  await expect(html).toHaveAttribute('data-theme', 'day');
+  await expect(select).toHaveValue('day');
+  await page.getByRole('button', { name: 'Theme: Day' }).click();
+  await expect(select).toHaveValue('night');
+  await expectNoHorizontalScroll(page);
+});
+
 test('welcome asks for a ship name, and links to the import screen', async ({ page }) => {
   await freshApp(page);
   await page.getByRole('button', { name: 'Create your first ship' }).click();

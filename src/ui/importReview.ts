@@ -59,12 +59,13 @@ export function fromLine({ deviceName, exportedAt }: { deviceName: string; expor
   return `From ${plainText(deviceName, MAX_DEVICE_NAME_SHOWN) || 'an unknown device'}, exported ${when ? when : 'at an unknown time'}`;
 }
 
+/** "3 new · 0 updated · 1 deleted · 1 conflict": "deleted" is a participle, so only "conflict" changes for one. */
 export function summaryLine({ added, updated, deleted, conflicts }: MergePlan['summary']): string {
-  return `${added} new · ${updated} updated · ${deleted} deleted · ${conflicts} conflicts`;
+  return `${added} new · ${updated} updated · ${deleted} deleted · ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'}`;
 }
 
 export function deletionsLabel(count: number): string {
-  return `Apply ${count} deletions`;
+  return `Apply ${count} ${count === 1 ? 'deletion' : 'deletions'}`;
 }
 
 type Values = Record<string, unknown>;

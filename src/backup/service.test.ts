@@ -537,6 +537,47 @@ describe('prepareImport and applyImport between two devices', () => {
     expect(await b.crew.get(a.crew.id)).toMatchObject({ nationality: 'Croatian' });
   });
 
+  describe('a handover file', () => {
+    it("does not count as an exchange of everything with the other device: lastSync stays, so a change to another ship still conflicts", async () => {
+      const a = await deviceA();
+      at('2026-10-25T09:00:00.000Z');
+      const b = await deviceBSyncedWith(a.db); // B has both ships, as of 09:00
+      const deviceId = (await getSettings(a.db)).deviceId;
+      const syncedAt = (await getSettings(b)).lastSync[deviceId];
+      expect(syncedAt).toBe('2026-10-25T09:00:00.000Z');
+
+      at('2026-10-25T10:00:00.000Z');
+      await updateRecord(a.db, 'crew', a.otherCrew.id, { nationality: 'Croatian' }); // a record of ship Y, which the handover of X does not carry
+      at('2026-10-25T10:30:00.000Z');
+      const handover = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...FAST });
+      await applyImport(b, await prepareImport(b, handover.text, PW), { conflicts: {}, applyDeletions: true });
+      expect((await getSettings(b)).lastSync[deviceId]).toBe(syncedAt); // a handover says nothing about the ships it left out
+
+      at('2026-10-25T11:00:00.000Z');
+      await updateRecord(b, 'crew', a.otherCrew.id, { nationality: 'Montenegrin' });
+      at('2026-10-25T12:00:00.000Z');
+      const full = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+      const p = await prepareImport(b, full.text, PW);
+      // Both devices changed the record since 09:00. With a lastSync of 10:30 A's change would look old and be dropped without a word.
+      expect(p.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 1 });
+      expect(conflictKey(p.plan.items[0])).toBe(`crew:${a.otherCrew.id}`);
+
+      await applyImport(b, p, { conflicts: { [`crew:${a.otherCrew.id}`]: 'incoming' }, applyDeletions: true });
+      expect((await getSettings(b)).lastSync[deviceId]).toBe(full.exportedAt); // a full backup does
+    });
+
+    it('leaves lastSync without an entry for a device that has only ever sent a handover, and still sets the active ship', async () => {
+      const a = await deviceA();
+      const b = freshDb();
+      const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...FAST });
+      await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+      const settings = await getSettings(b);
+      expect(settings.lastSync).toEqual({});
+      expect(settings.activeShipId).toBe(a.ship.id);
+      expect((await b.crew.toArray()).length).toBeGreaterThan(0); // and the ship's records did come in
+    });
+  });
+
   it('is an update, not a conflict, when only the other device changed a record since the last exchange', async () => {
     const a = await deviceA();
     at('2026-10-25T09:00:00.000Z');

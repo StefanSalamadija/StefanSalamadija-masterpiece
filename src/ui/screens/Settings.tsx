@@ -9,7 +9,7 @@ import { updateSettings } from '../../db/settings';
 import { listShips } from '../../db/ships';
 import { listSnapshots, restoreSnapshot, SNAPSHOTS_KEPT } from '../../db/snapshots';
 import type { SnapshotSummary } from '../../db/snapshots';
-import type { FieldError } from '../../domain/types';
+import type { FieldError, Theme } from '../../domain/types';
 import { AppLockSettings } from '../components/AppLockSettings';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
@@ -18,6 +18,7 @@ import {
   cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, oldestRemovedNote, parseReminderDays, REMINDER_ERROR,
   restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from '../settingsView';
+import { THEME_LABELS, THEMES } from '../theme';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
 
@@ -260,6 +261,37 @@ function DeviceSection() {
   );
 }
 
+/**
+ * The theme, as the header button has it: both read `settings.theme` and write it with `updateSettings`, and `AppState`
+ * puts whatever is stored on `<html>` (and into the mirror for the first paint), so neither needs to tell the other.
+ * It applies at once; there is nothing to save.
+ */
+function ThemeSection() {
+  const { db, settings } = useAppState();
+  const id = useId();
+
+  async function choose(theme: Theme): Promise<void> {
+    try {
+      await updateSettings(db, { theme });
+    } catch (err) {
+      reportError(err);
+    }
+  }
+
+  return (
+    <div class="settings-section">
+      <h3>Display</h3>
+      <div class="field">
+        <label for={id}>Theme</label>
+        <select id={id} value={settings.theme} onChange={(event) => void choose(event.currentTarget.value as Theme)}>
+          {THEMES.map((theme) => <option key={theme} value={theme}>{THEME_LABELS[theme]}</option>)}
+        </select>
+      </div>
+      <p class="helper-text">High contrast is for bright sun on deck. The button at the top of every screen changes the theme too. Printing is always black on white.</p>
+    </div>
+  );
+}
+
 /** Backup and restore, this device's preferences, and the version. */
 export function Settings() {
   return (
@@ -269,6 +301,7 @@ export function Settings() {
       <SnapshotSection />
       <DeviceSection />
       <AppLockSettings />
+      <ThemeSection />
       <div class="settings-section">
         <h3>About</h3>
         <p>Masterpiece {__APP_VERSION__}</p>

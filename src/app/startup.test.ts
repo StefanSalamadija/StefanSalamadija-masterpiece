@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StorageFullError } from '../db/storage';
 import {
-  BLOCKED_MESSAGE, OPEN_FAILED_MESSAGE, OUTDATED_MESSAGE, openFailureMessage, setStartup, startupNotice, startupState,
+  BLOCKED_MESSAGE, ERASED_MESSAGE, OPEN_FAILED_MESSAGE, OUTDATED_MESSAGE, openFailureMessage, setStartup, startupNotice, startupState,
   subscribeStartup,
 } from './startup';
 
@@ -36,6 +36,13 @@ describe('startupNotice', () => {
     expect(startupNotice('outdated', ready)).toEqual({ message: OUTDATED_MESSAGE, action: 'Reload', urgent: true });
     expect(startupNotice('outdated', opening)?.message).toBe('Masterpiece was updated in another tab. Reload to continue.');
     expect(startupNotice('outdated', { status: 'failed', message: 'x' })?.action).toBe('Reload');
+  });
+
+  it('says the data was erased when another tab deleted the database, with the same Reload button', () => {
+    expect(startupNotice('erased', ready)).toEqual({ message: ERASED_MESSAGE, action: 'Reload', urgent: true });
+    expect(ERASED_MESSAGE).toBe("Masterpiece's data was erased in another tab. Reload to continue.");
+    expect(startupNotice('erased', opening)?.message).toBe(ERASED_MESSAGE);
+    expect(startupNotice('erased', { status: 'failed', message: 'x' })?.action).toBe('Reload');
   });
 
   it('asks for the other tabs to be closed while the upgrade is blocked, with no button: it goes on by itself', () => {

@@ -8,6 +8,7 @@ import { formatDisplayDate } from '../../domain/dates';
 import type { CrewDocument, CrewListColumn, CrewMember, ShipProfile, Voyage } from '../../domain/types';
 import { currentVoyage } from '../../domain/voyage';
 import { Field } from '../components/Field';
+import { LogoMark } from '../components/LogoMark';
 import { crewListView, resolveAsAt } from '../crewListView';
 import { useLive } from '../useLive';
 
@@ -180,7 +181,10 @@ function CrewListSheet({ ship }: { ship: ShipProfile }) {
           </div>
           <div class="sheet-stamp">Ship's stamp</div>
         </div>
-        <p class="sheet-footer">Printed with Masterpiece</p>
+        <p class="sheet-footer">
+          <LogoMark size={16} mode="mono" />
+          <span>Printed with Masterpiece</span>
+        </p>
       </article>
     </section>
   );

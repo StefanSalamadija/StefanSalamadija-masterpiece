@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import indexHtml from '../../index.html?raw';
-import { logoMode, nextTheme, THEME_LABELS, THEME_STORAGE_KEY } from './theme';
+import { logoMode, nextTheme, THEME_LABELS, THEME_STORAGE_KEY, THEMES } from './theme';
+
+describe('THEMES', () => {
+  it('lists every theme once, in the order of the header button, named as the Settings select shows them', () => {
+    expect(THEMES).toEqual(['day', 'night', 'contrast']);
+    expect(THEMES.map((theme) => THEME_LABELS[theme])).toEqual(['Day', 'Night', 'High contrast']);
+    expect(new Set(THEMES)).toEqual(new Set(Object.keys(THEME_LABELS)));
+  });
+});
 
 describe('nextTheme', () => {
   it('cycles day, night, high contrast, day', () => {

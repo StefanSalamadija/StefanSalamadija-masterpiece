@@ -73,21 +73,6 @@ describe('another connection upgrades the database', () => {
     other.close();
   });
 
-  it('is also what a deletion of the database elsewhere means', async () => {
-    const { watch, db, name } = watched();
-    await db.open();
-    const heard = nextChange(watch);
-    const deleted = new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase(name);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-    await heard;
-    await deleted;
-    expect(watch.problem()).toBe('outdated');
-    expect(db.isOpen()).toBe(false);
-  });
-
   it('tells its listeners once, and stays outdated', async () => {
     const { watch, db } = watched();
     await db.open();
@@ -106,6 +91,37 @@ describe('another connection upgrades the database', () => {
     db.on('versionchange').fire({ oldVersion: 20, newVersion: 30 } as IDBVersionChangeEvent);
     db.on('blocked').fire({ oldVersion: 20, newVersion: 30 } as IDBVersionChangeEvent);
     expect(watch.problem()).toBe('outdated');
+  });
+});
+
+describe('another connection deletes the database', () => {
+  it('closes this connection for good and says the data was erased, which is not the same as an update', async () => {
+    const { watch, db, name } = watched();
+    await db.open();
+    const heard = nextChange(watch);
+    const deleted = new Promise<void>((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+    await heard;
+    await deleted; // this tab did not hold the delete up
+    expect(watch.problem()).toBe('erased');
+    expect(db.isOpen()).toBe(false);
+    await expect(db.crew.put(crew)).rejects.toMatchObject({ name: 'DatabaseClosedError' });
+  });
+
+  it('tells a deletion (no new version) from an upgrade, and keeps the first of the two it hears', async () => {
+    const { watch, db } = watched();
+    await db.open();
+    const heard = vi.fn();
+    watch.subscribe(heard);
+    db.on('versionchange').fire({ oldVersion: 20, newVersion: null } as unknown as IDBVersionChangeEvent);
+    expect(watch.problem()).toBe('erased');
+    db.on('versionchange').fire({ oldVersion: 20, newVersion: 30 } as IDBVersionChangeEvent);
+    db.on('blocked').fire({ oldVersion: 20, newVersion: 30 } as IDBVersionChangeEvent);
+    expect(watch.problem()).toBe('erased');
+    expect(heard).toHaveBeenCalledTimes(1);
   });
 });
 

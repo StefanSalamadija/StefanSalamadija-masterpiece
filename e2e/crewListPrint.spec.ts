@@ -193,6 +193,15 @@ test('print crew list and export to Excel', async ({ page }) => {
   await expect(sheet).toContainText('Master: Ivan PETROVIĆ');
   await expect(sheet).toContainText("Ship's stamp");
   await expect(sheet).toContainText('Printed with Masterpiece');
+  // The footer carries the one-colour line version of the logo, 16 px: strokes only, so it prints the same on any printer.
+  const footerLogo = sheet.locator('.sheet-footer svg');
+  await expect(footerLogo).toHaveCount(1);
+  await expect(footerLogo).toBeVisible();
+  const logoBox = await footerLogo.boundingBox();
+  expect(logoBox?.width).toBeCloseTo(16, 0);
+  expect(logoBox?.height).toBeCloseTo(16, 0);
+  expect(await footerLogo.locator('[fill]:not([fill="none"]), defs, linearGradient, radialGradient, clipPath').count()).toBe(0);
+  await expect(page.getByRole('img', { name: 'Masterpiece logo' })).toHaveCount(1);   // the header's; the footer's is not read out as a second one
 
   // One checkbox per column, the default ones ticked.
   const columns = page.getByRole('group', { name: 'Columns' });

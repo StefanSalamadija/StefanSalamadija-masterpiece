@@ -2,6 +2,7 @@ import { contractEndDate, daysOnboard } from './contracts';
 import { fullName, onboardAt } from './crew';
 import { latestDocument } from './crewDocs';
 import { formatOffset, shipOffsetAt, toShipLocal } from './shipTime';
+import { currentVoyage } from './voyage';
 import type { Certificate, ClockChange, CrewDocType, CrewDocument, CrewMember, Particulars, ShipProfile, Voyage } from './types';
 
 export interface FieldContext {
@@ -87,7 +88,7 @@ export function resolveField(name: string, ctx: FieldContext, opts?: { asAt?: st
 
   if (parts.length === 2 && parts[0] === 'voyage') {
     if (!Object.hasOwn(VOYAGE_FIELDS, parts[1])) return undefined;
-    const voyage = ctx.voyages.find((v) => !v.deleted && v.active);
+    const voyage = currentVoyage(ctx.voyages);
     return voyage && VOYAGE_FIELDS[parts[1]](voyage);
   }
 

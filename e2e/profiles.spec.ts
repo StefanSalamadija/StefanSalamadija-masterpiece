@@ -135,7 +135,7 @@ test('profiles: new, switch, copy, rename, delete', async ({ page }) => {
 
   await openProfiles(page);
   await row(page, 'MV SEA BREEZE').getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 0 certificates and 0 voyages from this device.');
+  await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 0 certificates, 0 voyages, 0 crew documents and 1 clock change from this device.');
   await expect(page.getByRole('dialog')).toContainText('A backup made earlier still contains them.');
   await expect(page.getByRole('heading', { name: 'Delete MV SEA BREEZE?' })).toBeVisible();
   await page.getByRole('button', { name: 'Delete ship' }).click();

@@ -1027,10 +1027,17 @@ textarea {
 }
 
 .sheet-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   margin: 8px 0 0;
   font-size: 11px;
-  text-align: right;
   color: var(--muted);
+}
+
+.sheet-footer svg {
+  flex: none;
 }
 
 /* ---- Certificates ---- */
@@ -1481,6 +1488,10 @@ textarea {
   margin: 0;
 }
 
+.dialog-body .dialog-waiting {
+  font-weight: 600;
+}
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1760,6 +1771,13 @@ textarea {
 
 .lock-intro {
   margin: 0;
+}
+
+/* What a forgotten passcode means and what the lock is not: said before the passcode is set, in the quiet helper style. */
+.lock-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .lock-form,

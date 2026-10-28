@@ -125,7 +125,10 @@ async function assertReviewCurrent(db: MasterpieceDB, plan: MergePlan): Promise<
  * (an import that changes nothing must not push an older snapshot out). The records, the time of this exchange with the
  * other device (`lastSync`, never moved back) and the active ship are then saved in one transaction, which checks the
  * review once more, so a change made while the snapshot was taken is not written over either, and a failed write leaves
- * all three as they were. Throws, before touching anything, if a conflict has no decision.
+ * all three as they were. Only a full backup moves `lastSync`: a handover holds one ship, so it says nothing about the
+ * other ships' records, and a `lastSync` moved by it would make the other device's later changes to those ships look old
+ * and be dropped without a conflict. The active ship is repaired either way. Throws, before touching anything, if a
+ * conflict has no decision.
  */
 export async function applyImport(db: MasterpieceDB, p: PreparedImport, decisions: MergeDecisions): Promise<void> {
   const { deviceId } = await getSettings(db);
@@ -138,10 +141,10 @@ export async function applyImport(db: MasterpieceDB, p: PreparedImport, decision
       await putRecords(db, writes);
       const settings = await getSettings(db);
       const from = p.header.deviceId;
-      await updateSettings(db, {
-        lastSync: { ...settings.lastSync, [from]: laterOf(settings.lastSync[from], p.header.exportedAt) },
-        activeShipId: liveActiveShipId(settings.activeShipId, await listShips(db)),
-      });
+      const lastSync = p.header.kind === 'full'
+        ? { ...settings.lastSync, [from]: laterOf(settings.lastSync[from], p.header.exportedAt) }
+        : settings.lastSync;
+      await updateSettings(db, { lastSync, activeShipId: liveActiveShipId(settings.activeShipId, await listShips(db)) });
     }),
   );
 }

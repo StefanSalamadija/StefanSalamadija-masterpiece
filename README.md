@@ -6,6 +6,7 @@ It works fully offline once installed, with no account and no signal needed.
 Your data stays on your device and only leaves it in files you export or share yourself.
 
 Open the app at **https://stefansalamadija.github.io/StefanSalamadija-masterpiece/** (needs internet only for the first visit and for updates).
+The exact address is shown in the repository's **Settings**, then **Pages**, after the first deploy; use that one if it differs from the address here.
 
 ## Install on Android
 
@@ -49,6 +50,7 @@ A handover file holds one ship only, with a password of its own, so your relief 
 
 This is done once, by the owner of the repository. In the repository settings, go to **Pages** and set **Source** to **GitHub Actions**.
 After the next merge to `main`, the app is published at `https://stefansalamadija.github.io/StefanSalamadija-masterpiece/`.
+After the first deploy, the exact address is shown in the repository's **Settings**, then **Pages**. The capital letters in the repository name are not checked here, so use the address shown there if it differs.
 
 ## Releasing a new version
 

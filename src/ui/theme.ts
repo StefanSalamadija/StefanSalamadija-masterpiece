@@ -9,11 +9,12 @@ export const THEME_LABELS: Record<Theme, string> = {
   contrast: 'High contrast',
 };
 
-const ORDER: readonly Theme[] = ['day', 'night', 'contrast'];
+/** Every theme, in the order the header button goes through them and the Settings select lists them. */
+export const THEMES: readonly Theme[] = ['day', 'night', 'contrast'];
 
 /** The theme after `theme` when the header button is tapped: day, night, high contrast, and round again. */
 export function nextTheme(theme: Theme): Theme {
-  return ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length];
+  return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
 }
 
 /**

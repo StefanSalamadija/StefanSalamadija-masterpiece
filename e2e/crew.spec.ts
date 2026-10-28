@@ -512,7 +512,7 @@ test('profiles: the delete dialog counts the crew of the ship', async ({ page })
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Profiles', exact: true }).click();
   await page.getByRole('list', { name: 'Ships' }).getByRole('listitem').filter({ hasText: 'MV OCEAN STAR' })
     .getByRole('button', { name: 'Delete' }).click();
-  await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates and 0 voyages');
+  await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates, 0 voyages, 0 crew documents and 1 clock change from this device.');
 });
 
 /** A signed off 2026-06-01 to 2026-10-10, then re-joined as B on 2026-10-15 (open). Leaves the All view on. */

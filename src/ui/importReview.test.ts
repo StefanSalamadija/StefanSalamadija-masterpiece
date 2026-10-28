@@ -101,14 +101,16 @@ describe('fromLine', () => {
 });
 
 describe('summaryLine and deletionsLabel', () => {
-  it('writes the four counts, always in the plural', () => {
+  it('writes the four counts, with "conflict" in the singular for exactly one ("deleted" is a participle and never changes)', () => {
     expect(summaryLine({ added: 3, updated: 0, deleted: 0, conflicts: 0 })).toBe('3 new · 0 updated · 0 deleted · 0 conflicts');
-    expect(summaryLine({ added: 0, updated: 2, deleted: 1, conflicts: 1 })).toBe('0 new · 2 updated · 1 deleted · 1 conflicts');
+    expect(summaryLine({ added: 0, updated: 2, deleted: 1, conflicts: 1 })).toBe('0 new · 2 updated · 1 deleted · 1 conflict');
+    expect(summaryLine({ added: 1, updated: 1, deleted: 2, conflicts: 2 })).toBe('1 new · 1 updated · 2 deleted · 2 conflicts');
   });
 
-  it('names the deletions checkbox with their number', () => {
+  it('names the deletions checkbox with their number, "deletion" for exactly one', () => {
     expect(deletionsLabel(4)).toBe('Apply 4 deletions');
-    expect(deletionsLabel(1)).toBe('Apply 1 deletions');
+    expect(deletionsLabel(2)).toBe('Apply 2 deletions');
+    expect(deletionsLabel(1)).toBe('Apply 1 deletion');
   });
 });
 

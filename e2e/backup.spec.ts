@@ -281,7 +281,7 @@ test('handover file holds one ship; conflict across two devices', async ({ brows
     await at(b, '2026-10-25T10:20:00Z');
     await goToImport(b);
     await openFile(b, await pathOf(again), 'pw-12345678');
-    await summary(b, '0 new · 0 updated · 0 deleted · 1 conflicts');
+    await summary(b, '0 new · 0 updated · 0 deleted · 1 conflict');
     const conflict = b.getByRole('group', { name: 'Crew: Ivan PETROVIĆ' });
     await expect(conflict.getByRole('row', { name: /Nationality/ })).toContainText('Montenegrin');
     await expect(conflict.getByRole('row', { name: /Nationality/ })).toContainText('Croatian');
@@ -488,10 +488,10 @@ test('deletions are listed and left alone unless they are ticked; a conflict can
     await at(b, '2026-10-25T10:20:00Z');
     await goToImport(b);
     await openFile(b, second, PASSWORD);
-    await summary(b, '0 new · 0 updated · 1 deleted · 1 conflicts');
+    await summary(b, '0 new · 0 updated · 1 deleted · 1 conflict');
 
     // The deletion is listed, and not ticked.
-    const deletions = b.getByLabel('Apply 1 deletions');
+    const deletions = b.getByLabel('Apply 1 deletion');
     await expect(deletions).not.toBeChecked();
     await expect(b.getByRole('list', { name: 'Deletions' }).getByRole('listitem')).toHaveText(['Crew: Ivan PETROVIĆ']);
 
@@ -519,8 +519,8 @@ test('deletions are listed and left alone unless they are ticked; a conflict can
     await goToImport(b);
     await openFile(b, second, PASSWORD);
     await summary(b, '0 new · 0 updated · 1 deleted · 0 conflicts');
-    await expect(b.getByLabel('Apply 1 deletions')).not.toBeChecked();
-    await b.getByLabel('Apply 1 deletions').check();
+    await expect(b.getByLabel('Apply 1 deletion')).not.toBeChecked();
+    await b.getByLabel('Apply 1 deletion').check();
     await applyButton(b).click();
     await expect(b.getByText('Import complete.')).toBeVisible();
     expect((await crew())['PETROVIĆ'].deleted).toBe(true);
@@ -580,7 +580,7 @@ test('a review that went stale is refused, and nothing is written', async ({ bro
     await expect(b.getByLabel('Password')).toBeFocused();
     await b.getByLabel('Password').fill(PASSWORD);
     await b.getByRole('button', { name: 'Open' }).click();
-    await summary(b, '0 new · 0 updated · 0 deleted · 1 conflicts');
+    await summary(b, '0 new · 0 updated · 0 deleted · 1 conflict');
     await expect(b.getByRole('alert')).toHaveText('');
     await b.getByLabel("Use the file's version").check();
     await applyButton(b).click();

@@ -104,6 +104,10 @@ test('protect step and passcode lock (laptop: no fingerprint offered)', async ({
   await freshApp(page); await setupShip(page, SHIP, 'UTC+03:00', { skipLock: false });
   await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
   await expect(page.getByText('Set a 4-digit passcode to open the app.', { exact: true })).toBeVisible();
+  // Spec 4.10: the app says, when the lock is set up, that a forgotten passcode means erasing the device, and what the lock is not.
+  await expect(page.getByText(/the only way back in is to erase all data on this device and restore a backup\./)).toBeVisible();
+  await expect(page.getByText(/does not encrypt the data on this device/)).toBeVisible();
+  await expectNoHorizontalScroll(page);                                    // 360 px, with the notes on screen
   await expect(page.getByLabel('Also unlock with fingerprint')).toHaveCount(0);
   await page.getByLabel('New passcode').fill('123'); await page.getByLabel('Repeat passcode').fill('123');
   await page.getByRole('button', { name: 'Turn on app lock' }).click();
@@ -811,7 +815,7 @@ test('a screen reader is told once when a lock starts and once when it ends', as
   await expect(announcement).toHaveText('You can try again now.');
 });
 
-test('Erase everything: when another page keeps the database open, the dialog says so and is free again; the erase goes through when it lets go', async ({ page }) => {
+test('Erase everything: when another page keeps the database open, the dialog says the erase will finish when it lets go, cannot be cancelled, and the erase goes through then', async ({ page }) => {
   await deviceWithLock(page);
   await page.reload();
   // A page of an old version, say: it holds its connection and does not close it when asked.
@@ -825,12 +829,18 @@ test('Erase everything: when another page keeps the database open, the dialog sa
 
   await page.getByRole('button', { name: 'Forgot passcode?' }).click();
   await page.getByRole('button', { name: 'Erase everything' }).click();
-  await expect(dialog(page).getByRole('alert')).toHaveText('Close Masterpiece in other tabs, then try again.');
-  await expect(dialog(page).getByRole('button', { name: 'Erase everything' })).toBeEnabled();
-  await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  // The delete is queued and cannot be taken back, so the dialog stays busy: no "try again", no Cancel, Escape does nothing.
+  await expect(dialog(page).getByRole('status')).toHaveText('The erase will finish when Masterpiece is closed in your other tabs.');
+  await expect(dialog(page).getByRole('alert')).toHaveCount(0);
+  await expect(dialog(page).getByRole('button', { name: 'Erase everything' })).toBeDisabled();
+  await expect(dialog(page).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');                 // a second one is the browser's own close, which the dialog also refuses
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).getByRole('status')).toBeVisible();
+  await expectNoHorizontalScroll(page);
 
   // The other page lets go: the delete that was asked for goes through, and this page starts again from nothing.
   await other.evaluate(() => (window as unknown as { stubborn: IDBDatabase }).stubborn.close());
   await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
 });
-

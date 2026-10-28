@@ -530,6 +530,26 @@ test('document delete: asks first, can be cancelled, and soft-deletes the docume
   await expect(crewRow(page, 'Ivan PETROVIĆ').locator('[data-band]')).toHaveCount(0);
 });
 
+test('profiles: the delete dialog names the ship\'s crew documents, in the singular for one', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page);
+  await openMember(page, 'Ivan PETROVIĆ');
+  await addDocument(page, { document: 'Medical fitness certificate', number: 'M-1', expiry: '2027-06-01' });
+  const deleteShipButton = () => shipList(page).getByRole('listitem').filter({ hasText: 'MV OCEAN STAR' }).getByRole('button', { name: 'Delete' });
+
+  await page.goto('./#/profiles');
+  await deleteShipButton().click();
+  await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates, 0 voyages, 1 crew document and 1 clock change from this device.');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+
+  await openMember(page, 'Ivan PETROVIĆ');
+  await addDocument(page, { document: 'Medical fitness certificate', number: 'M-2', expiry: '2027-07-01' });
+  await page.goto('./#/profiles');
+  await deleteShipButton().click();
+  await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates, 0 voyages, 2 crew documents and 1 clock change from this device.');
+  await expectNoHorizontalScroll(page);
+});
+
 test('document edit: an unknown document or crew member says so, with a way back', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await addMember(page);

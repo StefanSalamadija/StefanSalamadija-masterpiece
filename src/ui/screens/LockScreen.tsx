@@ -1,7 +1,7 @@
 import type { RefObject } from 'preact';
 import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
-import { eraseDeviceData } from '../../app/eraseDevice';
+import { ERASE_WAITING_MESSAGE, eraseDeviceData } from '../../app/eraseDevice';
 import type { PinSettings } from '../../domain/types';
 import { isFingerprintAvailable, unlockWithFingerprint } from '../../security/fingerprint';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -23,15 +23,21 @@ interface Notice {
 function EraseDialog({ onCancel, focusFallback }: { onCancel: () => void; focusFallback: RefObject<HTMLElement | null> }) {
   const { db } = useAppState();
   const { busy, failure, run } = useDialogAction();
+  // Another page keeps the database open, so the delete is queued. It cannot be taken back, so from here the dialog only waits.
+  const [waiting, setWaiting] = useState(false);
   return (
     <ConfirmDialog
       title="Erase everything on this device?" confirmLabel="Erase everything" danger busy={busy} error={failure}
       focusFallback={focusFallback}
-      // On success the page starts again from nothing, so the dialog is never closed here.
+      // On success the page starts again from nothing, so the dialog is never closed here. While the delete waits for
+      // another page the dialog stays busy (no Cancel, Escape does nothing) until the delete goes through and the page reloads.
       onConfirm={() => void run(async () => {
-        // If another page holds the database the dialog says so and is free again; the delete then goes through when that
-        // page lets go, and this page starts again from nothing.
-        await eraseDeviceData(db, { onErasedLater: () => window.location.reload() });
+        try {
+          await eraseDeviceData(db, { onBlocked: () => setWaiting(true) });
+        } catch (err) {
+          setWaiting(false); // the queued delete failed after all: the data is still here and the dialog is free again
+          throw err;
+        }
         window.location.reload();
       })}
       onCancel={onCancel}
@@ -39,6 +45,7 @@ function EraseDialog({ onCancel, focusFallback }: { onCancel: () => void; focusF
         <>
           <p>This deletes every ship, crew member, certificate and snapshot on this device, and the passcode. It cannot be undone.</p>
           <p>The only way to get your data back is to restore a backup you exported earlier.</p>
+          {waiting && <p role="status" class="dialog-waiting">{ERASE_WAITING_MESSAGE}</p>}
         </>
       }
     />

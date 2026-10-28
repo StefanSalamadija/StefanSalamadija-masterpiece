@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FIELD_NAMES, resolveField, type FieldContext } from './fieldDictionary';
+import { currentVoyage } from './voyage';
 import type { Certificate, ClockChange, CrewDocument, CrewMember, ShipProfile, Voyage } from './types';
 
 const base = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'test-device', deleted: false, scope: 'ship' as const, shipId: 'ship-1' };
@@ -227,6 +228,19 @@ describe('resolveField: voyage', () => {
   it('skips inactive voyages to find the active one', () => {
     const past = { ...voyage, id: id(), active: false, nextPort: 'Hamburg' };
     expect(resolveField('voyage.nextPort', { ...ctx, voyages: [past, voyage] })).toBe('Rotterdam');
+  });
+  it('reads the same voyage the screens call current when two devices each began one: the one begun last, whatever the order', () => {
+    const first = { ...voyage, id: id(), createdAt: '2026-02-01T00:00:00.000Z', voyageNo: 'V-1', nextPort: 'Hamburg' };
+    const last = { ...voyage, id: id(), createdAt: '2026-05-01T00:00:00.000Z', voyageNo: 'V-2', nextPort: 'Antwerp' };
+    for (const voyages of [[first, last], [last, first]]) {
+      expect(resolveField('voyage.nextPort', { ...ctx, voyages })).toBe('Antwerp');
+      expect(resolveField('voyage.no', { ...ctx, voyages })).toBe('V-2');
+    }
+    // Two begun at the same moment are told apart by id, as everywhere else: the same one in either order.
+    const a = { ...first, id: 'aaa', createdAt: last.createdAt, nextPort: 'Gdansk' };
+    const z = { ...first, id: 'zzz', createdAt: last.createdAt, nextPort: 'Gdynia' };
+    expect(resolveField('voyage.nextPort', { ...ctx, voyages: [a, z] })).toBe(currentVoyage([a, z])?.nextPort);
+    expect(resolveField('voyage.nextPort', { ...ctx, voyages: [z, a] })).toBe(resolveField('voyage.nextPort', { ...ctx, voyages: [a, z] }));
   });
   it('is undefined for unknown voyage fields', () => {
     expect(resolveField('voyage.etaOffsetMinutes', ctx)).toBeUndefined();

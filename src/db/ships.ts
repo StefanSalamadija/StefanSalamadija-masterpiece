@@ -63,11 +63,13 @@ export function createShip(db: MasterpieceDB, name: string, offsetMinutes: numbe
 /** What deleting the ship would remove, for the confirmation: live records only. */
 export async function deleteSummary(
   db: MasterpieceDB, shipId: string,
-): Promise<{ crew: number; certificates: number; voyages: number; clockChanges: number }> {
-  const [crew, certificates, voyages, clockChanges] = await Promise.all(
-    (['crew', 'certificates', 'voyages', 'clockChanges'] as const).map(async (table) => (await listForShip(db, table, shipId)).length),
+): Promise<{ crew: number; certificates: number; voyages: number; crewDocuments: number; clockChanges: number }> {
+  const [crew, certificates, voyages, crewDocuments, clockChanges] = await Promise.all(
+    (['crew', 'certificates', 'voyages', 'crewDocuments', 'clockChanges'] as const).map(
+      async (table) => (await listForShip(db, table, shipId)).length,
+    ),
   );
-  return { crew, certificates, voyages, clockChanges };
+  return { crew, certificates, voyages, crewDocuments, clockChanges };
 }
 
 /**

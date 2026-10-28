@@ -471,7 +471,7 @@ test.describe('with the ship profiles', () => {
     await addTwoCertificates(page);
     await openProfiles(page);
     await shipRow(page, 'MV OCEAN STAR').getByRole('button', { name: 'Delete' }).click();
-    await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 2 certificates and 0 voyages from this device.');
+    await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 2 certificates, 0 voyages, 0 crew documents and 1 clock change from this device.');
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await page.goto('./#/ship/certificates');
@@ -482,6 +482,6 @@ test.describe('with the ship profiles', () => {
 
     await openProfiles(page);
     await shipRow(page, 'MV OCEAN STAR').getByRole('button', { name: 'Delete' }).click();
-    await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 1 certificate and 0 voyages from this device.');
+    await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 1 certificate, 0 voyages, 0 crew documents and 1 clock change from this device.');
   });
 });

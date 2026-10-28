@@ -6,6 +6,7 @@ import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 // share the storage) to be the second tab. The clock is 2026-10-25T09:00Z.
 
 const OUTDATED = 'Masterpiece was updated in another tab. Reload to continue.';
+const ERASED = "Masterpiece's data was erased in another tab. Reload to continue.";
 const BLOCKED = 'Close Masterpiece in your other tabs to finish the update.';
 const OPEN_FAILED = "Masterpiece couldn't open its data. Restart the app; if it keeps happening, free some storage.";
 const STORAGE_FULL = 'Storage on this device is full. The change was not saved. Export a backup and free up space.';
@@ -66,6 +67,33 @@ test('another tab upgrades the database: this one stops, says so, and a reload b
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   await expect(page.getByText(OUTDATED)).toHaveCount(0);
+});
+
+test('the data erased in another tab: this one stops, says so, and a reload starts from nothing', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+
+  const other = await plainPage(page);
+  await other.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.deleteDatabase('masterpiece');
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error('The app did not let go of its connection.'));
+        request.onsuccess = () => resolve();
+      }),
+  );
+  await other.close();
+
+  await expect(page.getByRole('alert')).toHaveText(ERASED);
+  await expect(page.getByText(OUTDATED)).toHaveCount(0);
+  await expect(page.getByRole('banner')).toHaveCount(0);
+  await expect(page.getByRole('navigation')).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+  await expect(page.getByText(ERASED)).toHaveCount(0);
 });
 
 test('an upgrade that another tab holds up says so, and goes on by itself when the tab lets go', async ({ page }) => {
