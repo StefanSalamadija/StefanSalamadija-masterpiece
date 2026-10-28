@@ -163,14 +163,16 @@ class Detector {
 
   /**
    * The text that names a field from its own paragraph or cell: the text before it, back to the previous field or
-   * tick box. A checkbox whose words follow the boxes of its line (see `labelsFollowBoxes`) is named by the text after
-   * it on that line instead. The text after a checkbox is also taken when nothing comes before it.
+   * tick box. A checkbox is named by the words its line gives each box (see `boxWords`); when the line does not say,
+   * by the text before it, else the text after it on its line.
    */
   private inlineLabel(tokens: readonly Token[], i: number, field: RawField): string | undefined {
     const before = segment(tokens, i - 1, -1);
-    if (isCheckbox(field) && (labelsFollowBoxes(tokens, i) || !hasWords(before))) {
+    if (isCheckbox(field)) {
+      const own = boxWords(tokens, i);
+      if (own !== undefined) return own;
       const after = segment(tokens, i + 1, 1, true);
-      if (hasWords(after)) return after;
+      if (!hasWords(before) && hasWords(after)) return after;
     }
     return hasWords(before) ? before : undefined;
   }
@@ -371,27 +373,45 @@ class Detector {
 }
 
 /**
- * Whether the words of the boxes around `tokens[i]` come after each box. The boxes are the run of checkboxes (and box
- * symbols) on the same line (paragraph) as `tokens[i]`, up to another kind of field. Their words follow them when:
- * - nothing with words comes before the first box (`☐ Hot ☐ Cold`);
- * - words come after the last box (`Permit type: ☐ Hot work ☐ Cold work`, `Is the area safe? ☐ Yes ☐ No`): the
- *   text before the first box is then a question about them, not a box's name;
- * - the text before the first box ends with `:` or `?` (a question whose boxes are named after them).
+ * The words a line gives the checkbox `tokens[i]`, or `undefined` when the line does not say.
  *
- * Otherwise each box follows its words: `Yes ☐ No ☐ N/A ☐`, `Hot work ☐ Cold work ☐`, `Name [text] Yes ☐ No ☐`.
+ * The line is the run of checkboxes and box symbols around it, in the same paragraph, up to another kind of field:
+ * `s0 ☐ s1 ☐ … ☐ sn`, where each `s` is the text between them. When the run ends at another field, `sn` is that
+ * field's label, not a box's, so it counts as empty. The boxes take their words either before them (box `k` takes
+ * `s(k-1)`) or after them (box `k` takes `s(k)`); a way counts only when every text it gives a box has words:
+ * - `Yes ☐ No ☐`, `Smoker: ☐ Non-smoker: ☐`, `Yes ☐ No ☐ Remarks: [text]`: only before works;
+ * - `☐ Hot ☐ Cold`: only after works;
+ * - `Permit type: ☐ Hot work ☐ Cold work`, `Is the area safe? ☐ Yes ☐ No`: both work, and `s0` ending with `:` or `?`
+ *   makes it a question about the boxes, so after; without it, before.
  */
-function labelsFollowBoxes(tokens: readonly Token[], i: number): boolean {
+function boxWords(tokens: readonly Token[], i: number): string | undefined {
   const isBox = (t: Token): boolean => t.t === 'box' || (t.t === 'field' && isCheckbox(t.field));
   const ends = (t: Token): boolean => t.t === 'break' || t.t === 'table' || t.t === 'repeat' || (t.t === 'field' && !isCheckbox(t.field));
   let start = i;
   while (start > 0 && !ends(tokens[start - 1])) start -= 1;
   let end = i;
   while (end < tokens.length - 1 && !ends(tokens[end + 1])) end += 1;
-  const run = tokens.slice(start, end + 1);
-  const first = run.findIndex(isBox);
-  const last = run.findLastIndex(isBox);
-  const lead = textOf(run.slice(0, first));
-  return !hasWords(lead) || hasWords(textOf(run.slice(last + 1))) || /[:?]$/.test(lead);
+
+  const texts: string[] = [];
+  let pending: Token[] = [];
+  let k = -1;
+  for (let j = start; j <= end; j += 1) {
+    if (!isBox(tokens[j])) {
+      pending.push(tokens[j]);
+      continue;
+    }
+    if (j === i) k = texts.length;
+    texts.push(textOf(pending));
+    pending = [];
+  }
+  const endsAtField = end + 1 < tokens.length && tokens[end + 1].t === 'field';
+  texts.push(endsAtField ? '' : textOf(pending));
+
+  const boxes = texts.length - 1;
+  const before = texts.slice(0, boxes).every(hasWords);
+  const after = texts.slice(1).every(hasWords);
+  if (before && (!after || !/[:?]$/.test(texts[0]))) return texts[k];
+  return after ? texts[k + 1] : undefined;
 }
 
 /** A row of the head of a table: text, and nothing to fill. */

@@ -242,6 +242,12 @@ describe('detectWord', () => {
     ['Permit type: [] Hot work [] Cold work', ['Hot work', 'Cold work']],
     ['Is the area safe? [] Yes [] No', ['Yes', 'No']],
     ['Name [text] Yes [] No []', ['Name', 'Yes', 'No']],
+    ['Yes [] No [] Remarks: [text]', ['Yes', 'No', 'Remarks']],
+    ['Yes: [] No: []', ['Yes', 'No']],
+    ['Smoker: [] Non-smoker: []', ['Smoker', 'Non-smoker']],
+    ['Q1? [] Q2? []', ['Q1?', 'Q2?']],
+    ['Agreed []', ['Agreed']],
+    ['Agreed: []', ['Agreed']],
   ])('names the checkboxes of the line "%s" by the words that belong to each box', (line, labels) => {
     const c = new Controls();
     // `[]` is a FORMCHECKBOX, `[text]` a FORMTEXT; the rest is text, with the spaces as written.
