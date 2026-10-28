@@ -1,12 +1,15 @@
 import type { FormIdentity } from './types';
 
 /**
- * A label of a form's header: `Form:`, `Revision:`, `Page:` or `Approved:` (or `Approved by:`), in any case. It is a
- * whole word followed by a colon, so `Platform:` is not one. Not global: it is used as the pattern of `matchAll`.
+ * The labels of a form's header, as the pattern of one: `Form:`, `Revision:`, `Page:` and `Approved:` (or `Approved by:`),
+ * and the usual ways of writing the first two: `Form No.:`, `Form No:`, `Form Number:`, `Rev.:`, `Rev:`, `Revision No:`
+ * and `Revision Number:`. Each is a whole word, or whole words, and in any case.
  */
-const LABEL = /\b(form|revision|page|approved(?:\s+by)?)\s*:/gi;
+const LABEL_WORDS = 'form(?:\\s+(?:no|number)\\.?)?|rev(?:ision)?\\.?(?:\\s+(?:no|number)\\.?)?|page|approved(?:\\s+by)?';
+/** A label of the header: one of those followed by a colon, so `Platform:` and `Revised:` are not. Global, for `matchAll`. */
+const LABEL = new RegExp(`\\b(${LABEL_WORDS})\\s*:`, 'gi');
 /** A line that is only a label, as a header table gives it when the colon is left out: `Approved`. */
-const LABEL_ONLY = /^(form|revision|page|approved(?:\s+by)?)$/i;
+const LABEL_ONLY = new RegExp(`^(${LABEL_WORDS})$`, 'i');
 
 type LabelName = 'form' | 'revision' | 'page' | 'approved';
 
@@ -18,7 +21,8 @@ interface Found {
 }
 
 function nameOf(label: string): LabelName {
-  return label.toLowerCase().split(/\s+/)[0] as LabelName;
+  const word = label.toLowerCase();
+  return word.startsWith('form') ? 'form' : word.startsWith('rev') ? 'revision' : word.startsWith('page') ? 'page' : 'approved';
 }
 
 function labelsIn(line: string): Found {
@@ -48,7 +52,7 @@ function withoutExtension(fileName: string): string {
  * - `code` is the first word after `Form:`, on the same line or the next. It is `''` when the header has none.
  * - `revision` is the text after `Revision:`, up to the next label (`00 / 01.01.2026`). Same line or the next.
  * - `title` is the longest line that is not a label or the value of one (`Approved`, `Page`, `Form`, `Revision`); the first
- *   of lines equally long. With no code, or with no such line, it is the file name without its extension.
+ *   of lines equally long. Only when the header has no such line is it the file name without its extension (code or not).
  *
  * Labels are matched in any case. When a header is repeated, the first value of a label is the one used.
  */
@@ -83,7 +87,7 @@ export function identityFromText(lines: readonly string[], fileName: string): Fo
   const longest = candidates.reduce<string>((best, line) => (line.length > best.length ? line : best), '');
   return {
     code,
-    title: code === '' || longest === '' ? withoutExtension(fileName) : longest,
+    title: longest === '' ? withoutExtension(fileName) : longest,
     revision: values.revision ?? '',
   };
 }

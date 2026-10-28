@@ -17,6 +17,14 @@ describe('formatDate', () => {
     expect(formatDate('2026-10-28', '  ')).toBe('28-OCT-2026');
   });
 
+  it('gives the display date for a hint with no day, month or year token in it', () => {
+    expect(formatDate('2026-10-28', '(24:00 UTC)')).toBe('28-OCT-2026');
+    expect(formatDate('2026-10-28', 'UTC')).toBe('28-OCT-2026');
+    expect(formatDate('2026-10-28', 'dddd')).toBe('28-OCT-2026');
+    expect(formatDate('2026-10-28', 'yyy')).toBe('28-OCT-2026');
+    expect(formatDate('not a date', '(24:00 UTC)')).toBe('not a date');
+  });
+
   it('pads the day and the month for dd and MM, and not for d and M', () => {
     expect(formatDate('2026-03-05', 'dd/MM/yyyy')).toBe('05/03/2026');
     expect(formatDate('2026-03-05', 'd/M/yyyy')).toBe('5/3/2026');
@@ -49,9 +57,9 @@ describe('formatDate', () => {
     expect(formatDate('2026-10-28', 'dd MMM yyyy "UTC"')).toBe('28 Oct 2026 "UTC"');
     expect(formatDate('2026-10-28', 'dd.MM.yyyy at 12:00')).toBe('28.10.2026 at 12:00');
     expect(formatDate('2026-10-28', '(dd/MMM/yyyy)')).toBe('(28/Oct/2026)');
-    expect(formatDate('2026-10-28', 'dddd')).toBe('dddd');
-    expect(formatDate('2026-10-28', 'yyy')).toBe('yyy');
-    expect(formatDate('2026-10-28', 'MMMMM')).toBe('MMMMM');
+    expect(formatDate('2026-10-28', 'dddd dd')).toBe('dddd 28');
+    expect(formatDate('2026-10-28', 'yyy yy')).toBe('yyy 26');
+    expect(formatDate('2026-10-28', 'MMMMM M')).toBe('MMMMM 10');
   });
 
   it('formats the first and last day of a month, and the 29th of February in a leap year', () => {

@@ -22,7 +22,7 @@ describe('identityFromText', () => {
   });
 
   it('matches the labels in any case and with non-breaking spaces, and keeps the code as it is written', () => {
-    expect(identityFromText(['FORM: tst-03', 'revision : A', 'Weekly Safety Round'], 'x.dotx'))
+    expect(identityFromText(['FORM:\u00a0tst-03', 'revision :\u00a0A', 'Weekly Safety Round'], 'x.dotx'))
       .toEqual({ code: 'tst-03', title: 'Weekly Safety Round', revision: 'A' });
   });
 
@@ -46,14 +46,15 @@ describe('identityFromText', () => {
     expect(identityFromText(lines, 'x.docx')).toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '00' });
   });
 
-  it('takes the title from the file name, without its extension, when there is no code', () => {
+  it('takes the title from the header whether or not there is a code, and the file name only when the header has none', () => {
     expect(identityFromText(['Safety Walk Round Checklist', 'Revision: 02'], 'Safety Walk Round.docx'))
-      .toEqual({ code: '', title: 'Safety Walk Round', revision: '02' });
+      .toEqual({ code: '', title: 'Safety Walk Round Checklist', revision: '02' });
     expect(identityFromText([], 'Safety Walk Round.docx')).toEqual({ code: '', title: 'Safety Walk Round', revision: '' });
+    expect(identityFromText(['Revision: 02'], 'Safety Walk Round.docx')).toEqual({ code: '', title: 'Safety Walk Round', revision: '02' });
   });
 
   it('treats a Form: with nothing after it as no code', () => {
-    expect(identityFromText(['Form:', 'Revision: 01', 'Hot Work Permit'], 'permit.docx')).toEqual({ code: '', title: 'permit', revision: '01' });
+    expect(identityFromText(['Form:', 'Revision: 01', 'Hot Work Permit'], 'permit.docx')).toEqual({ code: '', title: 'Hot Work Permit', revision: '01' });
   });
 
   it('takes the title from the file name when the code is the only thing in the header', () => {
@@ -69,5 +70,31 @@ describe('identityFromText', () => {
   it('ignores empty lines and the spaces around and inside lines', () => {
     expect(identityFromText(['', '  Toolbox   Talk  ', ' ', 'Form:', '', 'TST-01', 'Revision:  00 /  01.01.2026 '], 'x.docx'))
       .toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '00 / 01.01.2026' });
+  });
+
+  describe('labels written in other ways', () => {
+    const code = ['Form No.:', 'Form No:', 'Form Number:', 'FORM NO.:', 'Form  No :'];
+    const revision = ['Rev.:', 'Rev:', 'REV.:', 'Revision No:', 'Revision No.:', 'Revision Number:', 'Rev. No.:'];
+
+    it.each(code)('reads the code after %s, on the same line and on the next', (label) => {
+      expect(identityFromText(['Toolbox Talk', `${label} TST-01`, 'Revision: 00'], 'x.docx')).toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '00' });
+      expect(identityFromText(['Toolbox Talk', label, 'TST-01', 'Revision: 00'], 'x.docx')).toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '00' });
+    });
+
+    it.each(revision)('reads the revision after %s, on the same line and on the next', (label) => {
+      expect(identityFromText(['Toolbox Talk', 'Form: TST-01', `${label} 01 / 01.06.2026`], 'x.docx')).toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '01 / 01.06.2026' });
+      expect(identityFromText(['Toolbox Talk', 'Form: TST-01', label, '01 / 01.06.2026'], 'x.docx')).toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '01 / 01.06.2026' });
+    });
+
+    it('reads them all on one line, each value stopping at the next label', () => {
+      expect(identityFromText(['Toolbox Talk Form No.: TST-01 Rev.: 01 / 01.06.2026 Page: 1 of 1'], 'x.docx'))
+        .toEqual({ code: 'TST-01', title: 'Toolbox Talk', revision: '01 / 01.06.2026' });
+    });
+
+    it('leaves the label out of the title, and does not take a word that only starts or ends like one for a label', () => {
+      expect(identityFromText(['Form No.: TST-01', 'Revised: 3 times today', 'Reverse Osmosis Log'], 'x.docx'))
+        .toEqual({ code: 'TST-01', title: 'Revised: 3 times today', revision: '' });
+      expect(identityFromText(['Formation: A', 'Form No.: TST-01'], 'x.docx').title).toBe('Formation: A');
+    });
   });
 });

@@ -20,15 +20,15 @@ export function isSignatureLabel(s: string): boolean {
 }
 
 /**
- * A date pattern: a day (`d`, `dd`), a month (`m` to `mmmm`) and a year (`yy`, `yyyy`) in any of the three orders, in any
+ * A date pattern: a day (`d`, `dd`), a month (`m` to `mmmm`) and a year (`yy` or `yyyy`, never 3 `y`) in any of the three orders, in any
  * case, with the same one of `/`, `.`, `-` or a space between them. This is every hint `formatDate` formats with the
  * three parts together (`dd/MMM/yyyy`, `DD.MM.YYYY`, `dd.mm.yyyy`, `YYYY-MM-DD`). It must not begin or end inside a word.
  */
 const DATE_HINT = new RegExp(
   '(?:^|[^a-z])('
-  + 'd{1,2}(?<a>[/. -])m{1,4}\\k<a>y{2,4}'
-  + '|m{1,4}(?<b>[/. -])d{1,2}\\k<b>y{2,4}'
-  + '|y{2,4}(?<c>[/. -])m{1,4}\\k<c>d{1,2}'
+  + 'd{1,2}(?<a>[/. -])m{1,4}\\k<a>(?:y{4}|y{2})'
+  + '|m{1,4}(?<b>[/. -])d{1,2}\\k<b>(?:y{4}|y{2})'
+  + '|(?:y{4}|y{2})(?<c>[/. -])m{1,4}\\k<c>d{1,2}'
   + ')(?![a-z])',
   'i',
 );

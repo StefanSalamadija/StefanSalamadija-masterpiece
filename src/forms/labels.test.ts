@@ -14,7 +14,7 @@ describe('normaliseLabel', () => {
   });
 
   it('collapses runs of spaces, tabs, line breaks and non-breaking spaces to one space', () => {
-    expect(normaliseLabel('  Time  IN \t\n Local ')).toBe('time in local');
+    expect(normaliseLabel('  Time\u00a0\u00a0IN \t\n Local ')).toBe('time in local');
   });
 
   it('keeps words apart when the stripped character was the only thing between them', () => {
@@ -73,6 +73,12 @@ describe('formatHintOf', () => {
   it('gives the first hint when a label holds both', () => {
     expect(formatHintOf('Date (dd/MMM/yyyy) (24:00 UTC)')).toBe('dd/MMM/yyyy');
     expect(formatHintOf('(24:00 UTC) Date dd/MMM/yyyy')).toBe('(24:00 UTC)');
+  });
+
+  it('does not give a year of 3 digits, or any hint that formatDate cannot format', () => {
+    expect(formatHintOf('Date (dd/mmm/yyy)')).toBeUndefined();
+    expect(formatHintOf('Date (yyy-mm-dd)')).toBeUndefined();
+    expect(formatHintOf('Date (dd/mmm/yyyyy)')).toBeUndefined();
   });
 
   it('gives undefined when there is no hint', () => {

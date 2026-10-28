@@ -23,7 +23,7 @@ function pad(n: number, width: number): string {
  * Every other character is kept as it is, and so is a run of d, m or y that is not one of those (`dddd`, `yyy`).
  * `formatDate('2026-10-28', 'dd/MMM/yyyy')` is `28/Oct/2026`.
  *
- * With no hint (or an empty one) it is the app's own display date, `28-OCT-2026`. Text that is not a real date is given
+ * With no hint (or an empty one), or a hint with no token in it (`(24:00 UTC)`), it is the app's own display date, `28-OCT-2026`. Text that is not a real date is given
  * back as it is, as `formatDisplayDate` does, so that a value from a damaged file is shown and never made up.
  */
 export function formatDate(iso: string, hint?: string): string {
@@ -32,17 +32,27 @@ export function formatDate(iso: string, hint?: string): string {
   const year = Number(iso.slice(0, 4));
   const month = Number(iso.slice(5, 7));
   const day = Number(iso.slice(8, 10));
-  return hint.replace(DATE_LETTERS, (run: string, letter: string) => {
-    const length = run.length;
-    switch (letter.toLowerCase()) {
-      case 'd':
-        return length === 1 ? String(day) : length === 2 ? pad(day, 2) : run;
-      case 'm':
-        if (length === 1) return String(month);
-        if (length === 2) return pad(month, 2);
-        return length === 3 ? SHORT_MONTHS[month - 1] : length === 4 ? LONG_MONTHS[month - 1] : run;
-      default: // 'y'
-        return length === 2 ? pad(year, 4).slice(2) : length === 4 ? pad(year, 4) : run;
-    }
+  let tokens = 0;
+  const text = hint.replace(DATE_LETTERS, (run: string, letter: string) => {
+    const token = tokenOf(letter.toLowerCase(), run.length, { year, month, day });
+    if (token === undefined) return run;
+    tokens += 1;
+    return token;
   });
+  // A hint with no date token in it (`(24:00 UTC)`) says nothing about the date, so the display date is used.
+  return tokens === 0 ? formatDisplayDate(iso) : text;
+}
+
+/** What a run of `length` of the letter `d`, `m` or `y` stands for, or `undefined` when the run is not a token. */
+function tokenOf(letter: string, length: number, date: { year: number; month: number; day: number }): string | undefined {
+  switch (letter) {
+    case 'd':
+      return length === 1 ? String(date.day) : length === 2 ? pad(date.day, 2) : undefined;
+    case 'm':
+      if (length === 1) return String(date.month);
+      if (length === 2) return pad(date.month, 2);
+      return length === 3 ? SHORT_MONTHS[date.month - 1] : length === 4 ? LONG_MONTHS[date.month - 1] : undefined;
+    default: // 'y'
+      return length === 2 ? pad(date.year, 4).slice(2) : length === 4 ? pad(date.year, 4) : undefined;
+  }
 }
