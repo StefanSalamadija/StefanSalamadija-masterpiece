@@ -1,0 +1,26 @@
+const UNKNOWN_TYPE = 'application/octet-stream';
+
+/**
+ * Hands the file to the system share sheet where there is one, else downloads it. `data` is the file's text (a backup) or a
+ * Blob (a spreadsheet, which keeps its own type; a text is a file of unknown type). `cancelled`: the user closed the share
+ * sheet. Any other share failure (Android raises `NotAllowedError` when the tap that started the slow export is too old)
+ * falls back to a download, so the file is never lost.
+ */
+export async function shareOrDownload(fileName: string, data: string | Blob): Promise<'shared' | 'downloaded' | 'cancelled'> {
+  const file = new File([data], fileName, { type: (typeof data === 'string' ? '' : data.type) || UNKNOWN_TYPE });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: fileName });
+      return 'shared';
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return 'cancelled';
+    }
+  }
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000); // after the browser has started reading it
+  return 'downloaded';
+}

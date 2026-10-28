@@ -33,10 +33,14 @@ At sign-off they can give the relief a ship-only handover file.
 ## 3. Roadmap (each piece gets its own spec → plan → build)
 
 1. **Base:** this spec.
-2. **SMS forms engine:** fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. Starts once the user sends 3–5 sample forms.
-3. **Cargo:** draft survey (initial/final, trim, hog/sag and density corrections), final trimming pours, air draft (keel to hatch cover) for loader clearance. Hydrostatic tables are entered per ship profile. Results are an aid and are checked against the approved stability booklet/loading computer.
-4. **Admin:** port and crew papers (crew lists, IMO FAL), voyage reports (noon, arrival/departure, NOR, SOF), planned tasks and due dates, work/rest hours, cargo/ballast logs and ROB.
-5. **Finance and converters:** currency (offline rates, updated when online or entered by hand), units, financial calculators, personal planning (personal data), and ship's business (ship data: master's cash, wages and advances, slop chest, disbursements).
+2. **SMS forms engine** (user decision 2026-10-27: built right after the base, before the Library, because these forms are used daily): fills the company .docx/.xlsx with ship's data and form inputs and outputs the original layout for printing. The user's sample forms have arrived (15, Word legacy form fields and Excel sheets). They are company documents: they stay on the user's devices and are never committed to this public repository.
+3. **Library** (user request):
+   - **Document shelf:** about 100 of the user's own PDF/Word/Excel files (SMS manuals, circulars, stability booklet, their own legal copies of codes), stored offline, with folders and tags, full-text search inside the documents, favourites, and optional inclusion in the ship handover.
+   - **Built-in quick-reference cards:** only original or public-domain content (for example Beaufort scale, phonetic alphabet, flag signals, COLREG lights and shapes, formulas, unit tables). No copyrighted IMO or other publisher texts are bundled.
+   - Own spec when started.
+4. **Cargo:** draft survey (initial/final, trim, hog/sag and density corrections), final trimming pours, air draft (keel to hatch cover) for loader clearance. Hydrostatic tables are entered per ship profile. Results are an aid and are checked against the approved stability booklet/loading computer.
+5. **Admin:** port and crew papers (crew lists, IMO FAL), voyage reports (noon, arrival/departure, NOR, SOF), planned tasks and due dates, work/rest hours, cargo/ballast logs and ROB.
+6. **Finance and converters** (includes the **personal budget planner**, designed in `2026-10-25-masterpiece-budget-design.md`): currency (offline rates, updated when online or entered by hand), units, financial calculators, personal planning (personal data), and ship's business (ship data: master's cash, wages and advances, slop chest, disbursements).
 
 ## 4. Piece 1 scope
 
@@ -59,7 +63,10 @@ At sign-off they can give the relief a ship-only handover file.
   - **Crew list** (§4.4):
     - Fields: surname, given names, rank, nationality, date of birth, place of birth, passport no. and expiry, seaman's book no. and expiry, sign-on date and port, sign-off date and port.
     - **"As at" date** selector, defaulting to today (ship's time).
-    - Actions: *Sign off*, *Re-join*, *Import from Excel*.
+    - Actions: *Sign off*, *Re-join*, *Import from Excel*, *Print crew list*, *Export to Excel* (§4.15).
+    - Each crew member has a **Documents** list (§4.14) and **contract** fields (§4.16).
+  - **Reliefs** (§4.16): onboard crew sorted by contract end, with days onboard and planned reliefs.
+  - **Expiring** (§4.14): crew documents that lapse before the next port.
   - **Certificates** (§4.6): the register, with expiry and survey warnings.
   - **Current voyage:** voyage no., last port, next port, ETA (local time + UTC offset), cargo, charterers, agents at next port.
     One voyage per ship is active. Starting a new voyage keeps the old one as history.
@@ -82,10 +89,11 @@ Unit preferences are **deferred** to Pieces 3/5, where units are first used.
 Every data item has a stable dotted name that later pieces use to pre-fill forms and reports:
 
 - **Vessel:** `vessel.name`, `vessel.imo`, `vessel.callSign`, `vessel.mmsi`, `vessel.flag`, `vessel.portOfRegistry`, `vessel.gt`, `vessel.nt`, `vessel.dwt`, `vessel.loa`, `vessel.beam`, `vessel.yearBuilt`, `vessel.owners`, `vessel.managers`, `vessel.pandi`, `vessel.classSociety`
-- **Voyage:** `voyage.no`, `voyage.lastPort`, `voyage.nextPort`, `voyage.eta`, `voyage.cargo`, `voyage.charterers`, `voyage.agents`
+- **Voyage:** `voyage.no`, `voyage.lastPort`, `voyage.nextPort`, `voyage.eta` (local time at the destination), `voyage.etaTimeZone` (for example `UTC+01:00`), `voyage.cargo`, `voyage.charterers`, `voyage.agents`
 - **Crew by rank:** `crew.byRank.<rank>.<field>`, for example `crew.byRank.master.fullName` (first crew member with that rank onboard at the reference date).
   - Rank is chosen from a standard list (Master, Chief Officer, 2nd/3rd Officer, Deck Cadet, Bosun, AB, OS, Chief/2nd/3rd/4th Engineer, ETO, Engine Cadet, Fitter, Oiler, Wiper, Chief Cook, Messman, plus *Other* as free text).
   - The key is the camelCase name, for example `chiefOfficer`.
+  - Extra crew fields: `contractEndDate` and `daysOnboard` (§4.16), and `doc.<type>.<field>` for crew documents (§4.14), for example `crew.byRank.master.doc.coc.number`.
 - **Crew lists:** `crew.onboard` (the list onboard at the reference date, for crew-list style forms), `crew.onboardCount`
 - **Certificates:** `cert.<key>.number`, `cert.<key>.issuedBy`, `cert.<key>.issueDate`, `cert.<key>.expiryDate`, `cert.<key>.nextSurveyDue`. The key comes from the standard list (§4.6), for example `cert.loadLine.expiryDate`.
 - **Time:** `today` and `now` in **ship's time**, `nowUtc`, `ship.timeZone` (for example `UTC+03:00`)
@@ -140,6 +148,8 @@ The fields are exposed through one lookup function, `resolveField(name, { asAt? 
 - `Voyage`: `{ shipId, active: boolean, …§4.1 fields }`
 - `Certificate`: `{ shipId, key, name, number, issuedBy, issueDate, expiryDate?, nextSurveyDue?, remarks }`
 - `ClockChange`: `{ shipId, effectiveAt, toOffsetMinutes, note? }`
+- `CrewDocument` (§4.14): `{ shipId, crewId, type, typeOther?, grade, number, issuedBy, issueDate, expiryDate?, remarks }`
+- Added later to existing records: `CrewMember.contractMonths?`, `reliefPlannedDate?`, `reliefPlannedPort?` (§4.16); `ShipProfile.maxMonthsOnboard?` (§4.16) and `crewListColumns?` (§4.15).
 
 **Personal scope:** no tables in Piece 1. Piece 5 adds personal finance here. The backup and handover mechanism already respects scope.
 
@@ -214,20 +224,47 @@ Device clocks are assumed to be roughly correct. Times are compared in UTC.
 
 ### 4.9 Display themes
 
-- **Day:** normal colours.
-- **Night:** red-on-black, low brightness, with no white or blue light, to keep night vision on the bridge.
+**Visual style, chosen by the user: "A · Bridge Console".** Mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x.
+- Typefaces: IBM Plex Sans for text; IBM Plex Mono for clock times and rank codes. Both are bundled, so they work offline.
+- Cards and list rows have 10–12 px rounded corners on a dark surface. Status is shown as pill badges.
+- The main navigation is a bottom bar: Home, Ship, Profiles, Settings. The ship's sections are a row of chips under the header.
+- The header shows the ship's name, the ship's clock and the theme button.
+- **Logo (user-chosen): "M on the sea at sunrise" (logo v2).**
+  - A navy "M" stands on the waves, with the horizon behind it.
+  - The upper part of the tile is a bright sunrise sky (saturated sunrise yellow fading to light blue), with a small sun between the two peaks of the M. Below the horizon is blue sea, and dark navy waves sit under the M's feet.
+  - The Night version uses a dark sky, a pale moon, a teal horizon line and a light "M".
+  - It is used for the home-screen icon, the Android launch splash, the header brand and print footers. Print uses a one-colour line version.
+- **Welcome page (first start, approved as mocked up):**
+  - The logo and "Masterpiece" on a navy band.
+  - The tagline "Your ship's office in your pocket. Crew, certificates and paperwork — fully offline."
+  - Two large buttons, *Create your first ship* and *Import a backup*, a line for new phones and reliefs, and the note "Your data stays on this device. No account needed."
+
+Themes (user decision: no red night mode):
+- **Day (white with blue):** white page and light-grey cards with dark text, a navy `#0B2545` header and bottom bar, blue `#1D5FD1` buttons and accents, amber and red badges.
+- **Night (dark navy Bridge Console):** background `#0B1622`, cards `#12243A`, lines `#1E3550`, text `#E6EDF5`, secondary text `#9FB3C8`, teal accent `#5FD4CE`, amber warnings `#F2B33D`, red alarms `#FF6B5E`. At night, lower the phone's own brightness.
 - **High contrast:** black on white, bold text and larger touch targets, for bright sun on deck.
 
 The header has a one-tap toggle, and the choice is remembered per device.
 Printing always uses a black-on-white print layout, whatever the theme.
 
-### 4.10 App PIN lock (optional)
+### 4.10 App lock: fingerprint and 4-digit passcode (user decision)
 
-- A 4–8 digit PIN, set in Settings. It is asked when the app opens and again after it has been in the background longer than a set time (default 5 minutes).
-- The PIN is stored only as a salted PBKDF2 hash.
-- After 5 wrong tries, waits grow: 30 s, then 1 min, then 5 min.
-- **Forgot PIN:** the only way out is to erase all data on this device and then import a backup. The app says so when the PIN is set.
-- **Limitation, stated in the app:** the PIN stops casual access but does not encrypt the data on the device. The phone's own screen lock and device encryption remain the real protection.
+- **Phones** (Android): unlock with the **fingerprint first**. If the fingerprint isn't recognised or the prompt is cancelled, the **4-digit passcode** is the fallback.
+- **Laptops:** the **4-digit passcode only**.
+- **Setting it up:**
+  - It is offered right after the first ship is created (*Protect Masterpiece*: set a passcode, plus "Also unlock with fingerprint" on phones), with a *Skip for now* option.
+  - Once on, the lock is required every time the app opens and after the app has been in the background longer than a set time (default 5 minutes).
+  - It can be turned off in Settings.
+- **How the fingerprint works:**
+  - It uses the phone's built-in sensor through the browser's standard secure-login feature (WebAuthn). It works offline.
+  - The app keeps only a public key and checks the phone's signed answer itself. No fingerprint data ever reaches the app.
+  - Android shows its own prompt and may offer the phone's own screen lock there.
+- **Passcode:**
+  - Exactly 4 digits, stored only as a salted PBKDF2 hash.
+  - After 5 wrong tries, waits grow: 30 s, then 1 min, then 5 min.
+  - Failed fingerprint attempts don't count towards the waits.
+- **Can't unlock** (forgotten passcode and no fingerprint): the only way out is to erase all data on this device and import a backup. The app says so when the lock is set up.
+- **Limitation, stated in the app:** the lock stops casual access but does not encrypt the data on the device. The phone's own screen lock and device encryption remain the real protection.
 
 ### 4.11 Data safety
 
@@ -248,9 +285,73 @@ Printing always uses a black-on-white print layout, whatever the theme.
 
 ### 4.13 Updates
 
-- The service worker checks for a new version when online.
+- The service worker checks for a new version when the app starts, every hour while it is open and online, and as soon as the connection returns.
+- New versions are published by merging to `main`; GitHub Actions deploys them to GitHub Pages.
+- Updates arrive as an in-app banner, not a phone notification, because push notifications would need an online push service.
+- **The banner shows what's new**, for example *"Version 1.2.0 — Crew list print and Excel export. Update"*. It falls back to *"New version available — Update"* when the release note can't be fetched.
+- **Release control (user decision):**
+  - The owner asks for changes in a Claude session. Claude builds them on a branch with tests and reviews, and gives a plain-language summary.
+  - Nothing is merged to `main` (and so published) until the owner approves.
+  - There is no separate preview deployment.
+  - A bad release is rolled back by reverting the merge.
 - The user sees *"New version available — Update"*. The app never reloads by itself in the middle of a task.
 - Data schema changes run as versioned migrations, each preceded by a `before-update` snapshot.
+
+### 4.14 Crew documents (certificate register per seafarer)
+
+**Document types**, plus *Other* as free text:
+
+| Group | Documents |
+|---|---|
+| Competency | Certificate of Competency (CoC), Flag endorsement, GMDSS certificate |
+| Health | Medical fitness certificate, Yellow fever certificate |
+| STCW courses | Basic safety training, Advanced fire fighting, Survival craft and rescue boats, Fast rescue boats, Medical first aid, Medical care, Security awareness, Designated security duties, Ship security officer, ECDIS, Bridge resource management, Engine-room resource management, High voltage |
+| Visas | US C1/D visa, Schengen visa |
+
+- **Fields:** type, grade/capacity (for CoC, endorsement and GMDSS), number, issued by, issue date, expiry date (empty means no expiry), remarks.
+- **Warnings:** amber when expiry is within **90 days** of the reference date, red when past.
+  The crew list badge shows the worst of passport, seaman's book and documents.
+- **Expiring view:**
+  - Shows passports, seaman's books and documents of crew onboard today that expire on or before the active voyage's ETA date, sorted by expiry.
+  - With no ETA set, it shows the next 90 days and says so.
+- **Re-join:** the new contract record receives copies of the person's documents that have no expiry or expire on or after the new sign-on date.
+- **Delete:** deleting a crew member also soft-deletes their documents.
+- **Storage:** a new `crewDocuments` table (database version 2, with a `before-update` snapshot in the migration).
+- **Older backups:** a backup without that table imports as having no documents.
+
+### 4.15 Crew list output (print and Excel)
+
+- **Buttons:** *Print crew list* and *Export to Excel* on the crew list. Both use the current *As at* date and the *Onboard*/*All* filter.
+- **Options:**
+  - *Port* (default: the active voyage's next port) and *Date* (default: As at).
+  - Tickable columns, remembered per ship.
+- **Columns:**
+  - Default: No., surname, given names, rank, nationality, date of birth, place of birth, passport no., passport expiry, sign-on date, sign-on port.
+  - Optional: seaman's book no. and expiry, CoC no., contract end.
+- **Printout:**
+  - A4 landscape.
+  - Title `CREW LIST`; vessel name, IMO, call sign and flag; port and date.
+  - A numbered table in rank order.
+  - A Master signature line with the Master's name, a ship's stamp box, and a small "Printed with Masterpiece" footer.
+- **Dates** on printouts and exports are shown as `05-JAN-1985`, which can't be misread.
+- **Excel file:** the same header and table, named `crew-list-<ship>-<yyyy-mm-dd>.xlsx`, shared or downloaded like backups.
+
+### 4.16 Contracts and relief planning
+
+- **Crew fields:**
+  - Contract length in whole months (1–24, optional).
+  - Planned relief date and planned relief port (optional).
+- **Calculated values:**
+  - Contract end = sign-on + contract length.
+  - Days onboard = days from sign-on to the reference date (or the sign-off date if earlier), counting both ends.
+- **Contract warning:** amber when the contract ends within **30 days**, red when it has ended (relief overdue).
+- **Onboard limit:**
+  - A per-ship setting *Maximum months onboard*: 1–11, default **11**, staying under the MLC 12-month limit.
+  - Amber from 30 days before sign-on + limit; red once reached.
+  - Applies to crew onboard at the reference date.
+- **Reliefs view:**
+  - Onboard crew sorted by contract end (no contract length last), with days onboard, contract end, planned relief and badges.
+  - Alerts also appear on Home.
 
 ## 5. Technical design
 
@@ -295,6 +396,16 @@ Printing always uses a black-on-white print layout, whatever the theme.
 - Switch themes; check that the print layout is black on white.
 - PIN lock on reopen.
 - App loads and works with the network disabled after the first visit.
+
+**Unit and e2e tests for §4.14–4.16:**
+- Contract end, days onboard and band boundaries.
+- Document carry-over on re-join.
+- Expiring-before-next-port list.
+- Database v1 → v2 migration snapshot.
+- Old backups without crew documents.
+- Crew list columns and date format.
+- Excel export read back through the importer.
+- Printing shows only the sheet.
 
 **Manual:** install and run on an Android phone (Chrome) and a laptop (Chrome/Edge).
 

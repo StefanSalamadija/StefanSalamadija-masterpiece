@@ -17,7 +17,7 @@
 
 - **Runtime:** Node 22, npm. Project root `/home/user/masterpiece`.
 - **Dependencies (exact ranges):**
-  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, and `xlsx` (SheetJS CE). SheetJS is installed **only in Task 5** with `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
+  - Runtime: `preact@^11.0.2`, `dexie@^4.4.7`, `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0` (both installed in Task 13), and `xlsx` (SheetJS CE). SheetJS is installed **only in Task 5** with `npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`.
     - This needs `cdn.sheetjs.com` allowed in the environment's network policy. If the download is refused, stop at Task 5 and report; do not substitute another package.
     - Never use the npm-registry `xlsx@0.18.5`, which is outdated and has known vulnerabilities.
   - Dev: `vite@^8.3.5`, `@preact/preset-vite@^2.10.6`, `@babel/core@^7`, `vite-plugin-pwa@^2.0.0`, `workbox-window@^7.4.1`, `vitest@^5.0.5`, `fake-indexeddb@^6.2.6`, `typescript@^7.0.2`, `@playwright/test@1.63.0` (exact: it must match the preinstalled browsers in `/opt/pw-browsers`; never run `playwright install`).
@@ -33,7 +33,7 @@
   - IDs come from `crypto.randomUUID()`.
   - Syncable records are never hard-deleted (soft delete only). The exceptions are snapshot restore and "erase all data on this device".
 - **Backup crypto:** password ≥ 8 characters; PBKDF2-SHA-256 with **600,000** iterations; AES-GCM 256; 16-byte salt; 12-byte IV.
-- **PIN:** 4–8 digits. Lockout after 5 wrong tries: 30 s, then 60 s, then 300 s. Relock after 5 minutes in the background by default.
+- **App lock (user decision):** phones unlock with the fingerprint first (WebAuthn platform authenticator), with an **exactly 4-digit** passcode as the fallback; laptops use the passcode only. Lockout after 5 wrong passcodes: 30 s, then 60 s, then 300 s. Relock after 5 minutes in the background by default.
 - **Warnings:** crew documents amber when expiry ≤ 6 months away, red when past. Certificates amber when expiry or next survey ≤ 90 days away, red when past.
 - **Defaults:** snapshots keep the last **5**; backup reminder **7** days.
 - **Ship's time offsets:** −720 to +840 minutes, in steps of 15.
@@ -905,28 +905,49 @@ expect((await prepareImport(B, t2, 'pw-12345678')).plan.summary.conflicts).toBe(
 
 ---
 
-### Task 12: PIN security rules
+### Task 12: App lock rules: 4-digit passcode and fingerprint
 
 **Files:**
-- Create: `src/security/pin.ts`
-- Test: `src/security/pin.test.ts`
+- Create: `src/security/pin.ts`, `src/security/fingerprint.ts`
+- Modify: `src/domain/types.ts` (adds `FingerprintCredential`; `PinSettings` gains `fingerprint?: FingerprintCredential`)
+- Test: `src/security/pin.test.ts`, `src/security/fingerprint.test.ts`
 
 **Interfaces:**
-- Consumes: `PinHash`, `LockoutState` (Task 2).
-- Produces:
-  - `isValidPin(pin: string): boolean` (`/^\d{4,8}$/`).
-  - `hashPin(pin: string, opts?: { iterations?: number }): Promise<PinHash>`: PBKDF2-SHA-256 with 100000 iterations by default and a random 16-byte salt.
-  - `verifyPin(pin: string, h: PinHash): Promise<boolean>`.
+- Consumes: `PinHash`, `LockoutState`, `PinSettings` (Task 2).
+- Produces in `types.ts`: `interface FingerprintCredential { credentialId: string /*base64url*/; publicKey: string /*SPKI, base64*/; alg: -7 | -257 }`.
+- Produces in `pin.ts` (the passcode is **exactly 4 digits**, per the user's decision):
+  - `isValidPin(pin: string): boolean` (`/^\d{4}$/`).
+  - `hashPin(pin: string, opts?: { iterations?: number }): Promise<PinHash>`: PBKDF2-SHA-256, 100000 iterations by default, random 16-byte salt.
+  - `verifyPin(pin: string, h: PinHash): Promise<boolean>`: constant-time comparison.
   - `registerFailure(s: LockoutState, now: Date): LockoutState`: the 5th failure locks for 30 s, the 6th for 60 s, the 7th and later for 300 s.
   - `registerSuccess(): LockoutState` (`{ failures: 0 }`).
   - `lockRemainingMs(s: LockoutState, now: Date): number`.
   - `shouldRelock(hiddenAt: string | undefined, now: Date, relockMinutes: number): boolean`: true when more than `relockMinutes` have passed.
+- Produces in `fingerprint.ts` (WebAuthn platform authenticator, fully offline, with local verification and no server):
+  - `isMobileDevice(userAgent: string): boolean`: `/Android|iPhone|iPad/i`.
+  - `isFingerprintAvailable(): Promise<boolean>`: true only when **all** hold: `isMobileDevice(navigator.userAgent)` (laptops use the passcode only, per the user's decision), `window.PublicKeyCredential` exists, and `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` resolves true.
+  - `registerFingerprint(): Promise<FingerprintCredential>`: `navigator.credentials.create({ publicKey: { rp: { name: 'Masterpiece' }, user: { id: <random 16 bytes>, name: 'masterpiece', displayName: 'Masterpiece' }, challenge: <random 32 bytes>, pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, attestation: 'none', timeout: 60000 } })`. It stores `rawId` as base64url, `response.getPublicKey()` as base64 SPKI, and `response.getPublicKeyAlgorithm()`.
+  - `unlockWithFingerprint(cred: FingerprintCredential): Promise<boolean>`: calls `navigator.credentials.get` with `allowCredentials: [{ type: 'public-key', id }]`, `userVerification: 'required'`, a random 32-byte challenge and a 60 s timeout, then returns `verifyAssertion(...)`. A cancelled, failed or timed-out prompt returns `false` and never throws.
+  - Pure, unit-tested helpers:
+    - `parseAuthenticatorData(bytes: Uint8Array): { rpIdHash: Uint8Array; userPresent: boolean; userVerified: boolean }`: UP is flag bit 0, UV is bit 2.
+    - `derToRawEcdsa(der: Uint8Array): Uint8Array`: 64-byte r‖s for WebCrypto ES256.
+    - `verifyAssertion(input: { cred: FingerprintCredential; authenticatorData: Uint8Array; clientDataJSON: Uint8Array; signature: Uint8Array; expectedChallenge: Uint8Array; expectedOrigin: string; expectedRpId: string }): Promise<boolean>`. It returns true only if **every** check passes:
+      - `clientData.type === 'webauthn.get'`;
+      - `clientData.challenge` (base64url) equals `expectedChallenge`;
+      - `clientData.origin === expectedOrigin`;
+      - `rpIdHash` equals SHA-256(`expectedRpId`);
+      - both `userPresent` and `userVerified` are set;
+      - the signature over `authenticatorData ‖ SHA-256(clientDataJSON)` verifies with the stored key (ES256 via `derToRawEcdsa`, RS256 PKCS1-v1_5 SHA-256).
+- **Limitation, stated in the app:**
+  - The lock stops casual access but does not encrypt the data on the device.
+  - Android shows its own fingerprint prompt, and may offer the phone's own screen lock as an alternative there. That choice belongs to the phone, not the app.
 
 - [ ] **Step 1: Write the failing tests.**
 
 ```ts
-expect(['1234', '12345678'].every(isValidPin)).toBe(true);
-expect(['123', '123456789', '12a4', ''].some(isValidPin)).toBe(false);
+// pin.test.ts
+expect(isValidPin('2580')).toBe(true);
+expect(['123', '12345', '12a4', '', ' 258'].some(isValidPin)).toBe(false);
 const h = await hashPin('2580', { iterations: 1000 });
 expect(await verifyPin('2580', h)).toBe(true);
 expect(await verifyPin('2581', h)).toBe(false);
@@ -942,20 +963,37 @@ expect(lockRemainingMs(s, new Date(t0.getTime() + 300_001))).toBe(0);
 expect(shouldRelock('2026-10-25T12:00:00.000Z', new Date('2026-10-25T12:04:00Z'), 5)).toBe(false);
 expect(shouldRelock('2026-10-25T12:00:00.000Z', new Date('2026-10-25T12:06:00Z'), 5)).toBe(true);
 expect(shouldRelock(undefined, t0, 5)).toBe(false);
+
+// fingerprint.test.ts — build a real ES256 key with crypto.subtle.generateKey, export SPKI as the stored cred,
+// hand-build authenticatorData (rpIdHash = SHA-256('localhost') ‖ flags ‖ 4-byte counter) and clientDataJSON
+// ({ type: 'webauthn.get', challenge: b64url(ch), origin: 'http://localhost:4173' }), sign authData ‖ SHA-256(clientDataJSON),
+// convert WebCrypto's raw r‖s signature to DER for the input (a test helper rawToDer).
+expect(isMobileDevice('Mozilla/5.0 (Linux; Android 14; Pixel 7)')).toBe(true);
+expect(isMobileDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(false);
+expect(parseAuthenticatorData(authData(0x05))).toMatchObject({ userPresent: true, userVerified: true });
+expect(parseAuthenticatorData(authData(0x01))).toMatchObject({ userPresent: true, userVerified: false });
+expect(derToRawEcdsa(rawToDer(raw))).toEqual(raw);   // including r/s with a leading 0x00 pad byte
+expect(await verifyAssertion(good)).toBe(true);
+expect(await verifyAssertion({ ...good, expectedChallenge: otherChallenge })).toBe(false);
+expect(await verifyAssertion({ ...good, expectedOrigin: 'https://evil.example' })).toBe(false);
+expect(await verifyAssertion({ ...good, expectedRpId: 'example.com' })).toBe(false);
+expect(await verifyAssertion({ ...good, authenticatorData: authData(0x01) /* UV not set, re-signed */ , signature: sigFor(authData(0x01)) })).toBe(false);
+expect(await verifyAssertion({ ...good, signature: flipByte(good.signature) })).toBe(false);
+expect(await verifyAssertion({ ...good, clientDataJSON: enc({ type: 'webauthn.create', challenge, origin }) })).toBe(false);
 ```
 
 - [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/security`. Expected: FAIL.
-- [ ] **Step 3: Implement `pin.ts`.**
-- [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
-- [ ] **Step 5: Commit.** `git add src/security && git commit -m "feat: PIN hashing and lockout rules"`
+- [ ] **Step 3: Implement `pin.ts`, `fingerprint.ts` and the type additions.** `registerFingerprint` and `unlockWithFingerprint` are thin wrappers over the browser API; they are covered by Task 21's e2e test with a virtual authenticator.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npx vitest run src/security && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: passcode and fingerprint lock rules"`
 
 ---
 
 ### Task 13: App shell: state, router, header, themes, first ship, errors, update banner
 
 **Files:**
-- Create: `src/app/AppState.tsx`, `src/app/router.ts`, `src/ui/useLive.ts`, `src/ui/theme.css`, `src/ui/print.css`, `src/ui/components/Header.tsx`, `src/ui/components/Nav.tsx`, `src/ui/components/UpdateBanner.tsx`, `src/ui/components/ErrorToast.tsx`, `src/ui/screens/FirstShip.tsx`
-- Modify: `src/app/App.tsx`, `src/main.tsx`
+- Create: `src/app/AppState.tsx`, `src/app/router.ts`, `src/ui/useLive.ts`, `src/ui/theme.css`, `src/ui/print.css`, `src/ui/components/Header.tsx`, `src/ui/components/Nav.tsx`, `src/ui/components/UpdateBanner.tsx`, `src/ui/components/ErrorToast.tsx`, `src/ui/components/LogoMark.tsx`, `src/ui/screens/FirstShip.tsx`
+- Modify: `src/app/App.tsx`, `src/main.tsx`, `public/icon.svg` (and re-run `scripts/make-icons.mjs` to regenerate the three PNGs), `vite.config.ts` (manifest `theme_color` and `background_color` both `'#0B2545'`)
 - Test: `e2e/helpers.ts`, `e2e/shell.spec.ts`
 
 **Interfaces:**
@@ -970,14 +1008,66 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
     - Header: `<h1>Masterpiece</h1>`, the ship name, and a clock element `data-testid="ship-clock"` with the text `HH:mm LT (UTC±hh:mm)`.
     - Theme button: `aria-label` is `Theme: Day`, `Theme: Night` or `Theme: High contrast`. It cycles day → night → contrast and sets `<html data-theme>` to `day`, `night` or `contrast`.
     - Main nav links: `Home`, `Ship`, `Profiles`, `Settings`. Ship sub-nav: `Particulars`, `Crew`, `Certificates`, `Voyage`, `Ship's time`.
-    - First ship screen: heading `Create your first ship`, label `Ship name`, select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`), button `Create ship`, and link `Import a backup instead` → `#/settings/import`.
+    - **Logo (user-chosen: logo v2, "M on the sea at sunrise")** in `LogoMark.tsx` (`{ size: number; mode: 'day' | 'night' }`). It is inline SVG with viewBox `0 0 100 100`, clipped to a rounded tile `rect width=100 height=100 rx=22`. Copy the geometry exactly from the mockup artboard "Logo v2" (https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x):
+      - **Sky (sunrise, user decision):** `rect height=62`, linear gradient top→bottom `#FFD23F` → `#FFE9A8` (0.35) → `#D6EAFF` (0.7) → `#9CCBFF`, plus a radial glow (cx 0.5, cy 0.2, r 0.5, `#FFF7D1` → `#FFE27A` at 0.85 opacity → transparent).
+      - **Sun:** `circle cx=50 cy=20 r=7.5 fill=#FFF4C2`.
+      - **Far sea:** `rect y=60 height=40 fill=#2E6DB4`.
+      - **Horizon:** `path d="M0 60 H100"`, white at 0.85 opacity, width 0.8.
+      - **M:** `path d="M24 77 L24 32 L50 57 L76 32 L76 77"`, no fill, stroke `#0B2545`, width 10, round joins and caps. Underneath it, a white halo of the same path at width 15, 0.9 opacity.
+      - **Front waves:** `path d="M0 78 Q12.5 72 25 78 T50 78 T75 78 T100 78 V100 H0 Z" fill=#0B2545`, with a crest line of the same curve in `#7AB8FF`, width 2.5.
+      - **Small sizes (≤ 64 px):** omit the glow, the horizon line, the halo and the small wave accents, and thicken the M to width 12–13.
+      - **Night:** sky `#0B1622` → `#1E3550`, moon `circle cx=50 cy=20 r=6 fill=#E6EDF5 opacity=.85`, far sea `#12243A`, horizon `#5FD4CE`, M `#E6EDF5` (no halo), front waves `#0E1B2B`, crest `#5FD4CE`.
+      - Use unique gradient and clip ids per instance (for example via a counter), because several logos can be on one page.
+      - `role="img"`, `aria-label="Masterpiece logo"`.
+      - **Header brand:** the 24 px small-size version before "Masterpiece".
+      - `public/icon.svg` is the Day tile. The maskable icon adds 20% padding of `#0B2545`. Regenerate the PNGs from it.
+    - **Welcome screen (FirstShip.tsx, shown when no ships exist)**, matching the mockup "Welcome page — Day/Night":
+      - A top band (Day: navy `#0B2545`; Night: page background) with a 120 px logo tile and `<h1>Masterpiece</h1>`.
+      - The tagline, exactly: `Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.`
+      - Primary button `Create your first ship`, 56 px high. It reveals the form:
+        - heading `Create your first ship`;
+        - label `Ship name`;
+        - select `Ship's time (UTC offset)` (default `deviceOffsetMinutes()`);
+        - button `Create ship`.
+      - Secondary link `Import a backup` → `#/settings/import`, 56 px high, styled as an outline button.
+      - The helper text, exactly: `New phone or taking over from your relief? Import their backup or handover file.`
+      - The footer note with a padlock icon, exactly: `Your data stays on this device. No account needed.`
     - Update banner: `New version available — Update`, where **Update** is a button that calls `applyUpdate()`.
-  - **Night theme:** every colour token is pure red on black, with green and blue channels both 0. Background `#000000`, text `#cc0000`, muted `#7a0000`, borders `#4d0000`.
-  - **High contrast:** black on white, `font-weight: 600`, minimum touch target 48 px.
+    - **"What's new" (user decision):**
+      - A repo-root file `release.json` holds `{ "version": "<semver>", "whatsNew": "<one short sentence>" }`, and its `version` must equal `package.json`'s.
+      - A small Vite plugin in `vite.config.ts` writes it to `dist/version.json`. JSON is not in the Workbox `globPatterns`, so the file is never precached.
+      - When `onUpdateAvailable` fires, `src/app/releaseInfo.ts` runs `fetchReleaseInfo(): Promise<{ version: string; whatsNew: string } | null>`. It does `fetch('./version.json', { cache: 'no-store' })` and returns null on any failure or malformed JSON.
+      - `updateBannerText(info: { version: string; whatsNew: string } | null): string` gives `Version <version> — <whatsNew>` when info is present, and otherwise `New version available`. The **Update** button follows the text.
+      - Unit tests: `updateBannerText` both ways, and `fetchReleaseInfo` with a stubbed fetch for ok, 404, network error and malformed JSON.
+      - For this task, `release.json` starts as `{ "version": "0.1.0", "whatsNew": "First version of Masterpiece." }`. Set `package.json` to `0.1.0` too.
+    - **Update checks:** besides the check on app start, `swUpdate.ts` calls the service worker registration's `update()` every 60 minutes while `navigator.onLine`, and once on each `online` event. Use the `onRegisteredSW(swUrl, registration)` callback of `registerSW`; when offline, skip the check. The spec decision is to let a phone app that stays open for days still find updates. Unit-test the scheduling with fake timers and a stub registration: it calls `update` after 60 min when online, does not call it when offline, and calls it immediately on `online`.
+  - **Visual style "Bridge Console"** (user-chosen; spec §4.9). Reference mockups are at https://claude.ai/artifact/7aEGBDGRCemA7uUWVE638x: artboards "Day mode — Home" and "A · Bridge Console — Night mode".
+    - **Fonts:** IBM Plex Sans 400/500/600 (body) and IBM Plex Mono 500 (clock and rank codes), bundled with `@fontsource/ibm-plex-sans@^5.3.0` and `@fontsource/ibm-plex-mono@^5.3.0`. These are imported in `main.tsx`, so they are precached. No Google Fonts link.
+    - **Shared shapes and layout (all themes):**
+      - Cards and rows use radius 10–12 px; badges are pills.
+      - Header: brand line, ship name, clock (Plex Mono), theme button 44×44.
+      - Bottom nav bar: Home / Ship / Profiles / Settings, each with an inline stroke icon; the active one uses `--nav-active`.
+      - Ship sub-nav: a horizontal chip row, the active chip filled `--accent`.
+    - Every theme defines the same CSS variables on `:root[data-theme="…"]`:
+      - `--bg`, `--surface`, `--line`, `--text`, `--muted`
+      - `--bar-bg`, `--bar-text`, `--bar-muted` (header and bottom bar), `--nav-active`
+      - `--accent`, `--on-accent`, `--amber`, `--on-amber`, `--red`, `--on-red`
+  - **Day theme (white with blue):**
+    - Page and cards: `--bg #FFFFFF`, `--surface #F3F6FA`, `--line #D5DEE8`, `--text #0B1622`, `--muted #4A6380`.
+    - Navy header and bottom bar: `--bar-bg #0B2545`, `--bar-text #FFFFFF`, `--bar-muted #B8C7D9`, `--nav-active #7AB8FF`.
+    - Blue buttons: `--accent #1D5FD1`, `--on-accent #FFFFFF`.
+    - Badges: `--amber #F2B33D` (`--on-amber #241703`), `--red #C81E1E` (`--on-red #FFFFFF`).
+  - **Night theme (dark navy, the Bridge Console mockup):**
+    - Page and cards: `--bg #0B1622`, `--surface #12243A`, `--line #1E3550`, `--text #E6EDF5`, `--muted #9FB3C8`.
+    - Bars: `--bar-bg #0E1B2B`, `--bar-text #E6EDF5`, `--bar-muted #9FB3C8`, `--nav-active #5FD4CE`.
+    - Accent: `--accent #5FD4CE`, `--on-accent #04211F`.
+    - Badges: `--amber #F2B33D` (`--on-amber #241703`), `--red #FF6B5E` (`--on-red #1A0503`).
+    - No red night palette (user decision).
+  - **High contrast:** black on white, bars black with white text, `font-weight: 600`, minimum touch target 48 px.
   - **Print:** `@media print` forces background `#ffffff` and text `#000000` and hides nav, header buttons and banners, whatever the theme.
   - **e2e helpers** in `e2e/helpers.ts`:
     - `freshApp(page, opts?: { time?: string })`: installs `page.clock` at `opts.time ?? '2026-10-25T09:00:00Z'`, then goes to `./`.
-    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00')`: fills the first ship form.
+    - `setupShip(page, name = 'MV OCEAN STAR', offset = 'UTC+03:00', opts?: { skipLock?: boolean })`: clicks `Create your first ship` on the welcome screen, then fills the form and clicks `Create ship`. With `skipLock` (default `true`), it clicks `Skip for now` if the Task 21 protect step appears. Before Task 21 exists, that step never appears.
     - `expectNoHorizontalScroll(page)`: sets a 360×740 viewport and asserts `document.documentElement.scrollWidth <= 360`.
 
 - [ ] **Step 1: Write the failing e2e tests** in `e2e/shell.spec.ts`:
@@ -985,8 +1075,12 @@ expect(shouldRelock(undefined, t0, 5)).toBe(false);
 ```ts
 test('first ship and header clock', async ({ page }) => {
   await freshApp(page);
-  await expect(page.getByRole('heading', { name: 'Create your first ship' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Import a backup instead' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Masterpiece' })).toBeVisible();
+  await expect(page.getByText("Your ship's office in your pocket. Crew, certificates and paperwork — fully offline.")).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Masterpiece logo' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Import a backup' })).toHaveAttribute('href', '#/settings/import');
+  await expect(page.getByText('Your data stays on this device. No account needed.')).toBeVisible();
+  await expectNoHorizontalScroll(page);
   await setupShip(page);
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   await expect(page.getByTestId('ship-clock')).toHaveText('12:00 LT (UTC+03:00)');
@@ -997,8 +1091,8 @@ test('theme cycles, persists, and prints black on white', async ({ page }) => {
   await page.getByRole('button', { name: 'Theme: Day' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   const [bg, fg] = await page.evaluate(() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.body).color]);
-  expect(bg).toBe('rgb(0, 0, 0)');
-  expect(fg).toMatch(/^rgb\(\d+, 0, 0\)$/);
+  expect(bg).toBe('rgb(11, 22, 34)');      // night: dark navy #0B1622
+  expect(fg).toBe('rgb(230, 237, 245)');   // #E6EDF5
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
   await page.emulateMedia({ media: 'print' });
@@ -1367,7 +1461,7 @@ test('full backup round trip on a wiped device', async ({ page }) => {
   expect((await dl).suggestedFilename()).toMatch(/^masterpiece-full-mv-ocean-star-2026-10-25-\d{4}\.mpbak$/);
   await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('masterpiece'); q.onsuccess = q.onerror = q.onblocked = r; }));
   await page.reload();
-  await page.getByRole('link', { name: 'Import a backup instead' }).click();
+  await page.getByRole('link', { name: 'Import a backup' }).click();
   await page.getByLabel('Backup file').setInputFiles(file);
   await page.getByLabel('Password').fill('wrong-password'); await page.getByRole('button', { name: 'Open' }).click();
   await expect(page.getByRole('alert')).toHaveText('Wrong password, or the file is damaged. Nothing was changed.');
@@ -1392,7 +1486,10 @@ test('snapshot restore', async ({ page }) => {
 Spell out the commented steps as Playwright calls, using the labels above. Each device is a separate `browser.newContext()` with `freshApp`.
 
 - [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/backup.spec.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement the screens and dialog.** Export calls `shareOrDownload`. In Playwright (desktop) `canShare` is false, so the download path runs.
+- [ ] **Step 3: Implement the screens and dialog.** Export calls `exportBackup`, then `shareOrDownload`.
+  - Only when that resolves `'shared'` or `'downloaded'` does it call `recordFullBackup(db, exportedAt)`, so the backup reminder only resets once a file really left the app.
+  - On `'cancelled'` it shows `Export cancelled — no backup was made.`
+  - The handover `Ship` select lists only live ships. In Playwright (desktop) `canShare` is false, so the download path runs.
 - [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: settings, encrypted export/import with review, snapshot restore"`
 
@@ -1454,62 +1551,412 @@ The alert details use ISO dates in the domain layer. Home displays them in the s
 
 ---
 
-### Task 21: PIN lock UI
+### Task 21: App lock UI (fingerprint on phones, 4-digit passcode everywhere)
 
 **Files:**
-- Create: `src/ui/screens/PinLock.tsx`, `src/ui/components/PinSettings.tsx`
-- Modify: `src/app/App.tsx` (lock gate), `src/ui/screens/Settings.tsx` (adds the `App PIN lock` section)
-- Test: `e2e/pin.spec.ts`
+- Create: `src/ui/screens/LockScreen.tsx`, `src/ui/components/AppLockSettings.tsx`, `src/ui/screens/ProtectApp.tsx`
+- Modify: `src/app/App.tsx` (lock gate and first-start protect step), `src/ui/screens/Settings.tsx` (adds the `App lock` section)
+- Test: `e2e/lock.spec.ts`
 
 **Interfaces:**
-- Consumes: Task 12 (`isValidPin`, `hashPin`, `verifyPin`, `registerFailure`, `registerSuccess`, `lockRemainingMs`, `shouldRelock`), Task 9 (`updateSettings`), Task 13 (`useAppState`).
+- Consumes: Task 12 (`isValidPin`, `hashPin`, `verifyPin`, `registerFailure`, `registerSuccess`, `lockRemainingMs`, `shouldRelock`, `isFingerprintAvailable`, `registerFingerprint`, `unlockWithFingerprint`), Task 9 (`updateSettings`), Task 13 (`useAppState`, welcome flow).
+- **User decisions:**
+  - **Phones** unlock with the fingerprint first, with the 4-digit passcode as the fallback.
+  - **Laptops** use the 4-digit passcode only.
+  - The lock is offered right after the first ship is created, and stays on until it is turned off in Settings.
 - Produces:
-  - **Settings section** `App PIN lock`:
-    - Button `Set PIN` (or `Change PIN` / `Remove PIN` when one is set).
-    - Fields `New PIN`, `Repeat PIN` and `Lock after (minutes in background)` (default 5), and button `Save PIN`.
-    - The exact texts `The PIN stops casual access. It does not encrypt the data on this device — your phone's screen lock and encryption are the real protection.` and `If you forget the PIN, the only way back in is to erase all data on this device and restore a backup.`
-    - Invalid PIN: `Use 4 to 8 digits.`
-  - **Lock screen:** heading `Enter PIN`, input `PIN` (`inputmode="numeric"`), button `Unlock`.
-    - Wrong PIN → `Wrong PIN.`
-    - Locked out → `Too many attempts. Try again in <n> s.` (the countdown updates every second).
-    - Button `Forgot PIN?` opens a confirm dialog with the button `Erase everything`. It deletes the Dexie database, then `location.reload()`.
+  - **First-start protect step (`ProtectApp.tsx`).** It is shown once, after the first ship is created on the welcome screen, and again whenever no lock has been set up and `settings.lockPrompted` is not true.
+    - Heading `Protect Masterpiece`.
+    - Text `Set a 4-digit passcode to open the app.` On phones with a fingerprint sensor it adds ` You can also unlock with your fingerprint.`
+    - Fields `New passcode` and `Repeat passcode`.
+    - On a phone with a fingerprint sensor (`isFingerprintAvailable()`), the checkbox `Also unlock with fingerprint`, ticked by default.
+    - Buttons `Turn on app lock` and `Skip for now`.
+    - Either button sets `settings.lockPrompted = true`, so the step is not shown again.
+    - Turning the lock on with the fingerprint box ticked calls `registerFingerprint()`. If that fails, the passcode is still saved and the message `Fingerprint couldn't be set up. You can try again in Settings.` is shown.
+  - **Settings section `App lock`:**
+    - When off: button `Turn on app lock` (the same fields as the protect step).
+    - When on: `Change passcode`, the toggle `Unlock with fingerprint` (shown only when `isFingerprintAvailable()`), `Lock after (minutes in background)` (default 5) and `Turn off app lock`.
+    - Exact texts:
+      - `The lock stops casual access. It does not encrypt the data on this device — your phone's screen lock and encryption are the real protection.`
+      - `If you can't unlock (forgotten passcode and no fingerprint), the only way back in is to erase all data on this device and restore a backup.`
+    - Invalid passcode: `Use exactly 4 digits.` Mismatch: `The passcodes don't match.`
+  - **Lock screen (`LockScreen.tsx`):**
+    - The 64 px logo, heading `Masterpiece is locked`, and the active ship name.
+    - **With a fingerprint enrolled** (phone): on mount it calls `unlockWithFingerprint()` straight away, showing the button `Unlock with fingerprint` (to retry) and the link-button `Use passcode`. If the fingerprint returns false it switches to the passcode view with the text `Fingerprint not recognised — enter your passcode.`
+    - **Passcode view:** input `Passcode` (`inputmode="numeric"`, `maxlength="4"`, `autocomplete="off"`). It submits automatically at the 4th digit; there is also a button `Unlock`.
+      - Wrong passcode → `Wrong passcode.`
+      - Locked out → `Too many attempts. Try again in <n> s.` (the countdown updates every second). Fingerprint failures do not count towards the lockout.
+    - Button `Forgot passcode?` opens a confirm dialog with the button `Erase everything`. It deletes the Dexie database, then calls `location.reload()`.
   - **Gate:**
-    - The lock shows on app start when a PIN is set.
+    - The lock shows on app start when a passcode is set.
     - On `visibilitychange` to hidden, record `hiddenAt` in memory. On visible, lock if `shouldRelock` is true.
     - The lockout state is persisted in `settings.pin.lockout`, so a reload does not reset it.
+    - `Settings` gains `lockPrompted?: boolean`.
 
 - [ ] **Step 1: Write the failing e2e tests.**
 
 ```ts
-test('PIN lock, lockout, unlock, relock, forgot', async ({ page }) => {
-  await freshApp(page); await setupShip(page); await page.goto('./#/settings');
-  await page.getByRole('button', { name: 'Set PIN' }).click();
-  await page.getByLabel('New PIN').fill('123'); await expect(page.getByRole('alert')).toHaveText('Use 4 to 8 digits.');
-  await page.getByLabel('New PIN').fill('2580'); await page.getByLabel('Repeat PIN').fill('2580');
-  await page.getByRole('button', { name: 'Save PIN' }).click();
-  await page.reload(); await expect(page.getByRole('heading', { name: 'Enter PIN' })).toBeVisible();
-  for (let i = 0; i < 5; i++) { await page.getByLabel('PIN').fill('0000'); await page.getByRole('button', { name: 'Unlock' }).click(); }
+test('protect step and passcode lock (laptop: no fingerprint offered)', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toBeVisible();
+  await expect(page.getByLabel('Also unlock with fingerprint')).toHaveCount(0);
+  await page.getByLabel('New passcode').fill('123'); await page.getByLabel('Repeat passcode').fill('123');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Use exactly 4 digits.');
+  await page.getByLabel('New passcode').fill('2580'); await page.getByLabel('Repeat passcode').fill('2580');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await page.reload(); await expect(page.getByRole('heading', { name: 'Masterpiece is locked' })).toBeVisible();
+  for (let i = 0; i < 5; i++) await page.getByLabel('Passcode').fill('0000');   // auto-submits at 4 digits
   await expect(page.getByText(/Too many attempts\. Try again in \d+ s\./)).toBeVisible();
   await page.clock.fastForward(31_000);
-  await page.getByLabel('PIN').fill('2580'); await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByLabel('Passcode').fill('2580');
   await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
   const setVis = (v: string) => page.evaluate(v => { Object.defineProperty(document, 'visibilityState', { value: v, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); }, v);
   await setVis('hidden'); await page.clock.fastForward('06:00'); await setVis('visible');
-  await expect(page.getByRole('heading', { name: 'Enter PIN' })).toBeVisible();
-  await page.getByRole('button', { name: 'Forgot PIN?' }).click();
+  await expect(page.getByRole('heading', { name: 'Masterpiece is locked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Forgot passcode?' }).click();
   await page.getByRole('button', { name: 'Erase everything' }).click();
-  await expect(page.getByRole('heading', { name: 'Create your first ship' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+});
+
+test('phone: fingerprint first, passcode as fallback', async ({ page }, info) => {
+  test.skip(info.project.name !== 'android');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByLabel('Also unlock with fingerprint')).toBeChecked();
+  await page.getByLabel('New passcode').fill('2580'); await page.getByLabel('Repeat passcode').fill('2580');
+  await page.getByRole('button', { name: 'Turn on app lock' }).click();
+  await page.reload();                                                      // fingerprint prompt runs on open and succeeds
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+  await cdp.send('WebAuthn.setUserVerified', { authenticatorId, isUserVerified: false });
+  await page.reload();
+  await expect(page.getByText('Fingerprint not recognised — enter your passcode.')).toBeVisible();
+  await page.getByLabel('Passcode').fill('2580');
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+});
+
+test('skip for now does not ask again', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.getByRole('button', { name: 'Skip for now' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Protect Masterpiece' })).toHaveCount(0);
+  await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
 });
 ```
 
-- [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/pin.spec.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement the lock screen, PIN settings and gate.**
-- [ ] **Step 4: Run them and confirm they pass.** Same command. Expected: PASS.
-- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: optional app PIN lock"`
+Task 13's `setupShip` helper must leave the protect step visible; it doesn't dismiss it. Earlier e2e specs that use `setupShip` click `Skip for now`, through the helper's new option `setupShip(page, name, offset, { skipLock = true })`. The default skips, so Tasks 13–20 need no change; this test passes `{ skipLock: false }`.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx playwright test e2e/lock.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement the protect step, the lock screen, the settings section and the gate.** Update the `setupShip` helper as above.
+- [ ] **Step 4: Run them and confirm they pass,** together with the earlier e2e specs. Run: `npx playwright test`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: app lock with fingerprint and 4-digit passcode"`
 
 ---
 
-### Task 22: GitHub Pages deploy, README and full verification
+### Task 22: Contracts and relief planning
+
+**Files:**
+- Create: `src/domain/contracts.ts`, `src/ui/screens/Reliefs.tsx`
+- Modify: `src/domain/types.ts`, `src/domain/validation.ts`, `src/domain/fieldDictionary.ts`, `src/domain/alerts.ts`, `src/ui/screens/CrewEdit.tsx`, `src/ui/screens/Particulars.tsx`, `src/app/router.ts`, `src/ui/components/Nav.tsx`, `src/ui/screens/Home.tsx`
+- Test: `src/domain/contracts.test.ts`, plus additions to `src/domain/validation.test.ts`, `src/domain/fieldDictionary.test.ts`, `src/domain/alerts.test.ts`; `e2e/reliefs.spec.ts`
+
+**Interfaces:**
+- Consumes: Task 2 (`addMonths`, `addDays`, `Band`), Task 4 (`onboardAt`, `fullName`), Task 15 `BandBadge`, Task 20 `collectAlerts`.
+- Produces in `types.ts`:
+  - `CrewMember` gains `contractMonths?: number; reliefPlannedDate?: string; reliefPlannedPort?: string`.
+  - `ShipProfile` gains `maxMonthsOnboard?: number`.
+- Produces in `contracts.ts`:
+  - `DEFAULT_MAX_MONTHS_ONBOARD = 11`.
+  - `contractEndDate(m): string | undefined`: `addMonths(signOnDate, contractMonths)` when `contractMonths > 0`.
+  - `daysOnboard(m, asAt: string): number`:
+    - 0 if `asAt < signOnDate`;
+    - otherwise the end date is the earlier of `asAt` and `signOffDate`, and the result is (end − sign-on) in days + 1.
+  - `contractBand(m, ref): Band`: `'none'` without an end date; red if end < ref; amber if end ≤ ref + 30 days; otherwise ok.
+  - `onboardLimitDate(m, maxMonths): string` = `addMonths(signOnDate, maxMonths)`.
+  - `onboardLimitBand(m, ref, maxMonths = 11): Band`: red if ref ≥ limit; amber if ref ≥ limit − 30 days; otherwise ok.
+- Validation (`validateCrewMember`):
+  - `contractMonths`, if set, must be an integer 1–24. Message: `Enter whole months between 1 and 24.`
+  - `reliefPlannedDate`, if set, must be a valid date.
+- Field dictionary: `crew.byRank.<rank>.contractEndDate` and `crew.byRank.<rank>.daysOnboard` (as at the reference date).
+- `collectAlerts` input gains `maxMonthsOnboard: number`. New alert kinds:
+  - `'contract'`: amber `Contract ends <date>`, red `Contract ended <date> — relief overdue`.
+  - `'onboardLimit'`: amber `Reaches <n>-month onboard limit <date>`, red `Over <n>-month onboard limit since <date>`.
+  - Both have `href` `#/ship/reliefs` and cover onboard crew only.
+- **UI:**
+  - CrewEdit adds `Contract length (months)`, `Planned relief date` and `Planned relief port`.
+  - Particulars adds section heading `Crew policy` with field `Maximum months onboard` (blank means 11). Error: `Enter a number from 1 to 11.`
+  - New route `#/ship/reliefs`, with ship sub-nav link `Reliefs`. It lists onboard crew (as at ship's today), sorted by contract end ascending, with no-contract crew last.
+  - Each row shows rank, full name, `Onboard <n> days`, then `Contract ends <date>` or `No contract length`, then `Relief <date> <port>` when planned.
+  - Badges: contract `Relief due soon` / `Relief overdue`; limit `Near onboard limit` / `Onboard limit reached` (rendered with `data-band`).
+  - Home shows the new alerts.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+const m = crew({ signOnDate: '2026-06-01', contractMonths: 6 });
+expect(contractEndDate(m)).toBe('2026-12-01');
+expect(contractEndDate({ ...m, contractMonths: undefined })).toBeUndefined();
+expect(daysOnboard(m, '2026-06-01')).toBe(1);
+expect(daysOnboard(m, '2026-10-25')).toBe(147);
+expect(daysOnboard({ ...m, signOffDate: '2026-07-01' }, '2026-10-25')).toBe(31);
+expect(daysOnboard(m, '2026-05-01')).toBe(0);
+expect(contractBand(m, '2026-11-01')).toBe('amber');   // end = ref + 30
+expect(contractBand(m, '2026-10-31')).toBe('ok');
+expect(contractBand(m, '2026-12-01')).toBe('amber');   // ends today
+expect(contractBand(m, '2026-12-02')).toBe('red');
+const j = crew({ signOnDate: '2026-01-01' });          // limit 2026-12-01 at 11 months
+expect(onboardLimitBand(j, '2026-12-01', 11)).toBe('red');
+expect(onboardLimitBand(j, '2026-11-01', 11)).toBe('amber');
+expect(onboardLimitBand(j, '2026-10-31', 11)).toBe('ok');
+expect(onboardLimitBand(j, '2026-10-01', 9)).toBe('red');  // limit 2026-10-01
+expect(validateCrewMember({ ...draft, contractMonths: 25 }, '2026-10-25')[0]).toMatchObject({ field: 'contractMonths', message: 'Enter whole months between 1 and 24.' });
+expect(resolveField('crew.byRank.master.contractEndDate', ctxWithContract)).toBe('2026-12-01');
+expect(resolveField('crew.byRank.master.daysOnboard', ctxWithContract, { asAt: '2026-10-25' })).toBe(147);
+const al = collectAlerts({ today: '2026-11-15', maxMonthsOnboard: 11, certificates: [], crew: [m] });
+expect(al).toContainEqual(expect.objectContaining({ kind: 'contract', band: 'amber', detail: 'Contract ends 2026-12-01', href: '#/ship/reliefs' }));
+```
+
+```ts
+// e2e/reliefs.spec.ts — clock 2026-10-25T09:00:00Z
+test('reliefs view shows overdue relief and onboard limit', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  // add crew PETROVIĆ Ivan, Master, sign-on 2025-11-20, Contract length (months) 9, Planned relief date 2026-11-05, port Santos
+  await page.goto('./#/ship/reliefs');
+  const row = page.getByRole('listitem').filter({ hasText: 'Ivan PETROVIĆ' });
+  await expect(row).toContainText('Contract ends 2026-08-20');
+  await expect(row.getByText('Relief overdue')).toBeVisible();
+  await expect(row.getByText('Onboard limit reached')).toBeVisible();  // 2025-11-20 + 11 months = 2026-10-20
+  await expect(row).toContainText('Relief 2026-11-05 Santos');
+  await page.goto('./#/ship/particulars'); await page.getByLabel('Maximum months onboard').fill('12');
+  await expect(page.getByRole('alert')).toHaveText('Enter a number from 1 to 11.');
+  await expectNoHorizontalScroll(page);
+});
+```
+
+Spell out the commented step as real Playwright calls, using the Task 15 labels plus the new ones.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/domain && npx playwright test e2e/reliefs.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the domain module, the type and validation additions, the dictionary and alert additions, and the UI.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test e2e/reliefs.spec.ts e2e/crew.spec.ts e2e/home.spec.ts && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: contracts, days onboard and relief planning"`
+
+---
+
+### Task 23: Crew certificate register
+
+**Files:**
+- Create: `src/domain/crewDocs.ts`, `src/ui/screens/CrewDocumentEdit.tsx`, `src/ui/screens/Expiring.tsx`
+- Modify:
+  - Domain: `src/domain/types.ts`, `src/domain/catalogues.ts`, `src/domain/fieldDictionary.ts`, `src/domain/alerts.ts`
+  - Database and backup: `src/db/schema.ts`, `src/db/records.ts`, `src/backup/envelope.ts`
+  - Screens: `src/ui/screens/CrewEdit.tsx`, `src/ui/screens/Crew.tsx`
+  - Shell: `src/app/router.ts`, `src/ui/components/Nav.tsx`
+- Test: `src/domain/crewDocs.test.ts`, `src/db/migrationV2.test.ts`, plus additions to `src/backup/envelope.test.ts` and `src/domain/fieldDictionary.test.ts`; `e2e/crewDocs.spec.ts`
+
+**Interfaces:**
+- Consumes: Task 2 (`expiryBand`, `crewDocBand`, `worstBand`), Task 4 (`onboardAt`, `fullName`, `rejoinDraft`), Task 9 (`createRecord`, `softDelete`, `listForShip`), Task 10 (`snapshotInUpgrade`), Task 15 (`BandBadge`, the Re-join and Delete flows), Task 18 (active voyage).
+- Produces in `types.ts`:
+  - `type CrewDocType = 'coc' | 'endorsement' | 'gmdss' | 'medical' | 'yellowFever' | 'bst' | 'aff' | 'pscrb' | 'frb' | 'mfa' | 'medicalCare' | 'securityAwareness' | 'dsd' | 'sso' | 'ecdis' | 'brm' | 'erm' | 'highVoltage' | 'usVisa' | 'schengenVisa' | 'other'`.
+  - `interface CrewDocument extends BaseRecord { shipId: string; crewId: string; type: CrewDocType; typeOther?: string; grade: string; number: string; issuedBy: string; issueDate: string; expiryDate?: string; remarks: string }`.
+  - `TableName` adds `'crewDocuments'`, which is appended to `TABLE_NAMES` (the generic merge, backup and snapshot code picks it up).
+- Produces in `catalogues.ts`: `CREW_DOC_TYPES: readonly { key: CrewDocType; label: string; group: string; graded: boolean }[]` in spec §4.14 order. Labels:
+  - Competency: `Certificate of Competency (CoC)`, `Flag endorsement`, `GMDSS certificate`
+  - Health: `Medical fitness certificate`, `Yellow fever certificate`
+  - STCW courses: `Basic safety training`, `Advanced fire fighting`, `Survival craft and rescue boats`, `Fast rescue boats`, `Medical first aid`, `Medical care`, `Security awareness`, `Designated security duties`, `Ship security officer`, `ECDIS`, `Bridge resource management`, `Engine-room resource management`, `High voltage`
+  - Visas: `US C1/D visa`, `Schengen visa`
+  - `Other`
+  - `graded` is true for coc, endorsement and gmdss.
+- Produces in `crewDocs.ts`:
+  - `docLabel(d): string`.
+  - `docBand(d, ref): Band`: `expiryBand(d.expiryDate, ref, { days: 90 })`.
+  - `crewMemberBand(m: CrewMember, docs: CrewDocument[], ref): Band`: the worst of `crewDocBand(m, ref)` and the `docBand` of each non-deleted doc with `crewId === m.id`.
+  - `carryOverDocuments(docs, fromCrewId, signOnDate): Omit<CrewDocument, keyof BaseRecord | 'crewId'>[]`: non-deleted docs of `fromCrewId` with no expiry or `expiryDate ≥ signOnDate`.
+  - `interface ExpiringItem { crewId: string; name: string; rank: string; what: string; expiryDate: string; band: Band }`.
+  - `expiringBefore(input: { crew: CrewMember[]; docs: CrewDocument[]; today: string; until: string }): ExpiringItem[]`:
+    - Covers crew onboard at `today`: passport (`what: 'Passport'`), seaman's book (`"Seaman's book"`) and each doc (`docLabel`).
+    - Includes items with `expiryDate ≤ until`, sorted by expiry date ascending, then name.
+- **Database:** `MasterpieceDB` adds `version(2).stores({ crewDocuments: 'id, shipId, crewId' }).upgrade(tx => snapshotInUpgrade(tx))`. Every version-1 table stays the same.
+- **Backup compatibility:**
+  - `openBackup` requires the five original tables. Tables added later (`crewDocuments`) default to `[]` when absent.
+  - The envelope version stays 1.
+- **Cascades:**
+  - Crew delete (Task 15) also soft-deletes the member's documents.
+  - Re-join (Task 15) creates `carryOverDocuments` copies with the new `crewId`.
+  - `deleteShip` covers `crewDocuments` by `shipId`.
+- **Field dictionary:** `crew.byRank.<rank>.doc.<type>.<field>`, where field is number, grade, issuedBy, issueDate or expiryDate. It reads that crew member's latest non-deleted doc of that type, by `issueDate`, then `createdAt`.
+- **Alerts:** onboard crew's docs. Title is the full name. Detail is `<label> expires <date>` (amber) or `<label> expired <date>` (red). `href` is `#/ship/crew/<crewId>`.
+- **UI:**
+  - CrewEdit (existing member) gains section heading `Documents`: rows show label, number, expiry and BandBadge (`kind: 'crew'`), plus button `Add document`.
+  - The document edit route is `#/ship/crew/:id/documents/new` or `…/documents/:docId`. Labels:
+    - `Document` (select, grouped);
+    - `Document name` (Other only);
+    - `Grade / capacity` (graded types only);
+    - `Number`, `Issued by`, `Issue date`, `Expiry date`, `Remarks`;
+    - buttons `Save` and `Delete`.
+    - Validation: expiry before issue gives `Expiry date can't be before the issue date.`
+  - The crew list badge uses `crewMemberBand`.
+  - New route `#/ship/expiring`, with sub-nav link `Expiring`:
+    - heading `Expiring before next port`;
+    - with an active voyage that has an ETA: text `Next port <port>, ETA <date>`, and `until` = the ETA date;
+    - otherwise: text `No next port ETA set — showing the next 90 days.`, and `until` = today + 90;
+    - rows: rank, name, what, expiry and badge.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+// crewDocs.test.ts — ref '2026-10-25'
+const med = doc({ crewId: 'c1', type: 'medical', expiryDate: '2027-01-01' });
+const bst = doc({ crewId: 'c1', type: 'bst' });                       // no expiry
+const visa = doc({ crewId: 'c1', type: 'usVisa', expiryDate: '2026-09-01' });
+const gone = doc({ crewId: 'c1', type: 'ecdis', deleted: true });
+expect(carryOverDocuments([med, bst, visa, gone], 'c1', '2026-10-20').map(d => d.type)).toEqual(['medical', 'bst']);
+expect(docBand(doc({ expiryDate: '2027-01-23' }), '2026-10-25')).toBe('amber'); // +90 inclusive
+expect(docBand(doc({ expiryDate: '2027-01-24' }), '2026-10-25')).toBe('ok');
+expect(crewMemberBand(crew({ id: 'c1', passportExpiry: '2030-01-01', seamansBookExpiry: '2030-01-01' }), [med], '2026-10-25')).toBe('amber');
+expect(crewMemberBand(crew({ id: 'c1', passportExpiry: '2030-01-01', seamansBookExpiry: '2030-01-01' }), [visa], '2026-10-25')).toBe('red');
+const items = expiringBefore({ today: '2026-10-25', until: '2027-01-10',
+  crew: [crew({ id: 'c1', givenNames: 'Ivan', surname: 'PETROVIĆ', passportExpiry: '2026-12-01', seamansBookExpiry: '2030-01-01', signOnDate: '2026-06-01' })],
+  docs: [med, bst, doc({ crewId: 'c1', type: 'coc', expiryDate: '2026-11-15' })] });
+expect(items.map(i => [i.what, i.expiryDate])).toEqual([['Certificate of Competency (CoC)', '2026-11-15'], ['Passport', '2026-12-01'], ['Medical fitness certificate', '2027-01-01']]);
+// envelope.test.ts — a version-1 payload without crewDocuments still opens
+const old = await sealBackup(H, { tables: { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] } } as never, 'pw-12345678', { iterations: 1000 });
+expect((await openBackup(old, 'pw-12345678')).payload.tables.crewDocuments).toEqual([]);
+// migrationV2.test.ts — open a v1-only DB, write a ship, close; open MasterpieceDB (v2) on the same name
+expect((await listSnapshots(v2))[0]).toMatchObject({ reason: 'before-update' });
+expect((await listSnapshots(v2))[0].counts.ships).toBe(1);
+await createRecord<CrewDocument>(v2, 'crewDocuments', { shipId, crewId: 'c1', type: 'medical', grade: '', number: 'M-1', issuedBy: '', issueDate: '2025-01-01', expiryDate: '2027-01-01', remarks: '' });
+expect(await listForShip(v2, 'crewDocuments', shipId)).toHaveLength(1);
+// fieldDictionary.test.ts
+expect(resolveField('crew.byRank.master.doc.coc.number', ctxWithDocs)).toBe('CoC-123');
+```
+
+`migrationV2.test.ts` builds the v1 database with a local test-only Dexie subclass that declares only the version-1 stores.
+
+```ts
+// e2e/crewDocs.spec.ts — clock 2026-10-25T09:00:00Z
+test('documents: warning, expiring before next port, carry-over on re-join', async ({ page }) => {
+  // set up a ship, add crew PETROVIĆ Ivan (Master, sign-on 2026-06-01, passport and SB expiry 2030-01-01)
+  // on his edit screen: Add document → Document 'Medical fitness certificate', Number 'M-1', Expiry date 2026-12-24 → Save
+  // crew list row shows 'Expires soon'
+  // Voyage: Next port 'Rotterdam', ETA (local) 2027-01-05T08:00 → Save
+  // #/ship/expiring shows 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
+  // Sign off 2026-10-26 Santos; set As at 2026-10-26; Re-join sign-on 2026-11-01 Rotterdam → the new contract's Documents section lists 'Medical fitness certificate'
+  // expectNoHorizontalScroll on the Expiring screen
+});
+```
+
+Spell out the commented steps as Playwright calls with the labels above.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src && npx playwright test e2e/crewDocs.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the types, catalogue, domain module, database v2, envelope compatibility, cascades, dictionary, alerts and UI.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test && npm run typecheck`. Expected: PASS. The full e2e suite is needed because the database version changed.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: crew certificate register with expiry warnings"`
+
+---
+
+### Task 24: Crew list print and Excel export
+
+**Files:**
+- Create: `src/domain/crewList.ts`, `src/ui/screens/CrewListPrint.tsx`
+- Modify: `src/domain/types.ts`, `src/domain/dates.ts`, `src/backup/share.ts`, `src/backup/fileName.ts`, `src/ui/screens/Crew.tsx`, `src/app/router.ts`, `src/ui/print.css`
+- Test: `src/domain/crewList.test.ts`, plus an addition to `src/domain/dates.test.ts`; `e2e/crewListPrint.spec.ts`
+
+**Interfaces:**
+- Consumes:
+  - Task 4: `onboardAt`, `fullName`.
+  - Task 2: `rankLabel`.
+  - Task 22: `contractEndDate`.
+  - Task 23: the CrewDocument with type `coc`, latest by `issueDate`.
+  - Task 11: `shareOrDownload`, `backupFileName`'s slug rule.
+  - Task 5: `readSpreadsheet`, which is used in tests.
+- Produces:
+  - `ShipProfile` gains `crewListColumns?: CrewListColumn[]`.
+  - `formatDisplayDate(iso: string): string` in `dates.ts`: `'1985-01-05'` → `'05-JAN-1985'`, and `''` → `''`.
+  - `slugify(s: string): string`, exported from `fileName.ts` and reused by `backupFileName`.
+  - `shareOrDownload(fileName: string, data: string | Blob)`, widened from `text: string`.
+  - `type CrewListColumn = 'no' | 'surname' | 'givenNames' | 'rank' | 'nationality' | 'dateOfBirth' | 'placeOfBirth' | 'passportNo' | 'passportExpiry' | 'seamansBookNo' | 'seamansBookExpiry' | 'signOnDate' | 'signOnPort' | 'cocNumber' | 'contractEnd'`.
+  - `CREW_LIST_COLUMNS: readonly { key: CrewListColumn; label: string; byDefault: boolean }[]`, in the type's order, with labels `No.`, `Surname`, `Given names`, `Rank`, `Nationality`, `Date of birth`, `Place of birth`, `Passport no.`, `Passport expiry`, `Seaman's book no.`, `Seaman's book expiry`, `Sign-on date`, `Sign-on port`, `CoC no.`, `Contract end`. `byDefault` is true for the first 9 and for signOnDate and signOnPort.
+  - `buildCrewList(input: { crew: CrewMember[]; docs: CrewDocument[]; columns: CrewListColumn[]; asAt: string; filter: 'onboard' | 'all' }): { headers: string[]; rows: string[][] }`:
+    - Rows come in `onboardAt` order (for `all`, the same sort applied to every non-deleted record).
+    - Columns follow `CREW_LIST_COLUMNS` order whatever order `columns` lists them in.
+    - `No.` is 1…n; dates use `formatDisplayDate`; rank uses `rankLabel`.
+  - `crewListWorkbook(input: { ship: ShipProfile; port: string; date: string; table: { headers: string[]; rows: string[][] } }): ArrayBuffer`. One sheet named `Crew list`, with these rows:
+    1. `['CREW LIST']`
+    2. `['Vessel', name, 'IMO', imo]`
+    3. `['Call sign', callSign, 'Flag', flag]`
+    4. `['Port', port, 'Date', formatDisplayDate(date)]`
+    5. `[]`
+    6. headers, then the table rows
+  - `crewListFileName(shipName: string, date: string): string` = `` `crew-list-${slugify(shipName)}-${date}.xlsx` ``.
+- **UI:**
+  - The crew list gets buttons `Print crew list` and `Export to Excel`. Both open `#/ship/crew/print` carrying the current As at and filter.
+  - The print screen has an options panel (`class="no-print"`):
+    - `Port` (default: active voyage next port) and `Date` (default: As at);
+    - one checkbox per column, using the column label. Changes save to `ship.crewListColumns`;
+    - buttons `Print` (`window.print()`) and `Export to Excel` (`shareOrDownload`).
+  - The sheet (`data-testid="crew-list-sheet"`) contains:
+    - heading `CREW LIST`;
+    - lines `Vessel <name>   IMO <imo>   Call sign <cs>   Flag <flag>` and `Port <port>   Date <DD-MMM-YYYY>`;
+    - the table;
+    - `Master: <master full name or blank>` with a signature line;
+    - a box labelled `Ship's stamp`;
+    - footer `Printed with Masterpiece`.
+  - A4 landscape applies on this screen only, through a named `@page`. Print media hides `.no-print`, the header and the nav.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+expect(formatDisplayDate('1985-01-05')).toBe('05-JAN-1985');
+expect(formatDisplayDate('')).toBe('');
+const def = CREW_LIST_COLUMNS.filter(c => c.byDefault).map(c => c.key);
+const t = buildCrewList({ crew: [ab, master, offSigned], docs: [cocDoc], columns: def, asAt: '2026-10-25', filter: 'onboard' });
+expect(t.headers).toEqual(['No.', 'Surname', 'Given names', 'Rank', 'Nationality', 'Date of birth', 'Place of birth', 'Passport no.', 'Passport expiry', 'Sign-on date', 'Sign-on port']);
+expect(t.rows.map(r => r[3])).toEqual(['Master', 'AB']);             // rank order, signed-off excluded
+expect(t.rows[0]).toEqual(['1', 'PETROVIĆ', 'Ivan', 'Master', 'Serbian', '05-JAN-1985', 'Kotor', '012345678', '01-MAR-2030', '01-JUN-2026', 'Rotterdam']);
+expect(buildCrewList({ crew: [ab, master, offSigned], docs: [cocDoc], columns: ['cocNumber', 'surname'], asAt: '2026-10-25', filter: 'all' }).headers).toEqual(['Surname', 'CoC no.']);
+expect(buildCrewList({ crew: [master], docs: [cocDoc], columns: ['surname', 'cocNumber'], asAt: '2026-10-25', filter: 'all' }).rows[0]).toEqual(['PETROVIĆ', 'CoC-123']);
+const wb = crewListWorkbook({ ship, port: 'Rotterdam', date: '2026-10-25', table: t });
+const [sheet] = await readSpreadsheet('x.xlsx', wb);
+expect(sheet.name).toBe('Crew list');
+expect(sheet.rows[0][0]).toBe('CREW LIST');
+expect(sheet.rows[3]).toEqual(['Port', 'Rotterdam', 'Date', '25-OCT-2026']);
+expect(sheet.rows[5]).toEqual(t.headers);
+expect(crewListFileName('M/V Ocean Star', '2026-10-25')).toBe('crew-list-m-v-ocean-star-2026-10-25.xlsx');
+```
+
+```ts
+// e2e/crewListPrint.spec.ts — clock 2026-10-25T09:00:00Z
+test('print crew list and export to Excel', async ({ page }) => {
+  // ship MV OCEAN STAR (IMO 9074729 via Particulars), crew PETROVIĆ Ivan Master + one AB; Voyage next port Rotterdam
+  await page.goto('./#/ship/crew'); await page.getByRole('button', { name: 'Print crew list' }).click();
+  const sheet = page.getByTestId('crew-list-sheet');
+  await expect(sheet.getByRole('heading', { name: 'CREW LIST' })).toBeVisible();
+  await expect(sheet).toContainText('MV OCEAN STAR'); await expect(sheet).toContainText('Port Rotterdam');
+  await expect(sheet.getByRole('row')).toHaveCount(3);                 // header + 2 crew
+  await page.getByLabel('Place of birth').uncheck();
+  await expect(sheet.getByRole('columnheader', { name: 'Place of birth' })).toHaveCount(0);
+  await page.reload(); await expect(page.getByLabel('Place of birth')).not.toBeChecked();
+  const dl = page.waitForEvent('download'); await page.getByRole('button', { name: 'Export to Excel' }).click();
+  expect((await dl).suggestedFilename()).toBe('crew-list-mv-ocean-star-2026-10-25.xlsx');
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.getByRole('button', { name: 'Print' })).toBeHidden();
+  await expect(sheet).toBeVisible();
+});
+```
+
+Spell out the commented setup with the earlier tasks' labels.
+
+- [ ] **Step 2: Run them and confirm they fail.** Run: `npx vitest run src/domain && npx playwright test e2e/crewListPrint.spec.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement** the domain module, the widened share function, the screen and the print CSS.
+- [ ] **Step 4: Run them and confirm they pass.** Run: `npm test && npx playwright test e2e/crewListPrint.spec.ts e2e/backup.spec.ts && npm run typecheck`. Expected: PASS.
+- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: printable crew list and Excel export"`
+
+---
+
+### Task 25: GitHub Pages deploy, README and full verification
 
 **Files:**
 - Create: `.github/workflows/deploy.yml`, `README.md`
@@ -1521,6 +1968,11 @@ test('PIN lock, lockout, unlock, relock, forgot', async ({ page }) => {
     - Permissions: `contents: read`, `pages: write`, `id-token: write`.
     - Job `build`: `actions/checkout@v4`, `actions/setup-node@v4` (node 22, npm cache), `npm ci`, `npm test`, `npm run build`, `actions/upload-pages-artifact@v3` (path `dist`).
     - Job `deploy` (needs build): `actions/deploy-pages@v4`, environment `github-pages`.
+  - **Release steps** (README section `Releasing a new version`):
+    1. Bump `version` in `package.json` and `release.json`.
+    2. Write the one-sentence `whatsNew`.
+    3. Merge to `main` only after the owner approves the plain-language summary.
+    4. To roll back: revert the merge commit on `main`.
   - **README** sections:
     - What Masterpiece is (2 lines).
     - Install on Android: Chrome → ⋮ → *Install app*.

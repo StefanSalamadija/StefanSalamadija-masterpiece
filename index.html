@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Puts the last theme on <html> before the page is first painted, so night mode never starts with a white frame.
+      // localStorage only mirrors the setting (see src/ui/theme.ts); the app corrects it from IndexedDB when it starts.
+      try {
+        var theme = localStorage.getItem('mp-theme');
+        if (theme === 'day' || theme === 'night' || theme === 'contrast') document.documentElement.dataset.theme = theme;
+      } catch (e) {}
+    </script>
+    <meta name="theme-color" content="#0B2545" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <title>Masterpiece</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

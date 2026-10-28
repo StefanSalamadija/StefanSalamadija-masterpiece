@@ -1,0 +1,59 @@
+import type { Ref } from 'preact';
+import { useId } from 'preact/hooks';
+import type { FieldError } from '../../domain/types';
+
+export interface FieldProps {
+  label: string;
+  value: string;
+  onInput: (value: string) => void;
+  type?: 'text' | 'number' | 'date' | 'datetime-local' | 'password';
+  /** The on-screen keyboard to offer. Numbers are typed as text with `decimal` or `numeric`, then read with `parseDecimal`. */
+  inputMode?: 'decimal' | 'numeric';
+  /** An error is announced (`role="alert"`) and marks the input invalid; a warning is only shown. */
+  error?: FieldError;
+  /** For moving focus to the input, such as after a failed submit. A multi-line field takes none. */
+  inputRef?: Ref<HTMLInputElement>;
+  /** Several lines of free text, such as remarks, instead of one line. */
+  multiline?: boolean;
+  /** A line of help under the input, above any message; it is read with the label. */
+  hint?: string;
+  /** The most characters the input takes (the browser stops typing there). */
+  maxLength?: number;
+  /** The input keeps the focus but takes no typing, such as while a passcode is being checked. */
+  readOnly?: boolean;
+  /** What the browser may fill in: off unless said. A password a person makes up is `new-password`, one they give again `current-password`. */
+  autoComplete?: 'new-password' | 'current-password';
+}
+
+/** A labelled input (or a text box, when `multiline`) with its hint and validation message underneath. */
+export function Field({ label, value, onInput, type = 'text', inputMode, error, inputRef, multiline, hint, autoComplete, maxLength, readOnly }: FieldProps) {
+  const id = useId();
+  const messageId = `${id}-message`;
+  const hintId = `${id}-hint`;
+  const isError = error?.severity === 'error';
+  const describedBy = [hint !== undefined && hintId, error && messageId].filter(Boolean).join(' ') || undefined;
+  return (
+    <div class="field">
+      <label for={id}>{label}</label>
+      {multiline ? (
+        <textarea
+          id={id} rows={3} value={value}
+          aria-invalid={isError ? 'true' : undefined} aria-describedby={describedBy}
+          onInput={(event) => onInput(event.currentTarget.value)}
+        />
+      ) : (
+        <input
+          // Preact types `<input>` as a union keyed by `type`; all the types here take the same attributes.
+          id={id} ref={inputRef} type={type as 'text'} inputMode={inputMode} maxLength={maxLength} readOnly={readOnly} value={value} autocomplete={autoComplete ?? 'off'}
+          step={type === 'number' ? 'any' : undefined}
+          aria-invalid={isError ? 'true' : undefined} aria-describedby={describedBy}
+          onInput={(event) => onInput(event.currentTarget.value)}
+        />
+      )}
+      {hint !== undefined && <p id={hintId} class="helper-text">{hint}</p>}
+      {error && (isError
+        ? <p id={messageId} class="field-error" role="alert">{error.message}</p>
+        : <p id={messageId} class="field-warning warning">{error.message}</p>)}
+    </div>
+  );
+}

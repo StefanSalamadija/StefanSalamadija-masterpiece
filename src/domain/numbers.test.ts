@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import { looksLikeThousands, parseDecimal, parseNumberOrNaN } from './numbers';
+
+describe('parseDecimal', () => {
+  it('reads a plain number, with a dot or a comma as the decimal separator', () => {
+    expect(parseDecimal('229')).toBe(229);
+    expect(parseDecimal('229.5')).toBe(229.5);
+    expect(parseDecimal('229,5')).toBe(229.5);
+    expect(parseDecimal('0.25')).toBe(0.25);
+    expect(parseDecimal('007')).toBe(7);
+  });
+
+  it('ignores whitespace around the number', () => {
+    expect(parseDecimal(' 32 ')).toBe(32);
+    expect(parseDecimal('\t32500.5\n')).toBe(32500.5);
+  });
+
+  it('has no value for an empty entry', () => {
+    expect(parseDecimal('')).toBeUndefined();
+    expect(parseDecimal('   ')).toBeUndefined();
+  });
+
+  it('rejects anything that is not digits with at most one separator', () => {
+    for (const text of ['2e', '2e3', '1e-5', 'abc', '12 5', '1,000.5', '1.000,5', '1.2.3', '1,2,3', '1.,5', '--5', '+5', '5%', '٣']) {
+      expect(parseDecimal(text), text).toBe('invalid');
+    }
+  });
+
+  it('needs digits on both sides of the separator, so a bare .5 or 5. is rejected', () => {
+    expect(parseDecimal('.5')).toBe('invalid');
+    expect(parseDecimal(',5')).toBe('invalid');
+    expect(parseDecimal('5.')).toBe('invalid');
+    expect(parseDecimal('5,')).toBe('invalid');
+    expect(parseDecimal('.')).toBe('invalid');
+  });
+
+  it('reads a single comma as the decimal separator, so 1,000 is one', () => {
+    expect(parseDecimal('1,000')).toBe(1);
+  });
+
+  it('rejects a sign unless the caller allows a minus', () => {
+    expect(parseDecimal('-5')).toBe('invalid');
+    expect(parseDecimal('-5.5')).toBe('invalid');
+    expect(parseDecimal('-5', { signed: true })).toBe(-5);
+    expect(parseDecimal('-5,5', { signed: true })).toBe(-5.5);
+    expect(parseDecimal(' -0.5 ', { signed: true })).toBe(-0.5);
+    expect(parseDecimal('5', { signed: true })).toBe(5);
+    expect(parseDecimal('', { signed: true })).toBeUndefined();
+  });
+
+  it('still rejects a lone minus, a plus, a minus after the digits and a space after the minus when signed', () => {
+    for (const text of ['-', '+5', '5-', '- 5', '--5', '-.5', '-5.']) {
+      expect(parseDecimal(text, { signed: true }), text).toBe('invalid');
+    }
+  });
+
+  it('rejects a number too large to be a number', () => {
+    expect(parseDecimal('9'.repeat(400))).toBe('invalid');
+  });
+
+  it('reads three decimals by default: 1,025 is a density of 1.025, not a thousand', () => {
+    expect(parseDecimal('1,025')).toBe(1.025);
+    expect(parseDecimal('12.345')).toBe(12.345);
+    expect(parseDecimal('32.500')).toBe(32.5);
+  });
+
+  describe('with rejectThousandsLike', () => {
+    const strict = { rejectThousandsLike: true };
+
+    it('refuses 1 to 3 digits, one separator and exactly 3 digits, which is probably a thousands separator', () => {
+      for (const text of ['32,500', '32.500', '1,000', '1.025', '999,999', ' 32,500 ']) {
+        expect(parseDecimal(text, strict), text).toBe('invalid');
+      }
+    });
+
+    it('still reads everything else', () => {
+      expect(parseDecimal('0.125', strict)).toBe(0.125);
+      expect(parseDecimal('32500', strict)).toBe(32500);
+      expect(parseDecimal('32500.5', strict)).toBe(32500.5);
+      expect(parseDecimal('229,5', strict)).toBe(229.5);
+      expect(parseDecimal('32,50', strict)).toBe(32.5);
+      expect(parseDecimal('1234.567', strict)).toBe(1234.567);
+      expect(parseDecimal('32,5000', strict)).toBe(32.5);
+      expect(parseDecimal('', strict)).toBeUndefined();
+    });
+
+    it('also refuses it after a minus when signed', () => {
+      expect(parseDecimal('-32,500', { ...strict, signed: true })).toBe('invalid');
+      expect(parseDecimal('-32,5', { ...strict, signed: true })).toBe(-32.5);
+    });
+  });
+});
+
+describe('looksLikeThousands', () => {
+  it('says whether an entry has the shape of a whole number written with a thousands separator', () => {
+    for (const text of ['32,500', '32.500', ' 1,000 ', '-32,500']) expect(looksLikeThousands(text), text).toBe(true);
+    for (const text of ['', '0.125', '32500', '229,5', '1234.567', '32,5000', '2e', '1,000.5']) expect(looksLikeThousands(text), text).toBe(false);
+  });
+});
+
+describe('parseNumberOrNaN', () => {
+  it('reads a number as parseDecimal does, and an empty entry as no value', () => {
+    expect(parseNumberOrNaN('9')).toBe(9);
+    expect(parseNumberOrNaN(' 6,5 ')).toBe(6.5);
+    expect(parseNumberOrNaN('')).toBeUndefined();
+    expect(parseNumberOrNaN('   ')).toBeUndefined();
+  });
+  it('makes an entry that is not a number NaN, for the range check of the field to refuse', () => {
+    for (const text of ['abc', '1e1', '1,000.5', '-3', '5.']) expect(parseNumberOrNaN(text), text).toBeNaN();
+    expect(parseNumberOrNaN('-3', { signed: true })).toBe(-3);
+  });
+});

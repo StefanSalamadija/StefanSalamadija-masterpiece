@@ -1,0 +1,115 @@
+/*
+ * Printing is always black on white, whatever the theme. This file is loaded after theme.css, so these rules win.
+ *
+ * Only the printed crew list sets a page of its own (A4 landscape): every other screen prints on the browser's default page.
+ */
+
+/* The page of the crew list sheet, which `page: crew-list` below puts the sheet on. */
+@page crew-list {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+@media print {
+  :root,
+  :root[data-theme] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --line: #000000;
+    --text: #000000;
+    --muted: #000000;
+    --bar-bg: #ffffff;
+    --bar-text: #000000;
+    --bar-muted: #000000;
+    --nav-active: #000000;
+    --accent: #000000;
+    --on-accent: #ffffff;
+    --amber: #ffffff;
+    --on-amber: #000000;
+    --red: #ffffff;
+    --on-red: #000000;
+    --bar-border: #000000;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .app-header {
+    position: static;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /*
+   * The crew list prints as the sheet alone: not the header, and no minimum height or padding around it that would push its
+   * last lines onto a page of their own. (The navigation bars, the update banner and the error toast are .no-print.) The
+   * screen puts `printing-crew-list` on <html> while it is open, which is a class and not `:has()`, because a browser that
+   * does not know `:has()` drops the whole rule and prints the header on a page of its own, before and after the sheet.
+   */
+  :root.printing-crew-list .shell {
+    min-height: 0;
+  }
+
+  :root.printing-crew-list .app-header {
+    display: none;
+  }
+
+  /* The sheet has the whole width of the page, and not the 960 px that the screens are limited to. */
+  :root.printing-crew-list .page {
+    max-width: none;
+    padding: 0;
+  }
+
+  .crew-list-sheet {
+    page: crew-list;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    font-size: 10pt;
+  }
+
+  .sheet-title {
+    font-size: 16pt;
+  }
+
+  .sheet-table-wrap {
+    overflow: visible;
+  }
+
+  .sheet-table {
+    font-size: 9pt;
+  }
+
+  .sheet-table th,
+  .sheet-table td {
+    padding: 3px 5px;
+    border-color: #000000;
+    white-space: normal;
+  }
+
+  .sheet-table th {
+    background: none;
+  }
+
+  /* More than 11 columns: a date or a number never wraps, so the type is made smaller for the 15 of them to fit the page. */
+  .sheet-table-dense {
+    font-size: 7.5pt;
+  }
+
+  .sheet-table-dense th,
+  .sheet-table-dense td {
+    padding: 3px;
+  }
+
+  .sheet-table tr,
+  .sheet-sign {
+    break-inside: avoid;
+  }
+}
