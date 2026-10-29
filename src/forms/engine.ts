@@ -122,22 +122,28 @@ function parsed(pkg: Package, part: string): Document {
   }
 }
 
-/** Whether a part is XML: by its name (`.xml`, `.rels`), or by the content type `[Content_Types].xml` gives it. */
-function xmlPartTest(pkg: Package): (part: string) => boolean {
+/**
+ * The content type `[Content_Types].xml` gives a part (its Override, else the Default for its extension), or
+ * `undefined` when it gives none.
+ */
+function contentTypes(pkg: Package): (part: string) => string | undefined {
   const types = new Map<string, string>();
   if (pkg.entries.has('[Content_Types].xml')) {
     const doc = parsed(pkg, '[Content_Types].xml');
     for (const el of Array.from(doc.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Default'))) types.set(`ext:${(el.getAttribute('Extension') ?? '').toLowerCase()}`, el.getAttribute('ContentType') ?? '');
-    for (const el of Array.from(doc.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Override'))) types.set((el.getAttribute('PartName') ?? '').replace(/^\//, ''), el.getAttribute('ContentType') ?? '');
+    for (const el of Array.from(doc.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Override'))) types.set((el.getAttribute('PartName') ?? '').replace(/^\//, '').toLowerCase(), el.getAttribute('ContentType') ?? '');
   }
   return (part) => {
-    if (/\.(?:xml|rels)$/i.test(part)) return true;
-    const type = types.get(part) ?? types.get(`ext:${part.slice(part.lastIndexOf('.') + 1).toLowerCase()}`) ?? '';
-    return /[+/]xml$/i.test(type.trim());
+    const dot = part.lastIndexOf('.');
+    return types.get(part.toLowerCase()) ?? (dot < 0 ? undefined : types.get(`ext:${part.slice(dot + 1).toLowerCase()}`));
   };
 }
 
-/** The parts: every part not written is the template's to the byte; nothing is lost; nothing is added unwritten; every written XML part parses. */
+/**
+ * The parts: every part not written is the template's to the byte; nothing is lost; nothing is added unwritten, and
+ * every added part has a content type (Word and Excel refuse a package with a part that has none); every written XML
+ * part parses. A written part is XML by its name (`.xml`, `.rels`) or its content type (`...+xml`, `.../xml`).
+ */
 function checkParts(original: Package, output: Package, changed: Set<string>): void {
   for (const part of original.entries.keys()) {
     const out = output.entries.get(part);
@@ -147,11 +153,13 @@ function checkParts(original: Package, output: Package, changed: Set<string>): v
   for (const part of output.entries.keys()) {
     if (!original.entries.has(part) && !changed.has(part)) throw new IntegrityError(`The part ${part} is in the output, and nothing wrote it.`);
   }
-  const isXml = xmlPartTest(output);
+  const typeOf = contentTypes(output);
   for (const part of changed) {
     const bytes = output.entries.get(part);
     if (bytes === undefined) throw new IntegrityError(`The written part ${part} is missing from the output.`);
-    if (isXml(part)) parsed(output, part);
+    const type = typeOf(part);
+    if (!original.entries.has(part) && part !== '[Content_Types].xml' && !type) throw new IntegrityError(`The added part ${part} has no content type.`);
+    if (/\.(?:xml|rels)$/i.test(part) || /[+/]xml$/i.test((type ?? '').trim())) parsed(output, part);
   }
 }
 
@@ -168,14 +176,15 @@ type Expect = (field: FieldDef, value: string | boolean) => FormValue;
 
 /**
  * Whether one field or column read back right:
- * - a left-empty field, or one the draft leaves blank, is not written, so it reads as the template has it (a control
- *   that already held text, a ticked default), or as blank;
+ * - a left-empty field, or one the draft leaves blank, is not written, so it reads exactly as the template has it (a
+ *   control that already held text, a ticked default). In a row the writer cloned (`clone`), which has no template
+ *   row of its own, it reads blank: `null`, `''`, or an unticked checkbox (the writer clears a clone's columns);
  * - a filled picture, by presence: it shows a picture that the writer added to the file. A control that showed a
  *   picture in the template reads as filled without being written, so reading as filled is not enough;
  * - any other filled value reads back as `expect` gives it (both sides `''` as `null`).
  */
-function readsRight(field: FieldDef, value: FormValue | undefined, back: FormValue | undefined, template: FormValue | undefined, expect: Expect, changed: Set<string>, output: Package): boolean {
-  if (field.leftEmpty || isBlank(value)) return back === template || back === null || back === '';
+function readsRight(field: FieldDef, value: FormValue | undefined, back: FormValue | undefined, template: FormValue | undefined, clone: boolean, expect: Expect, changed: Set<string>, output: Package): boolean {
+  if (field.leftEmpty || isBlank(value)) return clone ? back === null || back === '' || (field.kind === 'checkbox' && back === false) : back === template;
   if (field.kind === 'picture') return typeof back === 'string' && changed.has(back) && output.entries.has(back);
   const want = expect(field, value!);
   return (back === '' ? null : back) === (want === '' ? null : want);
@@ -184,12 +193,13 @@ function readsRight(field: FieldDef, value: FormValue | undefined, back: FormVal
 /**
  * Checks a made file before it is handed over, and throws `IntegrityError` when anything is wrong:
  * - every part of `original` that is not in `changed` is in `output` with the very same bytes;
- * - no part of `original` is missing, every part in `changed` is in `output`, and `output` has no part that is in
- *   neither;
+ * - no part of `original` is missing, every part in `changed` is in `output`, `output` has no part that is in
+ *   neither, and every part the writer added has a content type;
  * - every part in `changed` that is XML parses (`parseXml`, so a `<!DOCTYPE` fails too). A changed binary part, a new
  *   photo, is not parsed;
  * - every value reads back from `output` through the stored schema (R1), as `readsRight` says: the Word reader with the
- *   rows the writer cloned (`extraRowsOf`), the Excel reader as it is. Every row the output has is checked, rows the
+ *   rows the writer cloned (`extraRowsOf`), the Excel reader as it is. The Word reader reads a content control as
+ *   it shows, and as `null` where its stored state disagrees with what it shows (see `word/read.ts`). Every row the output has is checked, rows the
  *   draft does not fill included; a filled value in a row the output does not have fails.
  *
  * Nothing else escapes it: whatever stops the check is an `IntegrityError` too.
@@ -216,8 +226,8 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
   const back = word ? readWordValues(output, schema, extraRowsOf(schema, values)) : readExcelValues(output, schema);
   const template = word ? readWordValues(original, schema) : readExcelValues(original, schema);
   const expect: Expect = word ? (_field, value) => wordValue(value) : canonicalExcelValue;
-  const check = (field: FieldDef, value: FormValue | undefined, read: FormValue | undefined, before: FormValue | undefined, where: string) => {
-    if (!readsRight(field, value, read, before, expect, changed, output)) throw new IntegrityError(`${where} does not read back as written.`);
+  const check = (field: FieldDef, value: FormValue | undefined, read: FormValue | undefined, before: FormValue | undefined, where: string, clone = false) => {
+    if (!readsRight(field, value, read, before, clone, expect, changed, output)) throw new IntegrityError(`${where} does not read back as written.`);
   };
 
   for (const field of schema.fields) check(field, values.fields[field.id], back.fields[field.id], template.fields[field.id], `The field ${field.id} (${field.label})`);
@@ -234,9 +244,9 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
         if (group.columns.some((column) => !column.leftEmpty && !isBlank(draft[column.id]))) throw new IntegrityError(`Row ${i + 1} of ${group.id} (${group.label}) is missing from the output.`);
         continue;
       }
-      // A row the writer cloned is a copy of the template's last row.
-      const was = before?.[Math.min(i, before.length - 1)];
-      for (const column of group.columns) check(column, draft[column.id], row[column.id], was?.[column.id], `The column ${column.id} (${column.label}) in row ${i + 1}`);
+      // Rows past the template's own are the writer's clones.
+      const was = before?.[i];
+      for (const column of group.columns) check(column, draft[column.id], row[column.id], was?.[column.id], `The column ${column.id} (${column.label}) in row ${i + 1}`, was === undefined);
     }
   }
 }

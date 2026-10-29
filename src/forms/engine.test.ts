@@ -12,9 +12,12 @@ import { contentControlsDocx, oddLayoutsDocx, permitDocx, toolboxTalkDocx, weekl
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
 import { readWordValues } from './word/read';
 import { extraRowsOf } from './word/write';
+import { parseXml, serializeXml } from './xml';
 
 const INTEGRITY_MESSAGE = 'The file couldn\'t be made correctly, so it wasn\'t shared. Nothing was lost — your draft is still here.';
 const DATE = '2026-10-28';
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
 const PHOTO = 'photo-1';
 
 /** A tiny JPEG: start of image, a baseline frame header (4 x 3) and end of image. The writer never decodes it. */
@@ -362,3 +365,115 @@ describe('verifyOutput', () => {
   });
 });
 
+
+/** Changes the output's `word/document.xml` through the DOM, as a damaged write might have left it. */
+function corrupt(made: { output: Package }, change: (doc: Document) => void): void {
+  const doc = parseXml(partText(made.output, 'word/document.xml')!);
+  change(doc);
+  made.output.entries.set('word/document.xml', bytesOf(serializeXml(doc)));
+}
+
+/** The content control with this alias. */
+function control(doc: Document, alias: string): Element {
+  const found = Array.from(doc.getElementsByTagNameNS(W, 'sdt')).find((sdt) => Array.from(sdt.getElementsByTagNameNS(W, 'alias')).some((a) => a.getAttributeNS(W, 'val') === alias));
+  if (!found) throw new Error(`no control ${alias}`);
+  return found;
+}
+const only = (el: Element, ns: string, name: string): Element => el.getElementsByTagNameNS(ns, name)[0]!;
+
+/** Puts `text` as the only text a control shows. */
+function show(sdt: Element, text: string): void {
+  const ts = Array.from(sdt.getElementsByTagNameNS(W, 't'));
+  ts.forEach((t, i) => {
+    while (t.firstChild) t.removeChild(t.firstChild);
+    if (i === 0 && text !== '') t.appendChild(t.ownerDocument.createTextNode(text));
+  });
+}
+
+describe('verifyOutput: a content control must show what it holds', () => {
+  const byLabel = (s: FormSchema, label: string): string => s.fields.find((f) => f.label === label)!.id;
+  const controlsInput = (fill: (s: FormSchema) => DraftValues['fields']) => inputOf(fixture('content controls'), (s) => ({ fields: fill(s), rows: {} }));
+  const written = (s: FormSchema): DraftValues['fields'] => ({
+    [byLabel(s, 'Name')]: 'New name', [byLabel(s, 'Date')]: '2026-10-28', [byLabel(s, 'Option')]: 'Second',
+    [byLabel(s, 'Entry')]: 'Typed', [byLabel(s, 'Confirmed')]: true, [byLabel(s, 'Notes')]: 'Some notes',
+  });
+
+  it('passes the controls as the writer leaves them', () => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    expect(partText(made.output, 'word/document.xml')).toContain('28/Oct/2026');
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it.each<[string, string, (doc: Document) => void]>([
+    ['a date control showing another date than it stores', 'Date', (doc) => show(control(doc, 'Date'), '13/Jan/1999')],
+    ['a date control storing another date than it shows', 'Date', (doc) => only(control(doc, 'Date'), W, 'date').setAttributeNS(W, 'w:fullDate', '1999-01-13T00:00:00Z')],
+    ['a ticked checkbox showing an empty box', 'Confirmed', (doc) => show(control(doc, 'Confirmed'), '☐')],
+    ['a checkbox glyph in another font than its state names', 'Confirmed', (doc) => only(control(doc, 'Confirmed'), W, 'rFonts').setAttributeNS(W, 'w:ascii', 'Arial')],
+    ['a drop-down whose stored item is not the one it shows', 'Option', (doc) => only(control(doc, 'Option'), W, 'dropDownList').setAttributeNS(W, 'w:lastValue', '3')],
+    ['a control bound to custom XML, which Word shows instead of its text', 'Name', (doc) => {
+      const binding = doc.createElementNS(W, 'w:dataBinding');
+      binding.setAttributeNS(W, 'w:xpath', '/root/name');
+      binding.setAttributeNS(W, 'w:storeItemID', '{00000000-0000-0000-0000-000000000001}');
+      only(control(doc, 'Name'), W, 'sdtPr').appendChild(binding);
+    }],
+  ])('refuses %s', (_name, label, change) => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    corrupt(made, change);
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain(`(${label})`);
+  });
+
+  it('refuses a prefilled control that a blank draft left, but the output shows wiped', () => {
+    // Another field is written, so the part is one the writer changed and only the values can tell.
+    const input = controlsInput((s) => ({ [byLabel(s, 'Name')]: null, [byLabel(s, 'Notes')]: 'Some notes' }));
+    const made = assembled(input);
+    expect(made.changed.has('word/document.xml')).toBe(true);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    corrupt(made, (doc) => show(control(doc, 'Name'), ''));
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('(Name)');
+  });
+
+  it('refuses a written checkbox whose stored state was flipped, glyph included', () => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    corrupt(made, (doc) => {
+      const box = control(doc, 'Confirmed');
+      only(box, W14, 'checked').setAttributeNS(W14, 'w14:val', '0');
+      show(box, '☐');
+    });
+    expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values));
+  });
+});
+
+describe('verifyOutput: more', () => {
+  it('refuses a part the writer added that has no content type', () => {
+    const input = inputOf(fixture('weekly jobs (template)'));
+    const made = assembled(input);
+    made.output.entries.set('word/media/extra.bin', Uint8Array.from([1, 2, 3]));
+    made.changed.add('word/media/extra.bin');
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('word/media/extra.bin');
+  });
+
+  it('refuses an Excel output in which a filled value reads back differently', () => {
+    const input = inputOf(fixture('inventory'));
+    const made = assembled(input);
+    const field = input.schema.fields.find((f) => !f.leftEmpty && f.kind === 'text')!;
+    const other: DraftValues = { ...input.values, fields: { ...input.values.fields, [field.id]: 'Another vessel' } };
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, other)).reason).toContain(field.id);
+    const group = input.schema.rowGroups[0]!;
+    const rows = input.values.rows[group.id]!.map((row, i) => (i === 50 ? { ...row, [group.columns[0]!.id]: 'Something else' } : row));
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, { ...input.values, rows: { [group.id]: rows } })).reason)
+      .toContain(group.columns[0]!.id);
+  });
+
+  it('lets a cloned row read blank where the draft is blank', () => {
+    const input = inputOf(fixture('toolbox'));
+    const group = input.schema.rowGroups[0]!;
+    // Row 13 is a clone (the table holds 12). Blank in the draft, it reads null.
+    const rows = input.values.rows[group.id]!.map((row, i) => (i === 12 ? Object.fromEntries(group.columns.map((c) => [c.id, null])) : row));
+    const blanked = assembled({ ...input, values: { ...input.values, rows: { [group.id]: rows } } });
+    expect(readWordValues(blanked.output, input.schema, { [group.id]: 2 }).rows[group.id]![12]![group.columns[0]!.id]).toBeNull();
+    expect(() => verifyOutput(blanked.original, blanked.output, blanked.changed, input.schema, { ...input.values, rows: { [group.id]: rows } })).not.toThrow();
+  });
+});

@@ -12,10 +12,10 @@ import { A, MC, R, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
 /*
  * Reading the values of a filled Word form back (spec §8, the integrity check), through the stored addresses (R1):
  * nothing is detected again. Values come back in their canonical form (R2), the form the writer was given:
- * - a `date` field reads as ISO `YYYY-MM-DD`. A content-control date reads its `w:fullDate`, which the writer sets. A
- *   legacy FORMTEXT or a table cell is read with `parseDate` and the field's `formatHint`, which only accepts the very
- *   text `formatDate` writes with that hint, so the date read is the date written. Text that is not a date in that
- *   format is given back as it is (a value that was not ISO was written as it was given);
+ * - a `date` field reads as ISO `YYYY-MM-DD`. A legacy FORMTEXT or a table cell is read with `parseDate` and the
+ *   field's `formatHint`, which only accepts the very text `formatDate` writes with that hint, so the date read is the
+ *   date written. Text that is not a date in that format is given back as it is (a value that was not ISO was written
+ *   as it was given). A content-control date: see below;
  * - a checkbox (legacy or `w14:checkbox`) reads as a boolean: what the file shows, ticked or not;
  * - a choice reads as the option text (a FORMDROPDOWN's chosen entry, a tick column's ticked option, a list
  *   control's text), or `null` when nothing is chosen;
@@ -23,6 +23,19 @@ import { A, MC, R, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
  *
  * A field that shows nothing a person gave reads as `null`: an empty FORMTEXT (no text, or only the en spaces Word
  * puts in an empty one), a content control showing its prompt, an empty cell.
+ *
+ * A content control is read as Word shows it, and its stored state must agree with what it shows (the integrity check
+ * relies on this: a file prints what it shows). Where they disagree, the control reads as `null`, a value nobody gave,
+ * so a written value no longer reads back:
+ * - a date control shows text in its format: the same chain the writer uses (R13: its own `w:dateFormat` when
+ *   `formatDate` can render it, else the field's `formatHint`, else the display date). With a `w:fullDate`, the text
+ *   must be that date in that format; without one, the text is read as a FORMTEXT date is;
+ * - a `w14:checkbox` must show the glyph of its `w14:checked` state (`w14:checkedState` or `w14:uncheckedState`, else
+ *   U+2612 or U+2610), and, when that state names a font, every font its run sets must be that one (a symbol font such
+ *   as Wingdings shows another glyph in another font);
+ * - a drop-down list or combo box whose `w:lastValue` names one of its items must show that item's text;
+ * - a control bound to custom XML (`w:dataBinding`) shows that data when the file is opened, not its own text, so
+ *   none of its text can be trusted. The writer removes the binding from every control it writes.
  *
  * A picture field reads as the path of the media part its picture control shows (`word/media/mp-1.jpeg`), which is
  * presence only: the photo id the draft holds is not in the file. A control still showing its placeholder reads as
@@ -139,6 +152,26 @@ function textValue(text: string, field: FieldDef, hint = field.formatHint): Form
   return field.kind === 'date' ? parseDate(text, usableDateHint(hint)) ?? text : text;
 }
 
+/**
+ * A `w14:checkbox`: ticked or not as `w14:checked` says, when the control shows that state's glyph in that state's font
+ * (see the top of this file); `null` when it shows something else.
+ */
+function readCheckbox(box: Element, content: Element | undefined, text: string): FormValue {
+  const on = isOn(child(box, W14, 'checked'), W14);
+  const state = child(box, W14, on ? 'checkedState' : 'uncheckedState');
+  const code = parseInt(state?.getAttributeNS(W14, 'val') ?? '', 16);
+  const glyph = String.fromCodePoint(Number.isInteger(code) && code > 0 && code <= 0x10ffff ? code : on ? 0x2612 : 0x2610);
+  if (text !== glyph) return null;
+  const font = state?.getAttributeNS(W14, 'font');
+  if (font) {
+    const run = content && Array.from(content.getElementsByTagNameNS(W, 'r')).find((r) => r.getElementsByTagNameNS(W, 't').length > 0 || child(r, W, 'sym'));
+    const fonts = child(child(run, W, 'rPr'), W, 'rFonts');
+    const set = ['ascii', 'hAnsi', 'eastAsia', 'cs'].map((slot) => wAttr(fonts, slot)).filter((name): name is string => !!name);
+    if (set.length === 0 || set.some((name) => name.toLowerCase() !== font.toLowerCase())) return null;
+  }
+  return on;
+}
+
 /** Whether a tick cell shows a ticked box: a checked box symbol, a ticked box character, or the `X` the writer puts in a cell that had no box. */
 function isTicked(tc: Element): boolean {
   if (Array.from(tc.getElementsByTagNameNS(W, 'sym')).some((s) => TICKED_SYMBOLS.has((wAttr(s, 'char') ?? '').toUpperCase()))) return true;
@@ -196,16 +229,24 @@ export function readTarget(target: WordTarget, field: FieldDef, rels?: ReadonlyM
     case 'sdt': {
       const control = controlOf(target.sdt);
       if (control.type === 'picture') return rels && field.kind === 'picture' ? readPicture(target.sdt, rels) : undefined;
-      if (control.type === 'checkbox') return isOn(child(control.el, W14, 'checked'), W14);
-      if (child(control.sdtPr, W, 'showingPlcHdr')) return null;
+      if (control.sdtPr && kids(control.sdtPr).some((k) => k.localName === 'dataBinding')) return null;
       const content = child(target.sdt, W, 'sdtContent');
+      const text = content ? textIn(content) : '';
+      if (control.type === 'checkbox') return readCheckbox(control.el!, content, text);
+      if (child(control.sdtPr, W, 'showingPlcHdr')) return null;
       if (control.type === 'date') {
+        // The writer's chain (R13): the control's own format if it can be rendered, else the field's hint.
+        const hint = usableDateHint(wVal(control.el, 'dateFormat') || undefined) ?? field.formatHint;
         const full = (wAttr(control.el, 'fullDate') ?? '').slice(0, 10);
-        if (isValidIsoDate(full)) return full;
-        const own = usableDateHint(wVal(control.el, 'dateFormat') || undefined);
-        return textValue(content ? textIn(content) : '', field, own ?? field.formatHint);
+        if (!isValidIsoDate(full)) return textValue(text, field, hint);
+        return text !== '' && parseDate(text, usableDateHint(hint)) === full ? full : null;
       }
-      return textValue(content ? textIn(content) : '', field);
+      if (control.type === 'dropDownList' || control.type === 'comboBox') {
+        const last = wAttr(control.el, 'lastValue');
+        const item = last === undefined ? undefined : kids(control.el!).find((k) => isEl(k, W, 'listItem') && wAttr(k, 'value') === last);
+        if (item && (wAttr(item, 'displayText') ?? wAttr(item, 'value')) !== text) return null;
+      }
+      return textValue(text, field);
     }
     case 'tick': {
       const index = target.cells.findIndex(isTicked);
