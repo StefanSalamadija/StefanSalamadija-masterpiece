@@ -1,5 +1,5 @@
 import { isValidIsoDate } from '../../domain/dates';
-import { parseDate, usableDateHint } from '../format';
+import { formatDate, parseDate, usableDateHint } from '../format';
 import { partText } from '../package';
 import type { Package } from '../package';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from '../types';
@@ -29,7 +29,8 @@ import { A, MC, R, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
  * so a written value no longer reads back:
  * - a date control shows text in its format: the same chain the writer uses (R13: its own `w:dateFormat` when
  *   `formatDate` can render it, else the field's `formatHint`, else the display date). With a `w:fullDate`, the text
- *   must be that date in that format; without one, the text is read as a FORMTEXT date is;
+ *   must be exactly `formatDate` of that date in that format (so a format without a day, month or year, or with a
+ *   2-digit year, still reads back); without one, the text is read as a FORMTEXT date is;
  * - a `w14:checkbox` must show the glyph of its `w14:checked` state (`w14:checkedState` or `w14:uncheckedState`, else
  *   U+2612 or U+2610), and, when that state names a font, every font its run sets must be that one (a symbol font such
  *   as Wingdings shows another glyph in another font);
@@ -218,14 +219,8 @@ export function readTarget(target: WordTarget, field: FieldDef, rels?: ReadonlyM
       const checked = child(box, W, 'checked');
       return checked ? isOn(checked) : isOn(child(box, W, 'default'));
     }
-    case 'formdrop': {
-      const list = child(child(target.begin, W, 'ffData'), W, 'ddList');
-      const entries = (list ? kids(list) : []).filter((el) => isEl(el, W, 'listEntry')).map((el) => wAttr(el, 'val') ?? '');
-      const index = Number(wVal(list, 'result') ?? wVal(list, 'default') ?? 0);
-      const entry = entries[index];
-      if (entry === undefined) return null;
-      return field.options === undefined || field.options.includes(entry) ? entry : null;
-    }
+    case 'formdrop':
+      return dropEntry(target.begin, field, true);
     case 'sdt': {
       const control = controlOf(target.sdt);
       if (control.type === 'picture') return rels && field.kind === 'picture' ? readPicture(target.sdt, rels) : undefined;
@@ -239,7 +234,9 @@ export function readTarget(target: WordTarget, field: FieldDef, rels?: ReadonlyM
         const hint = usableDateHint(wVal(control.el, 'dateFormat') || undefined) ?? field.formatHint;
         const full = (wAttr(control.el, 'fullDate') ?? '').slice(0, 10);
         if (!isValidIsoDate(full)) return textValue(text, field, hint);
-        return text !== '' && parseDate(text, usableDateHint(hint)) === full ? full : null;
+        // What the writer shows for that date, compared as text: this works for a format that leaves out the day, month
+        // or year, and for a 2-digit year before 2000, which `parseDate` cannot read back.
+        return text !== '' && formatDate(full, usableDateHint(hint)) === text ? full : null;
       }
       if (control.type === 'dropDownList' || control.type === 'comboBox') {
         const last = wAttr(control.el, 'lastValue');
@@ -257,6 +254,46 @@ export function readTarget(target: WordTarget, field: FieldDef, rels?: ReadonlyM
     default:
       return undefined;
   }
+}
+
+/**
+ * The entry a legacy FORMDROPDOWN shows: its `w:result` (unless `chosen` is false), else its `w:default`, else the
+ * first entry. Word cannot show a drop-down with nothing in it, so one with no prompt entry always shows an option.
+ * `null` for the prompt entry (one that is not among the field's options).
+ */
+function dropEntry(begin: Element, field: FieldDef, chosen: boolean): FormValue {
+  const list = child(child(begin, W, 'ffData'), W, 'ddList');
+  const entries = (list ? kids(list) : []).filter((el) => isEl(el, W, 'listEntry')).map((el) => wAttr(el, 'val') ?? '');
+  const index = Number((chosen ? wVal(list, 'result') : undefined) ?? wVal(list, 'default') ?? 0);
+  const entry = entries[index];
+  if (entry === undefined) return null;
+  return field.options === undefined || field.options.includes(entry) ? entry : null;
+}
+
+/**
+ * What a cleared clone of each group's last row or item shows in its legacy FORMDROPDOWN columns, by column id: the
+ * list's default entry (the writer removes a clone's `w:result`). The integrity check accepts it for a blank choice in
+ * a cloned row. Columns that are not a FORMDROPDOWN in the template's last row are not in the result.
+ */
+export function wordCloneDefaults(pkg: Package, schema: FormSchema): Record<string, FormValue> {
+  const out: Record<string, FormValue> = {};
+  for (const part of partsOf(schema)) {
+    const text = partText(pkg, part);
+    if (text === undefined) continue;
+    const targets = locateWord(parseXml(text), part, schema);
+    for (const group of schema.rowGroups) {
+      const target = targets.get(group.id);
+      if (!target || target.kind !== 'group') continue;
+      const last = target.rows[target.rows.length - 1];
+      if (!last) continue;
+      for (const column of group.columns) {
+        if (column.kind !== 'choice') continue;
+        const at = locateColumn(last, column);
+        if (at?.kind === 'formdrop') out[column.id] = dropEntry(at.begin, column, false);
+      }
+    }
+  }
+  return out;
 }
 
 /** The parts a schema's addresses are in, in the order first met. */

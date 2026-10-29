@@ -9,7 +9,7 @@ import { partText, readPackage, sniffFormat, writePackage } from './package';
 import type { Package } from './package';
 import type { DraftValues, FieldDef, FormKind, FormSchema, FormValue } from './types';
 import { detectWord } from './word/detect';
-import { readWordValues } from './word/read';
+import { readWordValues, wordCloneDefaults } from './word/read';
 import { extraRowsOf, wordText, writeWord } from './word/write';
 import { parseXml } from './xml';
 
@@ -175,16 +175,32 @@ function wordValue(value: string | boolean): FormValue {
 type Expect = (field: FieldDef, value: string | boolean) => FormValue;
 
 /**
+ * What an unwritten field or column is compared with: the template's value where the template has the row (`template`),
+ * or, in a row the writer cloned (`clone`), the value of the row it was cloned from (the template's last row, `from`)
+ * and, for a legacy drop-down, the list's default entry (`fallback`).
+ */
+type Reference = { template: FormValue | undefined } | { clone: { from: FormValue | undefined; fallback: FormValue | undefined } };
+
+/**
  * Whether one field or column read back right:
  * - a left-empty field, or one the draft leaves blank, is not written, so it reads exactly as the template has it (a
- *   control that already held text, a ticked default). In a row the writer cloned (`clone`), which has no template
- *   row of its own, it reads blank: `null`, `''`, or an unticked checkbox (the writer clears a clone's columns);
+ *   control that already held text, a ticked default);
+ * - in a row the writer cloned, which has no template row of its own, a blank column reads blank: `null`, `''`, or an
+ *   unticked checkbox (the writer clears a clone's columns). A picture or choice column may also read as it does in
+ *   the row it was cloned from: the writer never clears a picture (a stock image stays), nor a tick column. A choice
+ *   may also read as its drop-down's default entry: a legacy drop-down with no prompt entry cannot show nothing, so a
+ *   cleared one shows its default. Text, date and checkbox columns stay strict;
  * - a filled picture, by presence: it shows a picture that the writer added to the file. A control that showed a
  *   picture in the template reads as filled without being written, so reading as filled is not enough;
  * - any other filled value reads back as `expect` gives it (both sides `''` as `null`).
  */
-function readsRight(field: FieldDef, value: FormValue | undefined, back: FormValue | undefined, template: FormValue | undefined, clone: boolean, expect: Expect, changed: Set<string>, output: Package): boolean {
-  if (field.leftEmpty || isBlank(value)) return clone ? back === null || back === '' || (field.kind === 'checkbox' && back === false) : back === template;
+function readsRight(field: FieldDef, value: FormValue | undefined, back: FormValue | undefined, ref: Reference, expect: Expect, changed: Set<string>, output: Package): boolean {
+  if (field.leftEmpty || isBlank(value)) {
+    if ('template' in ref) return back === ref.template;
+    if (back === null || back === '' || (field.kind === 'checkbox' && back === false)) return true;
+    if (field.kind === 'picture' || field.kind === 'choice') return (back !== undefined && back === ref.clone.from) || (field.kind === 'choice' && back !== undefined && back === ref.clone.fallback);
+    return false;
+  }
   if (field.kind === 'picture') return typeof back === 'string' && changed.has(back) && output.entries.has(back);
   const want = expect(field, value!);
   return (back === '' ? null : back) === (want === '' ? null : want);
@@ -199,13 +215,16 @@ function readsRight(field: FieldDef, value: FormValue | undefined, back: FormVal
  *   photo, is not parsed;
  * - every value reads back from `output` through the stored schema (R1), as `readsRight` says: the Word reader with the
  *   rows the writer cloned (`extraRowsOf`), the Excel reader as it is. The Word reader reads a content control as
- *   it shows, and as `null` where its stored state disagrees with what it shows (see `word/read.ts`). Every row the output has is checked, rows the
- *   draft does not fill included; a filled value in a row the output does not have fails.
+ *   it shows, and as `null` where its stored state disagrees with what it shows (see `word/read.ts`). Every row the
+ *   output has is checked, rows the draft does not fill included; a filled value in a row the output does not have
+ *   fails.
  *
  * Nothing else escapes it: whatever stops the check is an `IntegrityError` too.
  *
  * Known limits, in the safe direction (a right file refused, never a wrong one passed):
- * - a date written with a 2-digit year (`yy`) before 2000 reads back as 20xx, and is refused;
+ * - a date written as text with a 2-digit year (`yy`) before 2000, in a legacy text field, a table cell or an Excel
+ *   text cell, reads back as 20xx, and is refused. A date content control is not affected: it is checked against its
+ *   `w:fullDate` by the text `formatDate` makes, not parsed;
  * - a date-field value that is not ISO is compared as text, and is refused when it happens to be a date in the form's
  *   own format (it then reads back as ISO). The fill screen gives ISO dates (R2).
  */
@@ -226,11 +245,12 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
   const back = word ? readWordValues(output, schema, extraRowsOf(schema, values)) : readExcelValues(output, schema);
   const template = word ? readWordValues(original, schema) : readExcelValues(original, schema);
   const expect: Expect = word ? (_field, value) => wordValue(value) : canonicalExcelValue;
-  const check = (field: FieldDef, value: FormValue | undefined, read: FormValue | undefined, before: FormValue | undefined, where: string, clone = false) => {
-    if (!readsRight(field, value, read, before, clone, expect, changed, output)) throw new IntegrityError(`${where} does not read back as written.`);
+  const defaults = word ? wordCloneDefaults(original, schema) : {};
+  const check = (field: FieldDef, value: FormValue | undefined, read: FormValue | undefined, ref: Reference, where: string) => {
+    if (!readsRight(field, value, read, ref, expect, changed, output)) throw new IntegrityError(`${where} does not read back as written.`);
   };
 
-  for (const field of schema.fields) check(field, values.fields[field.id], back.fields[field.id], template.fields[field.id], `The field ${field.id} (${field.label})`);
+  for (const field of schema.fields) check(field, values.fields[field.id], back.fields[field.id], { template: template.fields[field.id] }, `The field ${field.id} (${field.label})`);
 
   for (const group of schema.rowGroups) {
     const given = values.rows[group.id] ?? [];
@@ -244,9 +264,13 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
         if (group.columns.some((column) => !column.leftEmpty && !isBlank(draft[column.id]))) throw new IntegrityError(`Row ${i + 1} of ${group.id} (${group.label}) is missing from the output.`);
         continue;
       }
-      // Rows past the template's own are the writer's clones.
+      // Rows past the template's own are the writer's clones, of the template's last row.
       const was = before?.[i];
-      for (const column of group.columns) check(column, draft[column.id], row[column.id], was?.[column.id], `The column ${column.id} (${column.label}) in row ${i + 1}`, was === undefined);
+      const from = before?.[before.length - 1];
+      for (const column of group.columns) {
+        const ref: Reference = was ? { template: was[column.id] } : { clone: { from: from?.[column.id], fallback: defaults[column.id] } };
+        check(column, draft[column.id], row[column.id], ref, `The column ${column.id} (${column.label}) in row ${i + 1}`);
+      }
     }
   }
 }

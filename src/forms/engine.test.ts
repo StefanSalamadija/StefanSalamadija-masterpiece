@@ -9,6 +9,7 @@ import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
 import { contentControlsDocx, oddLayoutsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
 import { readWordValues } from './word/read';
 import { extraRowsOf } from './word/write';
@@ -373,9 +374,16 @@ function corrupt(made: { output: Package }, change: (doc: Document) => void): vo
   made.output.entries.set('word/document.xml', bytesOf(serializeXml(doc)));
 }
 
-/** The content control with this alias. */
+/** The content controls with this alias (their own, not a nested control's), in document order. */
+function controls(doc: Document, alias: string): Element[] {
+  const own = (sdt: Element) => Array.from(sdt.childNodes).find((n) => n.nodeType === 1 && (n as Element).localName === 'sdtPr') as Element | undefined;
+  return Array.from(doc.getElementsByTagNameNS(W, 'sdt')).filter((sdt) => Array.from(own(sdt)?.childNodes ?? [])
+    .some((n) => n.nodeType === 1 && (n as Element).localName === 'alias' && (n as Element).getAttributeNS(W, 'val') === alias));
+}
+
+/** The first content control with this alias. */
 function control(doc: Document, alias: string): Element {
-  const found = Array.from(doc.getElementsByTagNameNS(W, 'sdt')).find((sdt) => Array.from(sdt.getElementsByTagNameNS(W, 'alias')).some((a) => a.getAttributeNS(W, 'val') === alias));
+  const found = controls(doc, alias)[0];
   if (!found) throw new Error(`no control ${alias}`);
   return found;
 }
@@ -384,6 +392,17 @@ const only = (el: Element, ns: string, name: string): Element => el.getElementsB
 /** Puts `text` as the only text a control shows. */
 function show(sdt: Element, text: string): void {
   const ts = Array.from(sdt.getElementsByTagNameNS(W, 't'));
+  if (ts.length === 0 && text !== '') {
+    // A cleared control may hold an empty run: give it a text element.
+    const doc = sdt.ownerDocument;
+    const content = only(sdt, W, 'sdtContent');
+    let r = content.getElementsByTagNameNS(W, 'r')[0];
+    if (!r) {
+      r = doc.createElementNS(W, 'w:r');
+      (content.getElementsByTagNameNS(W, 'p')[0] ?? content).appendChild(r);
+    }
+    ts.push(r.appendChild(doc.createElementNS(W, 'w:t')) as Element);
+  }
   ts.forEach((t, i) => {
     while (t.firstChild) t.removeChild(t.firstChild);
     if (i === 0 && text !== '') t.appendChild(t.ownerDocument.createTextNode(text));
@@ -475,5 +494,116 @@ describe('verifyOutput: more', () => {
     const blanked = assembled({ ...input, values: { ...input.values, rows: { [group.id]: rows } } });
     expect(readWordValues(blanked.output, input.schema, { [group.id]: 2 }).rows[group.id]![12]![group.columns[0]!.id]).toBeNull();
     expect(() => verifyOutput(blanked.original, blanked.output, blanked.changed, input.schema, { ...input.values, rows: { [group.id]: rows } })).not.toThrow();
+  });
+});
+
+/** A fixture's bytes with its `word/document.xml` changed by a text edit (which must change something). */
+function editedDocument(bytes: Uint8Array, change: (xml: string) => string): Uint8Array {
+  const pkg = readPackage(bytes);
+  const before = partText(pkg, 'word/document.xml')!;
+  const after = change(before);
+  expect(after).not.toBe(before);
+  pkg.entries.set('word/document.xml', bytesOf(after));
+  return writePackage(pkg, new Map());
+}
+
+describe('verifyOutput passes correct files (fix round 2)', () => {
+  const dateWith = (format: string, iso: string): MakeFileInput => {
+    const f: Fixture = { name: format, fileName: 'controls.docx', make: () => editedDocument(contentControlsDocx(), (x) => x.replace('w:val="dd/MMM/yyyy"', `w:val="${format}"`)) };
+    return inputOf(f, (s) => ({ fields: { [s.fields.find((x) => x.label === 'Date')!.id]: iso }, rows: {} }));
+  };
+
+  it.each([
+    ['MMMM yyyy', '2026-10-28', 'October 2026'],
+    ['d MMMM', '2026-10-28', '28 October'],
+    ['dd.MM.yy', '1999-01-13', '13.01.99'],
+  ])('a date control in %s with %s, which shows only part of the date or a 2-digit year', (format, iso, shown) => {
+    const input = dateWith(format, iso);
+    const made = assembled(input);
+    expect(partText(made.output, 'word/document.xml')).toContain(`>${shown}<`);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    expect(() => makeFile(input)).not.toThrow();
+    // What it shows must still be that date.
+    corrupt(made, (doc) => show(control(doc, 'Date'), 'Garbage'));
+    expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values));
+  });
+
+  const jobsGroup = (s: FormSchema) => s.rowGroups.find((g) => g.label === 'Jobs')!;
+  const jobs = (s: FormSchema, count: number): DraftValues => {
+    const g = jobsGroup(s);
+    return { fields: {}, rows: { [g.id]: Array.from({ length: count }, (_, i) => Object.fromEntries(g.columns.map((c) => [c.id, c.label === 'Responsible' ? `Person ${i}` : null]))) } };
+  };
+  const noPrompt = (selectLast: boolean): Fixture => ({
+    name: 'no prompt', fileName: 'weekly.dotx',
+    make: () => editedDocument(weeklyJobsDotx(), (x) => {
+      let out = x.split('<w:listEntry w:val="_ choose"/><w:listEntry w:val="Pending"/>').join('<w:listEntry w:val="Pending"/>');
+      // The template's last job shows Completed: a clone of it, cleared, shows the list's default, Pending.
+      if (selectLast) out = out.replace(/(<w:name w:val="Dropdown3"\/>[\s\S]*?<w:ddList>)/, '$1<w:result w:val="1"/>');
+      return out;
+    }),
+  });
+
+  it.each([false, true])('blank Status in cloned jobs, from a drop-down with no prompt entry (last template job chosen: %s)', (selectLast) => {
+    const input = inputOf(noPrompt(selectLast), (s) => jobs(s, 5));
+    const made = assembled(input);
+    const g = jobsGroup(input.schema);
+    const status = g.columns.find((c) => c.label === 'Status')!;
+    const back = readWordValues(made.output, input.schema, extraRowsOf(input.schema, input.values)).rows[g.id]!.map((r) => r[status.id]);
+    expect(back).toEqual(selectLast ? ['Pending', 'Pending', 'Completed', 'Pending', 'Pending'] : ['Pending', 'Pending', 'Pending', 'Pending', 'Pending']);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it('a blank picture in a cloned row of a template whose pictures show a stock image', () => {
+    const stock: Fixture = { name: 'stock', fileName: 'weekly.dotx', make: () => editedDocument(weeklyJobsDotx(), (x) => x.replace(/<w:showingPlcHdr\/>(<w:picture\/>)/g, '$1')) };
+    const input = inputOf(stock, (s) => {
+      const g = s.rowGroups.find((x) => x.label === 'Pictures')!;
+      return { fields: {}, rows: { [g.id]: [0, 1].map((i) => Object.fromEntries(g.columns.map((c) => [c.id, i === 0 && c.kind === 'picture' ? PHOTO : null]))) } };
+    });
+    const made = assembled(input);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it('keeps text columns strict in a clone: a clone showing the text of the row it was cloned from is refused', () => {
+    // The template's last job names someone already; a clone, cleared, must not.
+    const prefilled: Fixture = {
+      name: 'prefilled', fileName: 'weekly.dotx',
+      make: () => editedDocument(weeklyJobsDotx(), (x) => {
+        const at = x.split('<w:alias w:val="Responsible"/>').slice(0, 3).join('<w:alias w:val="Responsible"/>').length;
+        const tail = x.slice(at).replace('<w:showingPlcHdr/>', '').replace('Click or tap here to enter text.', 'Old text');
+        return x.slice(0, at) + tail;
+      }),
+    };
+    const input = inputOf(prefilled, (s) => jobs(s, 4));
+    const g = jobsGroup(input.schema);
+    const responsible = g.columns.find((c) => c.label === 'Responsible')!;
+    const blank: DraftValues = { fields: {}, rows: { [g.id]: input.values.rows[g.id]!.map((r, i) => (i === 3 ? { ...r, [responsible.id]: null } : r)) } };
+    const cleared = assembled({ ...input, values: blank });
+    expect(readWordValues(cleared.output, input.schema, { [g.id]: 1 }).rows[g.id]!.map((r) => r[responsible.id])).toEqual(['Person 0', 'Person 1', 'Person 2', null]);
+    expect(() => verifyOutput(cleared.original, cleared.output, cleared.changed, input.schema, blank)).not.toThrow();
+    corrupt(cleared, (doc) => show(controls(doc, 'Responsible')[3]!, 'Old text'));
+    expect(expectIntegrityError(() => verifyOutput(cleared.original, cleared.output, cleared.changed, input.schema, blank)).reason).toContain('(Responsible) in row 4');
+  });
+
+  it('a blank checkbox column in a cloned row reads unticked, and passes; a ticked one is refused', () => {
+    const c = new Controls();
+    const w = [6000, 3638];
+    const item = () => row(w, [{ content: p(c.formText()) }, { content: p(c.formCheckbox()) }]);
+    const bytes = wordPackage({
+      kind: 'docx',
+      header: headerBlock(c, { title: 'Demo Checks', code: 'TST-90', revision: '00' }),
+      body: heading('Checks') + table(w, [headerRow(w, ['Item', 'Done']), c.repeatingSection({ alias: 'Checks', tag: 'checks', items: [item()] })]) + p(),
+    });
+    const input = inputOf({ name: 'checks', fileName: 'checks.docx', make: () => bytes }, (s) => {
+      const g = s.rowGroups[0]!;
+      expect(g.columns.map((x) => x.kind)).toEqual(['text', 'checkbox']);
+      return { fields: {}, rows: { [g.id]: [0, 1, 2].map((i) => ({ [g.columns[0]!.id]: `Item ${i}`, [g.columns[1]!.id]: i === 0 ? true : null })) } };
+    });
+    const made = assembled(input);
+    const g = input.schema.rowGroups[0]!;
+    expect(readWordValues(made.output, input.schema, { [g.id]: 2 }).rows[g.id]!.map((r) => r[g.columns[1]!.id])).toEqual([true, false, false]);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    // A clone left ticked (as if copied, not cleared) is not blank.
+    const ticked = assembled({ ...input, values: { fields: {}, rows: { [g.id]: [0, 1, 2].map((i) => ({ [g.columns[0]!.id]: `Item ${i}`, [g.columns[1]!.id]: i !== 1 })) } } });
+    expectIntegrityError(() => verifyOutput(ticked.original, ticked.output, ticked.changed, input.schema, input.values));
   });
 });
