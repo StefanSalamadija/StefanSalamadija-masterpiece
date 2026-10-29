@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate } from './format';
+import { formatDate, parseDate } from './format';
 
 describe('formatDate', () => {
   it('formats with the tokens of the hint', () => {
@@ -73,5 +73,28 @@ describe('formatDate', () => {
       expect(formatDate(text), text).toBe(text);
       expect(formatDate(text, 'dd/MMM/yyyy'), text).toBe(text);
     }
+  });
+});
+
+describe('parseDate', () => {
+  it('reads back what formatDate wrote, for each kind of hint', () => {
+    const hints = ['dd/MMM/yyyy', 'DD.MM.YYYY', 'd/M/yyyy', 'd MMMM yy', 'yyyy-MM-dd', '(dd/MMM/yyyy)', 'dd.mm.yyyy', undefined, '', '(24:00 UTC)'];
+    for (const iso of ['2026-10-28', '2026-01-01', '2026-03-05', '2028-02-29', '2026-12-31']) {
+      for (const hint of hints) expect(parseDate(formatDate(iso, hint), hint), `${iso} ${hint}`).toBe(iso);
+    }
+  });
+
+  it('gives undefined for text formatDate would not have written with that hint', () => {
+    expect(parseDate('28/10/2026', 'dd/MMM/yyyy')).toBeUndefined();
+    expect(parseDate('28/oct/2026', 'dd/MMM/yyyy')).toBeUndefined();
+    expect(parseDate('31/Feb/2026', 'dd/MMM/yyyy')).toBeUndefined();
+    expect(parseDate('5.3.2026', 'DD.MM.YYYY')).toBeUndefined();
+    expect(parseDate('28-Oct-2026')).toBeUndefined();
+    expect(parseDate('tomorrow', 'dd/MMM/yyyy')).toBeUndefined();
+    expect(parseDate('', 'dd/MMM/yyyy')).toBeUndefined();
+  });
+
+  it('takes a 2-digit year to be in this century', () => {
+    expect(parseDate('28/10/26', 'dd/MM/yy')).toBe('2026-10-28');
   });
 });

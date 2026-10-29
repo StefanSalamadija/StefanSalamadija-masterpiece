@@ -56,3 +56,62 @@ function tokenOf(letter: string, length: number, date: { year: number; month: nu
       return length === 2 ? pad(date.year, 4).slice(2) : length === 4 ? pad(date.year, 4) : undefined;
   }
 }
+
+const DISPLAY_DATE = /^(\d{2})-([A-Z]{3})-(\d{4})$/;
+
+/** A month's number (1 to 12) from its name, short or long, in any case; 0 when it is none. */
+function monthOf(name: string): number {
+  const lower = name.toLowerCase();
+  const i = SHORT_MONTHS.findIndex((m, k) => m.toLowerCase() === lower || LONG_MONTHS[k].toLowerCase() === lower);
+  return i + 1;
+}
+
+/**
+ * The ISO date that `formatDate(iso, hint)` gives `text` for, or `undefined` when there is none: the inverse of
+ * `formatDate`, for reading back what a writer wrote. Only text formatDate would write is read, exactly (`28/oct/2026`
+ * is not `dd/MMM/yyyy`), so the date read is the one written and never a guess. A hint must give the day, the month and
+ * the year to be read; with no hint, or a hint with no token, the text is the display date (`28-OCT-2026`). A 2-digit
+ * year is taken to be 20xx.
+ */
+export function parseDate(text: string, hint?: string): string | undefined {
+  const parts: { day?: number; month?: number; year?: number } = {};
+  let tokens = 0;
+  const readers: ((s: string) => void)[] = [];
+  let pattern = '';
+  let last = 0;
+  const pieces = hint === undefined || hint.trim() === '' ? [] : [...hint.matchAll(DATE_LETTERS)];
+  for (const piece of pieces) {
+    const run = piece[0];
+    const letter = piece[1].toLowerCase();
+    const length = run.length;
+    const group = letter === 'd' && length <= 2 ? '(\\d{1,2})'
+      : letter === 'm' && length <= 2 ? '(\\d{1,2})'
+        : letter === 'm' && length <= 4 ? '(\\p{L}+)'
+          : letter === 'y' && (length === 2 || length === 4) ? `(\\d{${length}})` : undefined;
+    pattern += escapeRegExp(hint!.slice(last, piece.index)) + (group ?? escapeRegExp(run));
+    last = piece.index + length;
+    if (group === undefined) continue;
+    tokens += 1;
+    if (letter === 'd') readers.push((s) => { parts.day = Number(s); });
+    else if (letter === 'm') readers.push(length <= 2 ? (s) => { parts.month = Number(s); } : (s) => { parts.month = monthOf(s); });
+    else readers.push(length === 2 ? (s) => { parts.year = 2000 + Number(s); } : (s) => { parts.year = Number(s); });
+  }
+  if (tokens === 0) {
+    const match = DISPLAY_DATE.exec(text);
+    if (!match) return undefined;
+    Object.assign(parts, { day: Number(match[1]), month: monthOf(match[2]), year: Number(match[3]) });
+  } else {
+    pattern += escapeRegExp(hint!.slice(last));
+    const match = new RegExp(`^${pattern}$`, 'u').exec(text);
+    if (!match) return undefined;
+    readers.forEach((read, i) => read(match[i + 1]));
+  }
+  const { day, month, year } = parts;
+  if (day === undefined || month === undefined || year === undefined) return undefined;
+  const iso = `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`;
+  return isValidIsoDate(iso) && formatDate(iso, hint) === text ? iso : undefined;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
