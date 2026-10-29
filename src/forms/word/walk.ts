@@ -14,6 +14,10 @@ export const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 export const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
 export const W15 = 'http://schemas.microsoft.com/office/word/2012/wordml';
 export const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+/** DrawingML (`a:blip`), the relationships namespace (`r:embed`), and the wordprocessing drawing (`wp:extent`). */
+export const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+export const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+export const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const WPS = 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const VML = 'urn:schemas-microsoft-com:vml';
 

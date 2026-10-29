@@ -7,7 +7,8 @@ import { parseXml, serializeXml } from '../xml';
 import { locateColumn, locateWord } from './address';
 import type { WordTarget } from './address';
 import { EMPTY_FORMTEXT, controlOf, fieldRange, isOn, partsOf } from './read';
-import { BOX_CHARS, BOX_TEXT, W, W14, child, isEl, kids, wAttr } from './walk';
+import { dirOf, relsPathOf } from './rels';
+import { A, BOX_CHARS, BOX_TEXT, R, W, W14, WP, child, isEl, kids, wAttr } from './walk';
 
 /*
  * Writing a draft's values into a copy of a Word form (spec §8, rulings R1 and R2).
@@ -39,14 +40,31 @@ import { BOX_CHARS, BOX_TEXT, W, W14, child, isEl, kids, wAttr } from './walk';
  *
  * Values are canonical (R2): a `date` is written as `formatDate(iso, hint)`; a content-control date also gets
  * `w:fullDate` and is shown in its own `w:dateFormat` when it has one. A value that is not a real ISO date is written as
- * the text it is. `null`, `undefined` and `''` are no value: nothing is written. `leftEmpty` fields and columns and
- * picture fields (Task 6) are never written.
+ * the text it is. `null`, `undefined` and `''` are no value: nothing is written. `leftEmpty` fields and columns are never
+ * written.
+ *
+ * Pictures: the value of a picture field is a photo id, a key of `opts.photos` (JPEG bytes; an id with no photo, or
+ * bytes that are not a JPEG, is a `FormWriteError`). The photo becomes the part `<dir>/media/mp-<n>.jpeg` with the
+ * relationship `rIdMp<n>` in the part's `.rels` (`n` the smallest number free for both, so the same inputs give the same
+ * names), and the control's `a:blip/@r:embed` (and a VML fallback's `v:imagedata/@r:id`) points at it. The jpeg
+ * `Default` is added to `[Content_Types].xml` when it has none. The same photo id in two controls of one part is one
+ * part and one relationship. The placeholder picture and its relationship stay (other controls may show it).
+ * Only attributes change, plus the removal of `w:showingPlcHdr` and the `PlaceholderText` style from the control's runs
+ * (children of `w:sdtPr` and `w:rPr`, which no address goes through), so no stored address moves (R12).
+ *
+ * Size: the control's frame (`wp:extent`) is the room the photo has. A photo of the frame's shape keeps it exactly; a
+ * photo of another shape is fitted inside it, whole and not stretched, by shrinking `wp:extent` on one side. Its shape
+ * comes from the JPEG's frame header (SOF); if that cannot be read the frame is kept as it is. The picture's own size
+ * (`pic:spPr/a:xfrm/a:ext`) follows the extent kept. The EXIF orientation is not read: the app's photos are canvas
+ * output, which has none.
  */
 
 const DOCUMENT_MAIN = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
 const TEMPLATE_MAIN = /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.template\.main\+xml/i;
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
-const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+const JPEG_DEFAULT = /<Default\b[^>]*\bExtension\s*=\s*["']jpeg["']/i;
+const PIC = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
+const IMAGE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
 /** The checked box an empty box symbol (detection's `BOX_CHARS`) becomes, in the same font. */
 const CHECKED_SYMBOL = 'F0FE';
 /** What an empty box written as text (detection's `BOX_TEXT`, ☐ or □) becomes: ☒. */
@@ -88,7 +106,7 @@ export function extraRowsOf(schema: FormSchema, values: DraftValues): Record<str
 }
 
 const isBlank = (value: FormValue | undefined): value is null | undefined | '' => value === null || value === undefined || value === '';
-const writable = (field: FieldDef): boolean => !field.leftEmpty && field.kind !== 'picture';
+const writable = (field: FieldDef): boolean => !field.leftEmpty;
 const describe = (field: FieldDef): string => `${field.id} (${field.label})`;
 
 function el(doc: Document, name: string): Element {
@@ -289,6 +307,133 @@ function renumber(clone: Element, ids: CloneIds): void {
   for (const e of [clone, ...Array.from(clone.getElementsByTagName('*'))]) {
     e.removeAttributeNS(W14, 'paraId');
     e.removeAttributeNS(W14, 'textId');
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pictures
+
+/** The pixel size of a JPEG, from its first frame header (SOF0 to SOF15, not the tables that share those numbers). */
+export function jpegSize(bytes: Uint8Array): { width: number; height: number } | undefined {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return undefined;
+  let at = 2;
+  while (at + 4 <= bytes.length) {
+    if (bytes[at] !== 0xff) return undefined;
+    const marker = bytes[at + 1];
+    if (marker === 0xff) { at += 1; continue; } // fill bytes before a marker
+    if (marker === 0xd9 || marker === 0xda) return undefined; // end of image, or the scan: no frame header before it
+    const length = (bytes[at + 2] << 8) | bytes[at + 3];
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      if (length < 8 || at + 9 > bytes.length) return undefined;
+      const height = (bytes[at + 5] << 8) | bytes[at + 6];
+      const width = (bytes[at + 7] << 8) | bytes[at + 8];
+      return width > 0 && height > 0 ? { width, height } : undefined;
+    }
+    at += 2 + length;
+  }
+  return undefined;
+}
+
+/** The photos written into one part: its new relationships, and the media parts they point at (shared with other parts). */
+class PartPictures {
+  private ids: Set<string> | undefined;
+  private relsText: string | undefined;
+  private byPhoto = new Map<string, { rId: string; path: string }>();
+  private added: string[] = [];
+
+  constructor(private pkg: Package, private part: string, private photos: Record<string, Uint8Array>, private media: Map<string, Uint8Array>) {}
+
+  private load(): void {
+    if (this.ids) return;
+    this.relsText = partText(this.pkg, relsPathOf(this.part));
+    this.ids = new Set(this.relsText === undefined ? [] : Array.from(parseXml(this.relsText).getElementsByTagName('Relationship')).map((r) => r.getAttribute('Id') ?? ''));
+  }
+
+  /** The relationship id and the media part path of a photo, added on first use. */
+  embed(photoId: string, field: FieldDef): { rId: string; path: string } {
+    const known = this.byPhoto.get(photoId);
+    if (known) return known;
+    const bytes = Object.hasOwn(this.photos, photoId) ? this.photos[photoId] : undefined;
+    if (!bytes) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not among the photos.`);
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not a JPEG.`);
+    this.load();
+    const dir = dirOf(this.part);
+    const at = (n: number): string => `${dir === '' ? '' : `${dir}/`}media/mp-${n}.jpeg`;
+    let n = 1;
+    while (this.ids!.has(`rIdMp${n}`) || this.pkg.entries.has(at(n)) || this.media.has(at(n))) n += 1;
+    const entry = { rId: `rIdMp${n}`, path: at(n) };
+    this.ids!.add(entry.rId);
+    this.media.set(entry.path, bytes);
+    this.byPhoto.set(photoId, entry);
+    this.added.push(`<Relationship Id="${entry.rId}" Type="${IMAGE_REL}" Target="media/mp-${n}.jpeg"/>`);
+    return entry;
+  }
+
+  /** The `.rels` part with the relationships added, or `undefined` when none were. The rest of its text is kept as it was. */
+  rels(): [path: string, bytes: Uint8Array] | undefined {
+    if (this.added.length === 0) return undefined;
+    const add = this.added.join('');
+    let text = this.relsText;
+    if (text === undefined) {
+      text = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${add}</Relationships>`;
+    } else if (/<\/Relationships\s*>/.test(text)) {
+      text = text.replace(/<\/Relationships\s*>/, () => `${add}</Relationships>`);
+    } else {
+      text = text.replace(/<Relationships\b([^>]*?)\s*\/>/, (_, attributes: string) => `<Relationships${attributes}>${add}</Relationships>`);
+    }
+    return [relsPathOf(this.part), bytesOf(text)];
+  }
+}
+
+/** Fits a photo of `width` by `height` pixels inside a frame, whole and unstretched, in whole EMU. */
+function fitted(frame: { cx: number; cy: number }, size: { width: number; height: number } | undefined): { cx: number; cy: number } {
+  if (!size) return frame;
+  const scale = Math.min(frame.cx / size.width, frame.cy / size.height);
+  return { cx: Math.min(frame.cx, Math.max(1, Math.round(size.width * scale))), cy: Math.min(frame.cy, Math.max(1, Math.round(size.height * scale))) };
+}
+
+/** Shows a photo in a picture control: see the top of this file. */
+function writePicture(sdt: Element, photoId: string, field: FieldDef, pictures: PartPictures, photos: Record<string, Uint8Array>): void {
+  const { type, sdtPr } = controlOf(sdt);
+  const blips = Array.from(sdt.getElementsByTagNameNS(A, 'blip'));
+  if (type !== 'picture' || !sdtPr || blips.length === 0) throw new FormWriteError(`The field ${describe(field)} is not a picture control in the file.`);
+  const { rId, path } = pictures.embed(photoId, field);
+  const size = jpegSize(photos[photoId]);
+
+  const prompt = child(sdtPr, W, 'showingPlcHdr');
+  if (prompt) sdtPr.removeChild(prompt);
+  // A control bound to a custom XML part would show that part's data, not the photo, when the file is opened.
+  for (const binding of kids(sdtPr).filter((k) => k.localName === 'dataBinding')) sdtPr.removeChild(binding);
+
+  for (const blip of blips) {
+    blip.setAttributeNS(R, 'r:embed', rId);
+    blip.removeAttributeNS(R, 'link');
+    const pic = blip.parentNode?.parentNode;
+    const name = pic && isEl(pic, PIC, 'pic') ? pic.getElementsByTagNameNS(PIC, 'cNvPr')[0] : undefined;
+    name?.setAttribute('name', path.slice(path.lastIndexOf('/') + 1));
+  }
+  // The legacy picture a Fallback holds shows the same photo.
+  for (const image of Array.from(sdt.getElementsByTagNameNS('urn:schemas-microsoft-com:vml', 'imagedata'))) image.setAttributeNS(R, 'r:id', rId);
+
+  for (const drawing of Array.from(sdt.getElementsByTagNameNS(W, 'drawing'))) {
+    const holder = kids(drawing)[0]; // wp:inline or wp:anchor
+    const extent = holder && child(holder, WP, 'extent');
+    const frame = { cx: Number(extent?.getAttribute('cx')), cy: Number(extent?.getAttribute('cy')) };
+    if (extent && Number.isInteger(frame.cx) && Number.isInteger(frame.cy) && frame.cx > 0 && frame.cy > 0) {
+      const keep = fitted(frame, size);
+      extent.setAttribute('cx', String(keep.cx));
+      extent.setAttribute('cy', String(keep.cy));
+      for (const xfrm of Array.from(drawing.getElementsByTagNameNS(A, 'xfrm'))) {
+        const ext = child(xfrm, A, 'ext');
+        if (!ext) continue;
+        ext.setAttribute('cx', String(keep.cx));
+        ext.setAttribute('cy', String(keep.cy));
+      }
+    }
+  }
+  // The placeholder's grey prompt style does not belong on the photo's run.
+  for (const style of Array.from(sdt.getElementsByTagNameNS(W, 'rStyle'))) {
+    if (wAttr(style, 'val') === 'PlaceholderText' && isEl(style.parentNode, W, 'rPr')) style.parentNode.removeChild(style);
   }
 }
 
@@ -542,8 +687,16 @@ function asOption(value: FormValue, field: FieldDef, options: readonly string[] 
   return index;
 }
 
+/** The photos available, and where this part's go. */
+interface PictureContext { part: PartPictures; photos: Record<string, Uint8Array> }
+
 /** Writes a value (not blank) into the target of a field or column. */
-function writeTarget(target: WordTarget, field: FieldDef, value: string | boolean): void {
+function writeTarget(target: WordTarget, field: FieldDef, value: string | boolean, pictures: PictureContext): void {
+  if (field.kind === 'picture') {
+    if (typeof value !== 'string' || target.kind !== 'sdt') throw new FormWriteError(`The picture ${describe(field)} takes a photo.`);
+    writePicture(target.sdt, value, field, pictures.part, pictures.photos);
+    return;
+  }
   switch (target.kind) {
     case 'formtext': writeFormText(target.begin, asText(value, field), field); break;
     case 'formcheck':
@@ -591,7 +744,7 @@ function growRows(rows: Element[], extra: number, ids: CloneIds): { rows: Elemen
 }
 
 /** Fills a group's rows, cloning rows first when more are given than it holds. True when anything changed. */
-function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records: Record<string, FormValue>[], ids: () => CloneIds): boolean {
+function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records: Record<string, FormValue>[], ids: () => CloneIds, pictures: PictureContext): boolean {
   const extra = records.length - group.capacity;
   const anyValue = records.some((record) => group.columns.some((c) => writable(c) && !isBlank(record[c.id])));
   if (!anyValue && extra <= 0) return false;
@@ -604,7 +757,6 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
     // Every column of the row is found before any is written (R12).
     const jobs: { column: FieldDef; at: WordTarget; value: FormValue | undefined; blank: boolean }[] = [];
     for (const column of group.columns) {
-      if (column.kind === 'picture') continue;
       const value = record[column.id];
       const blank = !writable(column) || isBlank(value);
       if (blank && !clones.has(row)) continue;
@@ -617,14 +769,14 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
     }
     for (const { column, at, value, blank } of jobs) {
       if (blank) clearTarget(at, column);
-      else writeTarget(at, column, value as string | boolean);
+      else writeTarget(at, column, value as string | boolean, pictures);
     }
   });
   return true;
 }
 
 /** Fills one part. Gives back its new XML, or `undefined` when nothing in it was written. */
-function writePart(text: string, part: string, schema: FormSchema, values: DraftValues): string | undefined {
+function writePart(text: string, part: string, schema: FormSchema, values: DraftValues, pictures: PictureContext): string | undefined {
   const doc = parseXml(text);
   const targets = locateWord(doc, part, schema);
   let cloneIds: CloneIds | undefined;
@@ -634,17 +786,26 @@ function writePart(text: string, part: string, schema: FormSchema, values: Draft
   // Every target was found in the template before any row is cloned, so a clone moves no field away from its node.
   for (const group of schema.rowGroups) {
     if (!targets.has(group.id) && !isHere(group.loc, part)) continue;
-    if (writeGroup(group, targets.get(group.id), values.rows[group.id] ?? [], ids)) changed = true;
+    if (writeGroup(group, targets.get(group.id), values.rows[group.id] ?? [], ids, pictures)) changed = true;
   }
   for (const field of schema.fields) {
     const value = values.fields[field.id];
     if (!writable(field) || isBlank(value) || !isHere(field.loc, part)) continue;
     const target = targets.get(field.id);
     if (!target) throw new FormWriteError(`The field ${describe(field)} is not where it was in the file.`);
-    writeTarget(target, field, value);
+    writeTarget(target, field, value, pictures);
     changed = true;
   }
   return changed ? serializeXml(doc) : undefined;
+}
+
+/** `[Content_Types].xml` with `<Default Extension="jpeg" ContentType="image/jpeg"/>` after the last Default, else first in `Types`. */
+function withJpegDefault(types: string): string {
+  const entry = '<Default Extension="jpeg" ContentType="image/jpeg"/>';
+  const defaults = Array.from(types.matchAll(/<Default\b[^>]*\/>/g));
+  const last = defaults[defaults.length - 1];
+  if (last) return types.slice(0, last.index + last[0].length) + entry + types.slice(last.index + last[0].length);
+  return types.replace(/<Types\b[^>]*>/, (open) => open + entry);
 }
 
 function isHere(loc: string, part: string): boolean {
@@ -658,21 +819,31 @@ function isHere(loc: string, part: string): boolean {
  * for a value that has no place to go: a field or table whose address no longer fits the file, a choice that is not
  * one of the options, a checkbox given text, more rows than a table that cannot grow holds.
  *
- * `opts.photos` (photo id to JPEG bytes) is for picture fields, which Task 6 writes; until then it is not read.
+ * `opts.photos` (photo id to JPEG bytes) is for picture fields (see the top of this file); the new media parts and the
+ * changed `.rels` are in the result too, and `[Content_Types].xml` gets the jpeg `Default` when it lacks one.
  */
 export function writeWord(pkg: Package, schema: FormSchema, values: DraftValues, opts: { photos: Record<string, Uint8Array> }): Map<string, Uint8Array> {
-  void opts;
   const changed = new Map<string, Uint8Array>();
+  const media = new Map<string, Uint8Array>();
   for (const part of partsOf(schema)) {
     const text = partText(pkg, part);
     if (text === undefined) throw new FormWriteError(`The form has no part ${part}.`);
-    const written = writePart(text, part, schema, values);
-    if (written !== undefined) changed.set(part, bytesOf(written));
+    const pictures = new PartPictures(pkg, part, opts.photos, media);
+    const written = writePart(text, part, schema, values, { part: pictures, photos: opts.photos });
+    if (written === undefined) continue;
+    changed.set(part, bytesOf(written));
+    const rels = pictures.rels();
+    if (rels) changed.set(rels[0], rels[1]);
   }
-  const types = partText(pkg, '[Content_Types].xml');
-  if (types !== undefined && TEMPLATE_MAIN.test(types)) {
-    // A text replacement, so that nothing else in the part changes by a byte.
-    changed.set('[Content_Types].xml', bytesOf(types.replace(new RegExp(TEMPLATE_MAIN.source, 'gi'), DOCUMENT_MAIN)));
+  for (const [path, bytes] of media) changed.set(path, bytes);
+
+  let types = partText(pkg, '[Content_Types].xml');
+  if (types !== undefined) {
+    // Text replacements, so that nothing else in the part changes by a byte.
+    const before = types;
+    if (media.size > 0 && !JPEG_DEFAULT.test(types)) types = withJpegDefault(types);
+    if (TEMPLATE_MAIN.test(types)) types = types.replace(new RegExp(TEMPLATE_MAIN.source, 'gi'), DOCUMENT_MAIN);
+    if (types !== before) changed.set('[Content_Types].xml', bytesOf(types));
   }
   return changed;
 }

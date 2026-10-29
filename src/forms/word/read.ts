@@ -6,7 +6,8 @@ import type { DraftValues, FieldDef, FormSchema, FormValue } from '../types';
 import { parseXml } from '../xml';
 import { locateColumn, locateWord, parseLoc } from './address';
 import type { WordTarget } from './address';
-import { MC, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
+import { readRels } from './rels';
+import { A, MC, R, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
 
 /*
  * Reading the values of a filled Word form back (spec §8, the integrity check), through the stored addresses (R1):
@@ -22,6 +23,10 @@ import { MC, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
  *
  * A field that shows nothing a person gave reads as `null`: an empty FORMTEXT (no text, or only the en spaces Word
  * puts in an empty one), a content control showing its prompt, an empty cell.
+ *
+ * A picture field reads as the path of the media part its picture control shows (`word/media/mp-1.jpeg`), which is
+ * presence only: the photo id the draft holds is not in the file. A control still showing its placeholder reads as
+ * `null`.
  */
 
 /** What Word puts in an empty FORMTEXT: five en spaces (U+2002). A result of only en spaces, however many, is empty. */
@@ -153,8 +158,23 @@ export function controlOf(sdt: Element): { type: 'checkbox' | 'date' | 'dropDown
   return { type: 'text', sdtPr };
 }
 
-/** The value a target holds, or `undefined` for one this reader does not read (a picture, a group). */
-export function readTarget(target: WordTarget, field: FieldDef): FormValue | undefined {
+/**
+ * The media part a picture control shows: where its `a:blip` points through `rels` (the part's relationships, id to
+ * part path). `null` for a control showing its placeholder, or a picture that does not resolve to a part.
+ */
+function readPicture(sdt: Element, rels: ReadonlyMap<string, string>): FormValue {
+  const { sdtPr } = controlOf(sdt);
+  if (child(sdtPr, W, 'showingPlcHdr')) return null;
+  const blip = sdt.getElementsByTagNameNS(A, 'blip')[0];
+  const id = blip?.getAttributeNS(R, 'embed');
+  return (id && rels.get(id)) || null;
+}
+
+/**
+ * The value a target holds, or `undefined` for one this reader does not read (a group; a picture when `rels`, the
+ * relationships of the part the target is in, is not given).
+ */
+export function readTarget(target: WordTarget, field: FieldDef, rels?: ReadonlyMap<string, string>): FormValue | undefined {
   switch (target.kind) {
     case 'formtext': {
       const text = resultText(target.begin);
@@ -175,7 +195,7 @@ export function readTarget(target: WordTarget, field: FieldDef): FormValue | und
     }
     case 'sdt': {
       const control = controlOf(target.sdt);
-      if (control.type === 'picture') return undefined;
+      if (control.type === 'picture') return rels && field.kind === 'picture' ? readPicture(target.sdt, rels) : undefined;
       if (control.type === 'checkbox') return isOn(child(control.el, W14, 'checked'), W14);
       if (child(control.sdtPr, W, 'showingPlcHdr')) return null;
       const content = child(target.sdt, W, 'sdtContent');
@@ -215,7 +235,7 @@ export function partsOf(schema: FormSchema): string[] {
  *
  * Every field the reader can find is in `fields`, and every row of every group it can find is in `rows`, each with
  * every column. A field or group whose address does not resolve is left out, so a caller comparing values sees that it
- * is missing. Picture fields and columns are left out (Task 6 reads them).
+ * is missing. A picture field or column reads as its media part path, or `null` (see the top of this file).
  */
 export function readWordValues(pkg: Package, schema: FormSchema, extraRows: Record<string, number> = {}): DraftValues {
   const out: DraftValues = { fields: {}, rows: {} };
@@ -223,10 +243,11 @@ export function readWordValues(pkg: Package, schema: FormSchema, extraRows: Reco
     const text = partText(pkg, part);
     if (text === undefined) continue;
     const targets = locateWord(parseXml(text), part, schema, extraRows);
+    const rels = readRels(pkg, part);
     for (const field of schema.fields) {
       const target = targets.get(field.id);
-      if (!target || field.kind === 'picture') continue;
-      const value = readTarget(target, field);
+      if (!target) continue;
+      const value = readTarget(target, field, rels);
       if (value !== undefined) out.fields[field.id] = value;
     }
     for (const group of schema.rowGroups) {
@@ -235,9 +256,8 @@ export function readWordValues(pkg: Package, schema: FormSchema, extraRows: Reco
       out.rows[group.id] = target.rows.map((row) => {
         const record: Record<string, FormValue> = {};
         for (const column of group.columns) {
-          if (column.kind === 'picture') continue;
           const at = locateColumn(row, column);
-          const value = at && readTarget(at, column);
+          const value = at && readTarget(at, column, rels);
           if (value !== undefined) record[column.id] = value;
         }
         return record;
