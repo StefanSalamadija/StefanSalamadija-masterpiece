@@ -176,6 +176,18 @@ describe('detectExcel: the schema of each fixture', () => {
     ]);
   });
 
+  it('matrix: every cell of the matrix carries the matrix as its block, and no other field has one (R14)', () => {
+    const s = detect(matrixXlsx(), 'matrix.xlsx');
+    const inBlock = s.fields.filter((f) => f.block !== undefined);
+    expect(inBlock).toHaveLength(81);
+    expect(new Set(inBlock.map((f) => f.block))).toEqual(new Set(['Demo matrix!m1']));
+    expect(s.fields.filter((f) => f.block === undefined).map((f) => f.label)).toEqual(['Master', 'C/O']);
+    for (const make of [() => inventoryXlsx(5), dayGridXlsx, conditionListXlsx]) {
+      const other = detect(make());
+      expect([...other.fields, ...other.rowGroups.flatMap((g) => g.columns)].some((f) => f.block !== undefined)).toBe(false);
+    }
+  });
+
   it('condition list: M/V and Month, and the Condition and Remarks columns', () => {
     const s = detect(conditionListXlsx(), 'conditions.xlsx');
     expect(s.identity).toEqual({ code: 'TST-14', title: 'Demo Conditions', revision: '00 / 01.01.2026' });

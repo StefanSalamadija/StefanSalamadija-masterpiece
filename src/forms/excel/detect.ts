@@ -24,7 +24,8 @@ import type { SheetModel } from './workbook';
  * - a column of a row group: its column letters, e.g. `C`.
  *
  * Ids: a field is `<sheet name>!<A1>` (`Demo inventory!C6`), a row group `<sheet name>!g<n>` (`Demo inventory!g1`, by
- * order of `firstRow` in its sheet), and a column of a group `<group id>.<letters>` (`Demo inventory!g1.C`). The sheet's
+ * order of `firstRow` in its sheet), a column of a group `<group id>.<letters>` (`Demo inventory!g1.C`), and a matrix
+ * `<sheet name>!m<n>` (`Demo matrix!m1`, in document order): it is the `block` of each of its cells' fields (R14). The sheet's
  * name is what the person sees on the tab; it is unique in a workbook and stays the same when Excel renumbers the sheet
  * parts on saving. Ids are only keys: never parse one to find a cell, go to `loc`. (A sheet name may hold a `!`.)
  *
@@ -158,6 +159,7 @@ function detectSheet(grid: Grid, o: { title?: Origin; sectionDefault: string }):
 
   const fields = drafts.map((d) => makeField({
     id: `${sheet.name}!${columnLetters(d.col)}${d.row}`, loc: cellLoc(sheet.path, d.col, d.row), parts: d.parts, cell: d.cell, section: sectionAt(d.row), fallback: '',
+    ...(d.matrix === undefined ? {} : { block: `${sheet.name}!m${d.matrix}` }),
   }));
 
   const groups = [...tables.groups].sort((a, b) => a.firstRow - b.firstRow).map((g, i) => groupDef(sheet, g, i + 1, sectionAt(g.firstRow)));

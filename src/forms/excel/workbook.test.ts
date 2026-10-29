@@ -76,6 +76,9 @@ describe('number formats', () => {
     expect(kindOfFormat(172, '[h]:mm')).toBe('time');
     expect(kindOfFormat(173, '"dmy"@')).toBe('text');
     expect(kindOfFormat(174, '#,##0.00')).toBe('number');
+    // R15: a code with both a date and a time is a date.
+    expect(kindOfFormat(175, 'dd/mm hh:mm')).toBe('date');
+    expect(kindOfFormat(176, 'd/m/yyyy h:mm')).toBe('date');
   });
 
   it('gives a date format as a hint formatDate can render, or nothing', () => {

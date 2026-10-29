@@ -55,6 +55,12 @@ export interface FieldDef {
   formatHint?: string;
   /** A signature or stamp. It is never written, so the person signs the printed form. */
   leftEmpty?: boolean;
+  /**
+   * Excel only (R14): the block the field belongs to, when it is a cell of a matrix (an equipment × attribute grid).
+   * Every field of one matrix has the same block id, `<sheet>!m<n>` (the sheet's name and the matrix's number in it, in
+   * document order); a field outside a matrix has none. Helpers and the fill screen find a matrix's fields by it.
+   */
+  block?: string;
   /** `low` for a field whose label or kind was a guess, which the person is asked to check. */
   confidence: 'high' | 'low';
 }

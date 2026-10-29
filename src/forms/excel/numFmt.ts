@@ -55,13 +55,14 @@ function formatLetters(code: string): string {
 
 /**
  * What a cell with this format holds (spec §5.2):
- * - `date`: the built-in ids 14 to 17 and 22, or a code with a day, a month and a year (`d`, `m`, `y`);
+ * - `date`: the built-in ids 14 to 17 and 22, a code with a day, a month and a year (`d`, `m`, `y`), or a code with
+ *   both a date (`d` or `y`) and a time (`h` or `s`) in it (`dd/mm hh:mm`), R15;
  * - `time`: the built-in ids 18 to 21 and 45 to 47, or a code with hours or seconds and no date (`h:mm`, `[h]:mm`);
  * - `number`: any other built-in id but General (0) and Text (49), or a code with a digit placeholder (`0`, `#`, `?`);
  * - `text`: General, Text (`@`), and anything else.
  *
- * The brief makes all of 14 to 22 dates; 18 to 21 (`h:mm` and the like, which Excel gives a cell when a time is typed
- * into it) are kept as times instead, so that a time column is not asked for as a date.
+ * The brief made all of 14 to 22 dates; R15 keeps 18 to 21 (`h:mm` and the like, which Excel gives a cell when a time
+ * is typed into it) as times, so that a time column is not asked for as a date.
  */
 export function kindOfFormat(id: number, code: string | undefined): FormatKind {
   if ((id >= 14 && id <= 17) || id === 22) return 'date';
@@ -69,7 +70,7 @@ export function kindOfFormat(id: number, code: string | undefined): FormatKind {
   if (id === 0 || id === 49) return 'text';
   if (code === undefined) return id < 164 && builtInFormat(id) !== undefined ? 'number' : 'text';
   const letters = formatLetters(code);
-  if (/d/.test(letters) && /m/.test(letters) && /y/.test(letters)) return 'date';
+  if ((/d/.test(letters) && /m/.test(letters) && /y/.test(letters)) || (/[dy]/.test(letters) && /[hs]/.test(letters))) return 'date';
   if (/[hs]/.test(letters) && !/[dy]/.test(letters)) return 'time';
   if (/[0#?]/.test(letters)) return 'number';
   return 'text';

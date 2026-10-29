@@ -18,7 +18,14 @@ import type { CellModel } from './workbook';
  */
 
 /** A field found in a block, before it is given its id: its cell and the parts of its label. */
-export interface FieldDraft { row: number; col: number; parts: string[]; cell: CellModel | undefined }
+export interface FieldDraft {
+  row: number;
+  col: number;
+  parts: string[];
+  cell: CellModel | undefined;
+  /** For a cell of a matrix: the matrix's number in the sheet, from 1, top to bottom. */
+  matrix?: number;
+}
 
 /** A row group found in a block, before it is given its id and section. */
 export interface GroupDraft {
@@ -48,7 +55,7 @@ interface Header {
   c2: number;
 }
 
-interface Block { fields: FieldDraft[]; groups: GroupDraft[]; claimed: number[]; next: number }
+interface Block { fields: FieldDraft[]; groups: GroupDraft[]; claimed: number[]; next: number; matrix?: true }
 
 /** A cell of a header row: bordered, with letters in it, and no formula. */
 function isHeaderCell(grid: Grid, o: Origin): boolean {
@@ -211,7 +218,7 @@ function matrixBlock(grid: Grid, header: Header, corner: Origin, cols: number[],
   const byColumn = [...kinds.values()].filter((k) => k.size > 0);
   const typedByColumn = byColumn.every((k) => k.size === 1) && new Set(byColumn.map((k) => [...k][0])).size > 1;
   if (named === 0 || fields.length === 0 || typedByColumn) return undefined;
-  return { fields, groups: [], claimed: claimedKeys(grid, header, rows, nameCols.concat(cols)), next };
+  return { fields, groups: [], claimed: claimedKeys(grid, header, rows, nameCols.concat(cols)), next, matrix: true };
 }
 
 /** The keys of the header cells and of every cell of the block's rows. */
@@ -352,6 +359,7 @@ function groupOf(grid: Grid, run: Run, title: (c: number) => string, rowName: (r
 /** Every table block of a sheet, top to bottom. */
 export function findTables(grid: Grid): Tables {
   const out: Tables = { fields: [], groups: [], claimed: new Set() };
+  let matrices = 0;
   for (let row = 1; row <= grid.maxRow;) {
     const header = headerAt(grid, row);
     if (!header) {
@@ -366,6 +374,10 @@ export function findTables(grid: Grid): Tables {
     if (block.fields.length === 0 && block.groups.length === 0) {
       row += 1;
       continue;
+    }
+    if (block.matrix) {
+      matrices += 1;
+      for (const f of block.fields) f.matrix = matrices;
     }
     out.fields.push(...block.fields);
     out.groups.push(...block.groups);
