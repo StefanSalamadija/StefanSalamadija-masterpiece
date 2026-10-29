@@ -38,3 +38,15 @@ export class FormTooLargeError extends FormFileError {
 export class DamagedFormError extends FormFileError {
   constructor() { super("This file couldn't be read. It may be damaged.", 'DamagedFormError'); }
 }
+
+/**
+ * A value a writer (Word or Excel) refuses because it has no place to go in the form: a field whose address no longer
+ * fits the file, a formula cell, a choice that is not one of the options, more rows than a table holds. The message
+ * names the field (its id and label). It is not shown as it is: the app treats it as a file it could not make.
+ */
+export class FormWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FormWriteError';
+  }
+}

@@ -46,3 +46,15 @@ export function parseXml(text: string): Document {
 export function serializeXml(doc: Document): string {
   return new XMLSerializer().serializeToString(doc as unknown as XmldomDocument);
 }
+
+/** Characters XML 1.0 cannot hold, which a value could carry from a paste: control characters and lone surrogates. */
+const NOT_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * The text a value becomes in a written part, which is also what reads back from it: line ends as `\n` (a `\r` would
+ * be read back as `\n` by any XML parser), and without the characters XML 1.0 cannot hold. The Word and Excel writers
+ * both write their text through it.
+ */
+export function xmlText(value: string): string {
+  return value.replace(/\r\n?/g, '\n').replace(NOT_XML, '');
+}

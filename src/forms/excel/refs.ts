@@ -66,3 +66,10 @@ export function parseCellLoc(loc: string): { part: string; ref: string; row: num
   const cell = parseRef(ref);
   return cell && /^[A-Z]+\d+$/.test(ref) ? { part: loc.slice(0, at), ref, ...cell } : undefined;
 }
+
+/** The number of a row group column's `loc` (its letters, `C`), or `undefined` when it is not a column in the sheet. */
+export function columnOfLoc(letters: string): number | undefined {
+  if (!/^[A-Z]{1,3}$/.test(letters)) return undefined;
+  const col = columnNumber(letters);
+  return col <= MAX_COL ? col : undefined;
+}

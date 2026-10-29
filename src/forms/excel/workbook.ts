@@ -34,6 +34,8 @@ export interface CellModel {
    * number as written in the file (`2.5`, a date's serial), `TRUE`/`FALSE`, or an error (`#N/A`). `''` when empty.
    */
   text: string;
+  /** The cell's `t` (`s`, `str`, `inlineStr`, `b`, `e`, `n`), or `undefined` for a number written with none. */
+  type?: string;
   /** The formula, when the cell has one (`''` for a cell that shares the formula of another). */
   formula?: string;
   /** The index of the cell's format in `cellXfs` (its `s`), 0 when it has none. */
@@ -78,12 +80,13 @@ export interface Workbook {
 // ---------------------------------------------------------------------------------------------------------------
 // XML and relationships
 
+/** A SpreadsheetML element (transitional or strict). */
 function isSml(node: Node | null): node is Element {
   return node !== null && node.nodeType === 1 && SML.has((node as Element).namespaceURI ?? '');
 }
 
 /** The SpreadsheetML child elements of `el`, all or by local name. */
-function kids(el: Element, name?: string): Element[] {
+export function kids(el: Element, name?: string): Element[] {
   const out: Element[] = [];
   for (let n = el.firstChild; n !== null; n = n.nextSibling) {
     if (isSml(n) && (name === undefined || n.localName === name)) out.push(n);
@@ -91,14 +94,15 @@ function kids(el: Element, name?: string): Element[] {
   return out;
 }
 
-function kid(el: Element | undefined, name: string): Element | undefined {
+/** The first SpreadsheetML child element of `el` with this local name. */
+export function kid(el: Element | undefined, name: string): Element | undefined {
   if (!el) return undefined;
   for (let n = el.firstChild; n !== null; n = n.nextSibling) if (isSml(n) && n.localName === name) return n;
   return undefined;
 }
 
 /** The text of the `t` elements of a string item: its own `t`, or the `t` of each rich text run (`r`). Not `rPh`. */
-function stringItemText(si: Element): string {
+export function stringItemText(si: Element): string {
   let text = '';
   for (let n = si.firstChild; n !== null; n = n.nextSibling) {
     if (!isSml(n)) continue;
@@ -113,7 +117,8 @@ function decodeEscapes(s: string): string {
   return s.includes('_x') ? s.replace(/_x([0-9A-Fa-f]{4})_/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))) : s;
 }
 
-function isTrue(value: string | null): boolean {
+/** An XML boolean attribute that is on (`1` or `true`). */
+export function isTrue(value: string | null): boolean {
   return value === '1' || value === 'true';
 }
 
@@ -154,7 +159,7 @@ export function relsOf(pkg: Package, part: string): Rel[] {
 }
 
 /** The first relationship whose type ends with `/<kind>` (`worksheet`, `styles`), in either namespace. */
-function relOfType(rels: Rel[], kind: string): Rel | undefined {
+export function relOfType(rels: Rel[], kind: string): Rel | undefined {
   return rels.find((r) => r.type.endsWith(`/${kind}`));
 }
 
@@ -169,7 +174,8 @@ function relId(el: Element): string | undefined {
 // ---------------------------------------------------------------------------------------------------------------
 // Styles and shared strings
 
-interface Format { numFmtId: number; numFmt?: string; bordered: boolean; bold: boolean; fontSize?: number }
+/** What the writer and reader need of a cell format (an `xf` of `cellXfs`). */
+export interface Format { numFmtId: number; numFmt?: string; bordered: boolean; bold: boolean; fontSize?: number }
 
 const PLAIN: Format = { numFmtId: 0, bordered: false, bold: false };
 
@@ -336,6 +342,7 @@ function readSheet(text: string, o: { name: string; path: string; hidden: boolea
             : type === 'str' ? decodeEscapes(v ?? '') : v ?? '';
       const ref = refOf(colNumber, row);
       const cell: CellModel = { ref, row, col: colNumber, text, styleId, bordered: format.bordered, numFmtId: format.numFmtId, bold: format.bold };
+      if (type !== null) cell.type = type;
       if (formula !== undefined) cell.formula = formula;
       if (format.numFmt !== undefined) cell.numFmt = format.numFmt;
       if (format.fontSize !== undefined) cell.fontSize = format.fontSize;
@@ -353,8 +360,13 @@ function readSheet(text: string, o: { name: string; path: string; hidden: boolea
 }
 
 /** The workbook part: the `officeDocument` relationship of the package, else Excel's usual path. */
-function workbookPath(pkg: Package): string {
+export function workbookPath(pkg: Package): string {
   return relOfType(relsOf(pkg, ''), 'officeDocument')?.target ?? 'xl/workbook.xml';
+}
+
+/** The formats of `cellXfs` in the workbook's styles part, by index (a cell's `s`); one plain format when it has none. */
+export function loadFormats(pkg: Package, rels: Rel[]): Format[] {
+  return readStyles(partText(pkg, relOfType(rels, 'styles')?.target ?? ''));
 }
 
 /**
@@ -367,7 +379,7 @@ export function loadWorkbook(pkg: Package): Workbook {
   if (text === undefined) throw new NotAFormError();
   const root = parseXml(text).documentElement;
   const rels = relsOf(pkg, path);
-  const formats = readStyles(partText(pkg, relOfType(rels, 'styles')?.target ?? ''));
+  const formats = loadFormats(pkg, rels);
   const strings = readSharedStrings(partText(pkg, relOfType(rels, 'sharedStrings')?.target ?? ''));
 
   const printAreas = new Map<number, string>();

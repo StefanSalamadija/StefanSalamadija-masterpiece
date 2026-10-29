@@ -1,9 +1,10 @@
 import { isValidIsoDate } from '../../domain/dates';
+import { FormWriteError } from '../errors';
 import { formatDate, usableDateHint } from '../format';
 import { bytesOf, partText } from '../package';
 import type { Package } from '../package';
 import type { DraftValues, FieldDef, FormSchema, FormValue, RowGroupDef } from '../types';
-import { parseXml, serializeXml } from '../xml';
+import { parseXml, serializeXml, xmlText } from '../xml';
 import { locateColumn, locateWord } from './address';
 import type { WordTarget } from './address';
 import { EMPTY_FORMTEXT, controlOf, fieldRange, isOn, partsOf } from './read';
@@ -69,8 +70,6 @@ const IMAGE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relatio
 const CHECKED_SYMBOL = 'F0FE';
 /** What an empty box written as text (detection's `BOX_TEXT`, ☐ or □) becomes: ☒. */
 const CHECKED_TEXT = '\u2612';
-/** Characters XML 1.0 cannot hold, which a value could carry from a paste: control characters and lone surrogates. */
-const NOT_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 /** Elements a paragraph or control keeps when its runs are replaced. */
 const KEPT = new Set(['pPr', 'bookmarkStart', 'bookmarkEnd', 'permStart', 'permEnd', 'commentRangeStart', 'commentRangeEnd']);
 /** Paragraph-mark properties that are revisions, not formatting, and are not copied into a run. */
@@ -79,20 +78,14 @@ const MARK_ONLY = new Set(['ins', 'del', 'moveFrom', 'moveTo', 'rPrChange']);
 const AFTER_JC = new Set(['textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange']);
 const MAX_FIELD_NAME = 20;
 
-/** A value the writer refuses: it names the field, so the person can be told which one. */
-export class FormWriteError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'FormWriteError';
-  }
-}
+export { FormWriteError };
 
 /**
- * The text a value becomes in the file: line ends as `\n`, and without the characters XML cannot hold. A value read
- * back from the output equals `wordText` of the value written.
+ * The text a value becomes in the file: line ends as `\n`, and without the characters XML cannot hold (`xmlText`). A
+ * value read back from the output equals `wordText` of the value written.
  */
 export function wordText(value: string): string {
-  return value.replace(/\r\n?/g, '\n').replace(NOT_XML, '');
+  return xmlText(value);
 }
 
 /** For each group given more rows than it holds, how many rows are cloned: `rows given − capacity` (R1). */
