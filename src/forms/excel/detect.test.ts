@@ -441,6 +441,45 @@ describe('detectExcel rules', () => {
     expect(s.fields).toEqual([]);
   });
 
+  /** Items 9 to 16 with Spec and Qty to fill and a Value column worked out on each row, and an optional last row. */
+  function listWithValues(value: (r: number) => string, o: { label?: (r: number) => string; last?: [string, string] } = {}): Uint8Array {
+    const sheet = probeSheet('List');
+    ['Item', 'Spec', 'Qty', 'Value'].forEach((t, i) => sheet.set(`${'BCDE'[i]}8`, t, STYLE.header));
+    for (let r = 9; r <= 16; r += 1) {
+      sheet.set(`B${r}`, o.label?.(r) ?? `Item ${r}`, STYLE.cell).blank(`C${r}`, STYLE.cell).blank(`D${r}`, STYLE.number);
+      sheet.set(`E${r}`, { formula: value(r), value: 0 }, STYLE.number);
+    }
+    if (o.last) sheet.set('B17', o.last[0], STYLE.cell).blank('C17', STYLE.cell).blank('D17', STYLE.number).set('E17', { formula: o.last[1], value: 0 }, STYLE.number);
+    return sheet.toPackage({ printArea: 'A1:E20', logo: 'A1:A3' });
+  }
+
+  it.each([
+    ['a running sum', (r: number) => `SUM($D$9:D${r})`],
+    ['a rank', (r: number) => `RANK(D${r},$D$9:$D$16)`],
+    ['a lookup elsewhere on the sheet', (r: number) => `VLOOKUP(B${r},$H$1:$I$50,2,0)`],
+    ['a share of the total', (r: number) => `D${r}/SUM(D$9:D$16)`],
+  ])('keeps every row in the group when each row works out %s, and still leaves out the sum under it', (_name, value) => {
+    const whole = detect(listWithValues(value));
+    expect(whole.rowGroups.map((g) => [g.firstRow, g.capacity, g.columns.map((c) => c.loc)])).toEqual([[9, 8, ['C', 'D']]]);
+    // A last row named `Sum` (not `Total`) whose formula adds up the rows above it is a total.
+    const withSum = detect(listWithValues(value, { last: ['Sum', 'SUM(E9:E16)'] }));
+    expect(withSum.rowGroups.map((g) => [g.firstRow, g.capacity])).toEqual([[9, 8]]);
+    expect(withSum.fields).toEqual([]);
+  });
+
+  it('does not take a range on another sheet for a total', () => {
+    const s = detect(listWithValues((r) => `D${r}*2`, { last: ['Item 17', '\'Other sheet\'!D9:D16'] }));
+    expect(s.rowGroups.map((g) => [g.firstRow, g.capacity])).toEqual([[9, 9]]);
+  });
+
+  it('keeps an item that only starts with the word Total in the group, and leaves out a row called Total:', () => {
+    const label = (r: number) => (r === 12 ? 'Total hours' : `Item ${r}`);
+    const s = detect(listWithValues((r) => `D${r}*2`, { label, last: ['Total:', 'D9'] }));
+    const g = s.rowGroups[0]!;
+    expect([s.rowGroups.length, g.capacity, g.rowLabels![3]]).toEqual([1, 8, 'Total hours']);
+    expect(s.fields).toEqual([]);
+  });
+
   it('keeps a total row out when it sums the rows, or is called Total, with no formula column above', () => {
     for (const [label, formula] of [['Sum', 'SUM(D9:D13)'], ['Grand total', 'D9+D10']] as const) {
       const sheet = probeSheet('Totals');

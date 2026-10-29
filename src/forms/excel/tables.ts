@@ -2,6 +2,7 @@ import { normaliseLabel } from '../labels';
 import type { RowGroupDef } from '../types';
 import { isIdentityText, isStopLabel, kindOf, labelText } from './fields';
 import { hasLetters } from './grid';
+import { columnNumber } from './refs';
 import type { Grid, Origin } from './grid';
 import type { CellModel } from './workbook';
 
@@ -262,37 +263,51 @@ interface Run {
   formulaCols: Set<number>;
 }
 
-/** A row that totals the rows above it: `Total`, `Sub-total`, `Grand total`, `Totals` (generic words). */
-const TOTAL = /^(?:grand\s+|sub-?\s*)?totals?\b/i;
-/** A range of cells in a formula (`E9:E13`, `$E$9:$E$13`), with its two rows. */
-const RANGE = /\$?[A-Z]{1,3}\$?(\d+)\s*:\s*\$?[A-Z]{1,3}\$?(\d+)/gi;
-/** A range of whole columns in a formula (`E:E`). */
-const COLUMNS = /(?:^|[^A-Za-z0-9_$.])\$?[A-Z]{1,3}:\$?[A-Z]{1,3}(?![A-Za-z0-9_(])/i;
+/** The whole label of a row that totals the rows above it: `Total`, `Totals`, `Sub-total`, `Subtotal`, `Grand total`, with an optional `:`. */
+const TOTAL = /^(?:grand\s+total|sub-?\s*total|total)s?\s*:?$/i;
+/**
+ * A range of cells in a formula (`E9:E13`, `$E$9:$E$13`, `'Other sheet'!A1:B4`): its sheet (when named), and its two
+ * corners' columns and rows.
+ */
+const RANGE = /(?:('(?:[^']|'')+'|[A-Za-z0-9_.]+)!)?\$?([A-Z]{1,3})\$?(\d+)\s*:\s*\$?([A-Z]{1,3})\$?(\d+)/gi;
 
-/** The formula works on a range that holds two rows of the run or more (`SUM(E9:E13)`), or on whole columns. */
-function sumsRun(formula: string, rows: readonly number[]): boolean {
-  if (COLUMNS.test(formula)) return true;
+/**
+ * The formula adds up rows above it (`SUM(E9:E13)` in row 14): one of its ranges is on this sheet, overlaps the
+ * block's columns, ends above the formula's own row, and holds two rows of the run or more. A range that reaches the
+ * formula's row or below (a running sum `SUM($D$9:D12)`, `RANK(D12,$D$9:$D$16)`, a share of a total), one elsewhere
+ * (`VLOOKUP(B12,$H$1:$I$50,2,0)`), or on another sheet is a formula of the row, not a total.
+ */
+function sumsRun(formula: string, o: { row: number; rows: readonly number[]; c1: number; c2: number; sheet: string }): boolean {
   for (const m of formula.matchAll(RANGE)) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (rows.filter((row) => row >= Math.min(a, b) && row <= Math.max(a, b)).length >= 2) return true;
+    if (m[1] !== undefined) {
+      const sheet = m[1].startsWith('\'') ? m[1].slice(1, -1).replace(/''/g, '\'') : m[1];
+      if (sheet.toLowerCase() !== o.sheet.toLowerCase()) continue;
+    }
+    const ca = columnNumber(m[2]!.toUpperCase());
+    const cb = columnNumber(m[4]!.toUpperCase());
+    const ra = Number(m[3]);
+    const rb = Number(m[5]);
+    if (Math.max(ca, cb) < o.c1 || Math.min(ca, cb) > o.c2 || Math.max(ra, rb) >= o.row) continue;
+    if (o.rows.filter((r) => r >= Math.min(ra, rb) && r <= Math.max(ra, rb)).length >= 2) return true;
   }
   return false;
 }
 
 /**
- * A row under a run that totals it, and so is neither a row of it nor a place to write: its first text is `Total`
- * (or `Sub-total`, `Grand total`), or one of its formulas is in a column where the run's rows have none, or adds up
- * the run (`SUM(E9:E13)`). A column worked out on every row (`=D9*2`) is not a total.
+ * A row under a run that totals it, and so is neither a row of it nor a place to write: its first text is the whole
+ * word `Total` (or `Sub-total`, `Grand total`), or one of its formulas is in a column where the run's rows have none,
+ * or adds up the run above it (see `sumsRun`). A column worked out on every row (`=D9*2`) is not a total, and neither
+ * is an item that only starts with the word (`Total hours`).
  */
 function isTotalRow(grid: Grid, run: Run | undefined, row: number, cols: readonly number[]): boolean {
   const first = cols.map((c) => grid.origin(row, c)).find((o) => o.row === row && !grid.isFormula(o) && grid.text(o) !== '');
   if (first && TOTAL.test(grid.text(first))) return true;
   if (!run) return false;
+  const where = { row, rows: run.rows, c1: cols[0]!, c2: cols[cols.length - 1]!, sheet: grid.sheet.name };
   return cols.some((c) => {
     const o = grid.origin(row, c);
     if (o.row !== row || o.col !== c || !grid.isFormula(o)) return false;
-    return !run.formulaCols.has(c) || sumsRun(o.cell!.formula!, run.rows);
+    return !run.formulaCols.has(c) || sumsRun(o.cell!.formula!, where);
   });
 }
 
