@@ -5,6 +5,10 @@ const LONG_MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
 ] as const;
 
+/** Sunday first, as `Date.getUTCDay` counts. */
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const LONG_WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
 /** A run of one letter that stands for a part of a date, in either case. `([dmy])\1*` is one letter and the repeats of it. */
 const DATE_LETTERS = /([dmy])\1*/gi;
 
@@ -15,12 +19,12 @@ function pad(n: number, width: number): string {
 /**
  * A date as a form asks for it. `iso` is `YYYY-MM-DD` and `hint` is a pattern made of these tokens, each a run of the
  * same letter, in either case:
- * - `d` the day, `dd` the day with 2 digits;
+ * - `d` the day, `dd` the day with 2 digits, `ddd` the weekday as `Wed`, `dddd` the weekday as `Wednesday`;
  * - `M` the month number, `MM` the month with 2 digits (`m` and `mm` do the same: a hint is of a date alone, so they are
  *   never minutes), `MMM` the month as `Oct`, `MMMM` the month as `October`;
  * - `yy` the year with 2 digits, `yyyy` the year with 4.
  *
- * Every other character is kept as it is, and so is a run of d, m or y that is not one of those (`dddd`, `yyy`).
+ * Every other character is kept as it is, and so is a run of d, m or y that is not one of those (`ddddd`, `yyy`).
  * `formatDate('2026-10-28', 'dd/MMM/yyyy')` is `28/Oct/2026`.
  *
  * With no hint (or an empty one), or a hint with no token in it (`(24:00 UTC)`), it is the app's own display date, `28-OCT-2026`. Text that is not a real date is given
@@ -46,8 +50,11 @@ export function formatDate(iso: string, hint?: string): string {
 /** What a run of `length` of the letter `d`, `m` or `y` stands for, or `undefined` when the run is not a token. */
 function tokenOf(letter: string, length: number, date: { year: number; month: number; day: number }): string | undefined {
   switch (letter) {
-    case 'd':
-      return length === 1 ? String(date.day) : length === 2 ? pad(date.day, 2) : undefined;
+    case 'd': {
+      if (length <= 2) return length === 1 ? String(date.day) : pad(date.day, 2);
+      const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
+      return length === 3 ? SHORT_WEEKDAYS[weekday] : length === 4 ? LONG_WEEKDAYS[weekday] : undefined;
+    }
     case 'm':
       if (length === 1) return String(date.month);
       if (length === 2) return pad(date.month, 2);
@@ -85,6 +92,7 @@ export function parseDate(text: string, hint?: string): string | undefined {
     const letter = piece[1].toLowerCase();
     const length = run.length;
     const group = letter === 'd' && length <= 2 ? '(\\d{1,2})'
+      : letter === 'd' && length <= 4 ? '(\\p{L}+)'
       : letter === 'm' && length <= 2 ? '(\\d{1,2})'
         : letter === 'm' && length <= 4 ? '(\\p{L}+)'
           : letter === 'y' && (length === 2 || length === 4) ? `(\\d{${length}})` : undefined;
@@ -92,7 +100,7 @@ export function parseDate(text: string, hint?: string): string | undefined {
     last = piece.index + length;
     if (group === undefined) continue;
     tokens += 1;
-    if (letter === 'd') readers.push((s) => { parts.day = Number(s); });
+    if (letter === 'd') readers.push(length <= 2 ? (s) => { parts.day = Number(s); } : () => undefined); // the weekday follows from the date
     else if (letter === 'm') readers.push(length <= 2 ? (s) => { parts.month = Number(s); } : (s) => { parts.month = monthOf(s); });
     else readers.push(length === 2 ? (s) => { parts.year = 2000 + Number(s); } : (s) => { parts.year = Number(s); });
   }
@@ -114,4 +122,17 @@ export function parseDate(text: string, hint?: string): string | undefined {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** A time, or the AM/PM marker, outside quoted text: `h`, `H`, `s`, `AM/PM`. */
+const TIME_TOKENS = /[hHs]|AM\/PM/;
+
+/**
+ * `hint` when `formatDate` can render it, else `undefined` (R13). A Word date format can ask for a time (`h:mm AM/PM`,
+ * `HH:mm:ss`), which `formatDate` would print as letters; such a hint is not used. Quoted text (`'at'`, `"h"`) is
+ * literal and does not count.
+ */
+export function usableDateHint(hint: string | undefined): string | undefined {
+  if (hint === undefined) return undefined;
+  return TIME_TOKENS.test(hint.replace(/'[^']*'|"[^"]*"/g, '')) ? undefined : hint;
 }

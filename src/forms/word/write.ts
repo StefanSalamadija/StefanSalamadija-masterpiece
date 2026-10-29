@@ -1,13 +1,13 @@
 import { isValidIsoDate } from '../../domain/dates';
-import { formatDate } from '../format';
+import { formatDate, usableDateHint } from '../format';
 import { bytesOf, partText } from '../package';
 import type { Package } from '../package';
 import type { DraftValues, FieldDef, FormSchema, FormValue, RowGroupDef } from '../types';
 import { parseXml, serializeXml } from '../xml';
 import { locateColumn, locateWord } from './address';
 import type { WordTarget } from './address';
-import { controlOf, fieldRange, partsOf } from './read';
-import { W, W14, child, isEl, kids, wAttr } from './walk';
+import { EMPTY_FORMTEXT, controlOf, fieldRange, isOn, partsOf } from './read';
+import { BOX_CHARS, BOX_TEXT, W, W14, child, isEl, kids, wAttr } from './walk';
 
 /*
  * Writing a draft's values into a copy of a Word form (spec §8, rulings R1 and R2).
@@ -16,6 +16,10 @@ import { W, W14, child, isEl, kids, wAttr } from './walk';
  * nothing is detected again. Only the nodes of the fields change, plus the rows cloned for a group that needs more than
  * it has. Clones go straight after the group's last row (a `w:tr`) or last item (the item `w:sdt` of a repeating
  * section), so that `locateWord(output, part, schema, extraRowsOf(schema, values))` finds every address in the output.
+ *
+ * Apart from inserting clones, writing never changes the number of children of an element outside the field being
+ * written, so no other stored address moves (R12): a FORMTEXT keeps its runs (see `writeFormText`), and every column
+ * of a row is found before any of them is written.
  *
  * Rows are cloned before anything is filled, so a clone is a copy of the template's own last row or item. A clone's
  * columns that are given no value are cleared all the same, so that text the template's last item held is not copied
@@ -28,7 +32,8 @@ import { W, W14, child, isEl, kids, wAttr } from './walk';
  *   after it, `k` the smallest number not yet taken, the name cut so that the whole is at most 20 characters, Word's
  *   limit for a form field's name (`Dropdown3` becomes `Dropdown3_1`, then `Dropdown3_2`). A legacy form field's
  *   `w:ffData/w:name` follows its bookmark, or gets a name of its own in the same way when it has none, because Word
- *   refuses two form fields of the same name. A bookmark whose start or end is outside the clone is dropped from it;
+ *   refuses two form fields of the same name. A bookmark start or end whose other half is outside the clone gets a
+ *   new id (and the start a new name) too; nothing is removed from a clone, so its columns stay where they were (R12);
  * - `wp:docPr/@id` of a drawing gets one more than the largest in the part;
  * - `w14:paraId` and `w14:textId` are removed: they are optional, must be unique, and Word makes new ones.
  *
@@ -42,12 +47,9 @@ const DOCUMENT_MAIN = 'application/vnd.openxmlformats-officedocument.wordprocess
 const TEMPLATE_MAIN = /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.template\.main\+xml/i;
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
 const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
-const EMPTY_FORMTEXT = '\u2002'.repeat(5);
-/** `w:sym` characters of an empty box (as detection finds them); each becomes the checked box `F0FE` of the same font. */
-const BOX_SYMBOLS = new Set(['F0A8', 'F06F', 'F071']);
+/** The checked box an empty box symbol (detection's `BOX_CHARS`) becomes, in the same font. */
 const CHECKED_SYMBOL = 'F0FE';
-/** An empty box written as text, ☐ or □, which becomes ☒. */
-const BOX_TEXT = /[\u2610\u25A1]/;
+/** What an empty box written as text (detection's `BOX_TEXT`, ☐ or □) becomes: ☒. */
 const CHECKED_TEXT = '\u2612';
 /** Characters XML 1.0 cannot hold, which a value could carry from a paste: control characters and lone surrogates. */
 const NOT_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
@@ -97,11 +99,18 @@ function setW(target: Element, name: string, value: string): void {
   target.setAttributeNS(W, `w:${name}`, value);
 }
 
-/** A copy of run properties, without the grey `PlaceholderText` style a control's prompt is shown in. */
+/** Takes out of run properties the grey `PlaceholderText` style a control's prompt is shown in, and a tracked change of them. */
+function cleanRunProperties(rPr: Element): void {
+  for (const k of kids(rPr)) {
+    if ((isEl(k, W, 'rStyle') && wAttr(k, 'val') === 'PlaceholderText') || isEl(k, W, 'rPrChange')) rPr.removeChild(k);
+  }
+}
+
+/** A copy of run properties, cleaned (see `cleanRunProperties`). */
 function runProperties(rPr: Element | undefined): Element | undefined {
   if (!rPr) return undefined;
   const copy = rPr.cloneNode(true) as Element;
-  for (const style of kids(copy).filter((k) => isEl(k, W, 'rStyle') && wAttr(k, 'val') === 'PlaceholderText')) copy.removeChild(style);
+  cleanRunProperties(copy);
   return copy;
 }
 
@@ -114,21 +123,28 @@ function markProperties(p: Element): Element | undefined {
   return copy.firstChild ? copy : undefined;
 }
 
-/** One run holding `text`: `w:t` pieces, with `w:br` for each line break and `w:tab` for each tab. */
-function textRun(doc: Document, rPr: Element | undefined, text: string): Element {
-  const r = el(doc, 'r');
-  if (rPr) r.appendChild(rPr);
+/** The content of a run holding `text`: `w:t` pieces, with `w:br` for each line break and `w:tab` for each tab. */
+function textPieces(doc: Document, text: string): Element[] {
+  const out: Element[] = [];
   wordText(text).split('\n').forEach((line, i) => {
-    if (i > 0) r.appendChild(el(doc, 'br'));
+    if (i > 0) out.push(el(doc, 'br'));
     line.split('\t').forEach((piece, j) => {
-      if (j > 0) r.appendChild(el(doc, 'tab'));
+      if (j > 0) out.push(el(doc, 'tab'));
       if (piece === '') return;
       const t = el(doc, 't');
       if (/^\s|\s$/.test(piece)) t.setAttributeNS(XML_NS, 'xml:space', 'preserve');
       t.appendChild(doc.createTextNode(piece));
-      r.appendChild(t);
+      out.push(t);
     });
   });
+  return out;
+}
+
+/** One run holding `text`, in the properties `rPr`. */
+function textRun(doc: Document, rPr: Element | undefined, text: string): Element {
+  const r = el(doc, 'r');
+  if (rPr) r.appendChild(rPr);
+  for (const piece of textPieces(doc, text)) r.appendChild(piece);
   return r;
 }
 
@@ -251,20 +267,18 @@ function renumber(clone: Element, ids: CloneIds): void {
   for (const start of starts) {
     const old = wAttr(start, 'id');
     const end = ends.find((e) => wAttr(e, 'id') === old);
-    if (!end) {
-      start.parentNode!.removeChild(start);
-      continue;
-    }
     const id = String(ids.bookmarkId());
     setW(start, 'id', id);
-    setW(end, 'id', id);
     const oldName = wAttr(start, 'name') ?? '';
     const name = ids.name(oldName || 'Field');
-    renamed.set(oldName, name);
     setW(start, 'name', name);
+    if (!end) continue; // its end is outside the clone: a start of its own that ends nowhere, which Word drops
+    setW(end, 'id', id);
+    renamed.set(oldName, name);
     ends.splice(ends.indexOf(end), 1);
   }
-  for (const end of ends) end.parentNode!.removeChild(end); // ends whose start is outside the clone
+  // Ends whose start is outside the clone get an id of their own. Nothing is removed, so no address in the clone moves (R12).
+  for (const end of ends) setW(end, 'id', String(ids.bookmarkId()));
 
   for (const name of within(W, 'name')) {
     if (!isEl(name.parentNode, W, 'ffData')) continue;
@@ -281,33 +295,88 @@ function renumber(clone: Element, ids: CloneIds): void {
 // ---------------------------------------------------------------------------------------------------------------
 // Writing each kind of target
 
-/** Replaces a FORMTEXT's result with one run of `text`, in the properties of its first result run (else its begin run's). */
+/** Whether a run is inside deleted or moved-away text (`w:del`, `w:moveFrom`), up to `stop`. */
+function isDeleted(run: Element, stop: Node | null): boolean {
+  for (let node = run.parentNode; node && node !== stop; node = node.parentNode) {
+    if (isEl(node, W, 'del') || isEl(node, W, 'moveFrom')) return true;
+  }
+  return false;
+}
+
+/** Removes every child element of a run but its properties, so that it is an empty `w:r`. */
+function emptyRun(run: Element): void {
+  for (const k of kids(run)) if (!isEl(k, W, 'rPr')) run.removeChild(k);
+}
+
+/**
+ * Writes `text` as a FORMTEXT's result, keeping the number of children of every element outside the field's runs, so
+ * that no other stored address moves (R12):
+ * - the first result run is reused: it keeps its properties and takes the text; the other result runs stay as empty
+ *   `w:r` (runs inside a revision or a hyperlink too);
+ * - with no result run, the text goes in the separate's own run, after the `separate`, in the begin run's properties;
+ * - with no `separate`, one is put inside the end run, before its `end`, and the text after it.
+ * Text an earlier write left in the separate's or the end's run is removed first. A result that runs over more than
+ * one paragraph is refused.
+ */
 function writeFormText(begin: Element, text: string, field: FieldDef): void {
   const doc = begin.ownerDocument;
   const beginRun = begin.parentNode as Element;
-  let { separate, end } = fieldRange(begin);
+  const range = fieldRange(begin);
+  const end = range.end;
   if (!end) throw new FormWriteError(`The field ${describe(field)} has no end in the file.`);
   const endRun = end.parentNode as Element;
+  let separate = range.separate;
   if (!separate) {
-    const run = el(doc, 'r');
-    const rPr = runProperties(child(beginRun, W, 'rPr'));
-    if (rPr) run.appendChild(rPr);
     separate = el(doc, 'fldChar');
     setW(separate, 'fldCharType', 'separate');
-    run.appendChild(separate);
-    endRun.parentNode!.insertBefore(run, endRun);
+    endRun.insertBefore(separate, end);
   }
   const separateRun = separate.parentNode as Element;
-  if (separateRun.parentNode !== endRun.parentNode) throw new FormWriteError(`The result of the field ${describe(field)} runs over more than one paragraph.`);
+  if (separateRun !== endRun && separateRun.parentNode !== endRun.parentNode) {
+    throw new FormWriteError(`The result of the field ${describe(field)} runs over more than one paragraph.`);
+  }
 
-  const between: Element[] = [];
-  for (let node = separateRun.nextSibling; node && node !== endRun; node = node.nextSibling) if (node.nodeType === 1) between.push(node as Element);
-  const isRun = (e: Element): boolean => e.namespaceURI === W && e.localName === 'r';
-  const firstRun = between.map((e) => (isRun(e) ? e : e.getElementsByTagNameNS(W, 'r')[0])).find(Boolean);
-  const rPr = runProperties(child(firstRun ?? beginRun, W, 'rPr') ?? child(beginRun, W, 'rPr'));
-  // The result's runs go, with anything that holds runs (a revision, a hyperlink); bookmarks and the like stay.
-  for (const e of between) if (isRun(e) || e.getElementsByTagNameNS(W, 'r').length > 0) e.parentNode!.removeChild(e);
-  separateRun.parentNode!.insertBefore(textRun(doc, rPr, text), separateRun.nextSibling);
+  const runs: Element[] = [];
+  if (separateRun !== endRun) {
+    for (let node = separateRun.nextSibling; node && node !== endRun; node = node.nextSibling) {
+      if (node.nodeType !== 1) continue;
+      const e = node as Element;
+      if (e.namespaceURI === W && e.localName === 'r') runs.push(e);
+      else runs.push(...Array.from(e.getElementsByTagNameNS(W, 'r')));
+    }
+  }
+  // What follows the separate in its run, and what comes before the end in its run, is result text from an earlier write.
+  for (let node = separate.nextSibling; node && node !== end;) {
+    const next = node.nextSibling;
+    separateRun.removeChild(node);
+    node = next;
+  }
+  if (endRun !== separateRun) {
+    for (let node = end.previousSibling; node && !isEl(node, W, 'rPr');) {
+      const previous = node.previousSibling;
+      endRun.removeChild(node);
+      node = previous;
+    }
+  }
+  for (const run of runs) emptyRun(run);
+
+  const host = runs.find((run) => !isDeleted(run, separateRun.parentNode));
+  const pieces = textPieces(doc, text);
+  if (host) {
+    const rPr = child(host, W, 'rPr');
+    if (rPr) cleanRunProperties(rPr);
+    for (const piece of pieces) host.appendChild(piece);
+    return;
+  }
+  const beginRPr = child(beginRun, W, 'rPr');
+  if (beginRPr && beginRun !== separateRun) {
+    const own = child(separateRun, W, 'rPr');
+    const copy = runProperties(beginRPr)!;
+    if (own) separateRun.replaceChild(copy, own);
+    else separateRun.insertBefore(copy, separateRun.firstChild);
+  }
+  const before = separate.nextSibling; // the end, when it shares the run; else nothing follows the separate
+  for (const piece of pieces) separateRun.insertBefore(piece, before);
 }
 
 function ffChild(begin: Element, name: string): Element | undefined {
@@ -319,9 +388,7 @@ function writeFormCheck(begin: Element, checked: boolean): void {
   const box = ffChild(begin, 'checkBox');
   if (!box) return;
   for (const old of kids(box).filter((k) => isEl(k, W, 'checked'))) box.removeChild(old);
-  const byDefault = child(box, W, 'default');
-  const defaultOn = !!byDefault && !['0', 'false', 'off'].includes(wAttr(byDefault, 'val') ?? '');
-  if (!checked && !defaultOn) return;
+  if (!checked && !isOn(child(box, W, 'default'))) return;
   const mark = el(begin.ownerDocument, 'checked');
   setW(mark, 'val', checked ? '1' : '0');
   box.appendChild(mark); // `w:checked` is the last child of `w:checkBox`
@@ -411,7 +478,9 @@ function writeControl(sdt: Element, value: string | boolean | undefined, field: 
     const date = control.el!;
     if (isValidIsoDate(text)) {
       setW(date, 'fullDate', `${text}T00:00:00Z`);
-      writeControlText(sdt, formatDate(text, wAttr(child(date, W, 'dateFormat'), 'val') || field.formatHint), !!prompt);
+      // The control's own format, unless it asks for a time formatDate cannot render (R13); then the field's hint.
+      const hint = usableDateHint(wAttr(child(date, W, 'dateFormat'), 'val') || undefined) ?? usableDateHint(field.formatHint);
+      writeControlText(sdt, formatDate(text, hint), !!prompt);
     } else {
       date.removeAttributeNS(W, 'fullDate');
       writeControlText(sdt, text, !!prompt);
@@ -432,7 +501,7 @@ function writeControl(sdt: Element, value: string | boolean | undefined, field: 
 /** Ticks the option at `index`: its empty box becomes a checked one, else a centred `X` goes in its cell. */
 function writeTick(cells: Element[], index: number): void {
   const tc = cells[index];
-  const symbol = Array.from(tc.getElementsByTagNameNS(W, 'sym')).find((s) => BOX_SYMBOLS.has((wAttr(s, 'char') ?? '').toUpperCase()));
+  const symbol = Array.from(tc.getElementsByTagNameNS(W, 'sym')).find((s) => BOX_CHARS.has((wAttr(s, 'char') ?? '').toUpperCase()));
   if (symbol) {
     setW(symbol, 'char', CHECKED_SYMBOL);
     return;
@@ -449,7 +518,10 @@ function writeTick(cells: Element[], index: number): void {
   p.appendChild(textRun(tc.ownerDocument, markProperties(p), 'X'));
 }
 
-/** Writes text into a table cell of a plain group: its first paragraph gets one run, in the paragraph's properties. */
+/**
+ * Writes text into a table cell of a plain group: its first paragraph gets one run, in the paragraph's properties.
+ * Any other paragraphs stay (a cell often holds two empty ones to make its row taller); `cellText` reads past them.
+ */
 function writeCell(tc: Element, text: string): void {
   const p = firstParagraph(tc);
   const runs = kids(p).filter((k) => isEl(k, W, 'r'));
@@ -461,7 +533,7 @@ function writeCell(tc: Element, text: string): void {
 /** The text a field's value is written as: a date in the field's format (R2), anything else as it is. */
 function asText(value: FormValue, field: FieldDef): string {
   if (typeof value !== 'string') throw new FormWriteError(`The field ${describe(field)} takes text, not ${String(value)}.`);
-  return field.kind === 'date' && isValidIsoDate(value) ? formatDate(value, field.formatHint) : value;
+  return field.kind === 'date' && isValidIsoDate(value) ? formatDate(value, usableDateHint(field.formatHint)) : value;
 }
 
 function asOption(value: FormValue, field: FieldDef, options: readonly string[] | undefined): number {
@@ -529,6 +601,8 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
 
   records.forEach((record, i) => {
     const row = rows[i];
+    // Every column of the row is found before any is written (R12).
+    const jobs: { column: FieldDef; at: WordTarget; value: FormValue | undefined; blank: boolean }[] = [];
     for (const column of group.columns) {
       if (column.kind === 'picture') continue;
       const value = record[column.id];
@@ -539,8 +613,11 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
         if (blank) continue;
         throw new FormWriteError(`The column ${describe(column)} is not where it was in row ${i + 1} of the table ${group.id}.`);
       }
+      jobs.push({ column, at, value, blank });
+    }
+    for (const { column, at, value, blank } of jobs) {
       if (blank) clearTarget(at, column);
-      else writeTarget(at, column, value);
+      else writeTarget(at, column, value as string | boolean);
     }
   });
   return true;

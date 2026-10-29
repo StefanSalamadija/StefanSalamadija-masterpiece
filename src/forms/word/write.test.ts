@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { partText, readPackage, writePackage } from '../package';
+import { bytesOf, partText, readPackage, writePackage } from '../package';
 import type { Package } from '../package';
-import { Controls, headerBlock, headerRow, p, row, table, wordPackage } from '../testing/wordXml';
+import { Controls, emptyRows, headerBlock, headerRow, p, row, run, table, wordPackage } from '../testing/wordXml';
 import { contentControlsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import { CONTENT_TYPE } from '../testing/zip';
 import type { DraftValues, FieldDef, FormSchema } from '../types';
@@ -394,5 +394,127 @@ describe('writeWord', () => {
     expect(() => writeWord(pkg, fixed, tooMany, { photos: {} })).toThrow(new RegExp(personnel.id));
     // Nothing given is nothing written.
     expect(writeWord(pkg, s, values({ [check.id]: null, [box.id]: null }), { photos: {} }).size).toBe(0);
+  });
+
+  describe('R12: writing a field never moves another stored address', () => {
+    /** The result run of every FORMTEXT (five en spaces), and the separate run before it. */
+    const RESULT = /<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<\/w:rPr><w:t>(?:&#x2002;){5}<\/w:t><\/w:r>/g;
+    const SEPARATE = /<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<\/w:rPr><w:fldChar w:fldCharType="separate"\/><\/w:r>/g;
+    const variants: [string, (xml: string) => string][] = [
+      ['one result run', (xml) => xml],
+      ['no result run', (xml) => xml.replace(RESULT, '')],
+      ['three result runs', (xml) => xml.replace(RESULT, (r) => r.replace(/(?:&#x2002;){5}/, '&#x2002;') + r.replace(/(?:&#x2002;){5}/, '&#x2002;&#x2002;') + r.replace(/(?:&#x2002;){5}/, '&#x2002;&#x2002;'))],
+      ['no separate and no result', (xml) => xml.replace(RESULT, '').replace(SEPARATE, '')],
+    ];
+    /** Three FORMTEXTs in one paragraph, and a repeating section whose rows hold two FORMTEXTs in one cell and one in the next. */
+    const build = (mutate: (xml: string) => string): Package => {
+      const c = new Controls();
+      const widths = [5000, 4638];
+      const item = () => row(widths, [{ content: p(c.formText() + run(' / ') + c.formText()) }, { content: p(c.formText()) }]);
+      const body = p(run('Vessel: ') + c.formText() + run(' IMO No.: ') + c.formText() + run(' Flag: ') + c.formText())
+        + table(widths, [headerRow(widths, ['Name / Rank', 'Notes']), c.repeatingSection({ alias: 'People', tag: 'people', items: [item(), item()] })]) + p();
+      const pkg = readPackage(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Demo Shift', code: 'TST-92', revision: '00' }), body }));
+      const xml = mutate(partText(pkg, MAIN)!);
+      pkg.entries.set(MAIN, bytesOf(xml));
+      return pkg;
+    };
+
+    it.each(variants)('%s: every field and row reads back, top level and in cloned rows', (_name, mutate) => {
+      const pkg = build(mutate);
+      const s = detectWord(pkg, 'docx', 'shift.docx'); // the template as it is, with its own addresses
+      expect(s.fields.map((f) => f.label)).toEqual(['Vessel', 'IMO No.', 'Flag']);
+      const [group] = s.rowGroups;
+      expect(group.columns).toHaveLength(3);
+      const [a, b, n] = group.columns.map((col) => col.id);
+      const records = [{ [a]: 'Ann', [b]: 'AB', [n]: 'first' }, { [a]: 'Bob', [n]: 'second' }, { [b]: 'OS', [n]: 'third' }, { [a]: 'Cy', [b]: 'C/O' }];
+      const vals = values({ f1: 'MV DEMO STAR', f2: '1234567', f3: 'Demo Flag' }, { [group.id]: records });
+      const { out } = fill(pkg, s, vals);
+      const back = readWordValues(out, s, extraRowsOf(s, vals));
+      expect(back.fields).toEqual({ f1: 'MV DEMO STAR', f2: '1234567', f3: 'Demo Flag' });
+      expect(back.rows[group.id]).toEqual(records.map((r) => ({ [a]: r[a] ?? null, [b]: r[b] ?? null, [n]: r[n] ?? null })));
+      // Written again over its own output, the form still reads right (a result that is already text).
+      const again = fill(out, s, values({ f1: 'MV OTHER', f3: 'Flag 2' })).out;
+      expect(readWordValues(again, s, extraRowsOf(s, vals)).fields).toEqual({ f1: 'MV OTHER', f2: '1234567', f3: 'Flag 2' });
+    });
+
+    it.each(variants)('%s: a paragraph keeps its number of children when its fields are written', (_name, mutate) => {
+      const pkg = build(mutate);
+      const s = detectWord(pkg, 'docx', 'shift.docx');
+      const count = (doc: Document): number => Array.from(all(doc, W, 'p')[0].childNodes).filter((node) => node.nodeType === 1).length;
+      const { out } = fill(pkg, s, values({ f1: 'a\nb', f2: 'c', f3: 'd' }));
+      expect(count(mainDoc(out))).toBe(count(mainDoc(pkg)));
+    });
+  });
+
+  it('reads a plain-group cell of several paragraphs as its text, and an empty one as null', () => {
+    const c = new Controls();
+    const widths = [3000, 3000, 3638];
+    const empty = () => row(widths, [{ content: p() + p() }, { content: p() + p() }, { content: p() }]);
+    const pkg = readPackage(wordPackage({
+      kind: 'docx', header: headerBlock(c, { title: 'Demo Cells', code: 'TST-93', revision: '00' }),
+      body: table(widths, [headerRow(widths, ['Name', 'Date (dd.mm.yyyy)', 'Remarks']), empty(), empty()]) + p(),
+    }));
+    const s = detectWord(pkg, 'docx', 'cells.docx');
+    const [group] = s.rowGroups;
+    const [name, date, remarks] = group.columns;
+    expect(date.kind).toBe('date');
+    const vals = values({}, { [group.id]: [{ [name.id]: 'Ann', [date.id]: '2026-10-28', [remarks.id]: 'ok' }, { [name.id]: 'Bob\n' }, { [name.id]: 'Cy', [date.id]: '2026-11-01' }] });
+    const { out } = fill(pkg, s, vals);
+    expect(readWordValues(out, s, extraRowsOf(s, vals)).rows[group.id]).toEqual([
+      { [name.id]: 'Ann', [date.id]: '2026-10-28', [remarks.id]: 'ok' },
+      { [name.id]: 'Bob\n', [date.id]: null, [remarks.id]: null },
+      { [name.id]: 'Cy', [date.id]: '2026-11-01', [remarks.id]: null },
+    ]);
+    expect(partText(out, MAIN)).toContain('28.10.2026');
+    // The cell keeps its second paragraph: it gives the row its height.
+    const firstRow = all(all(mainDoc(out), W, 'tbl')[0], W, 'tr')[1];
+    expect(all(all(firstRow, W, 'tc')[0], W, 'p')).toHaveLength(2);
+  });
+
+  it('shows a content-control date in a format with a weekday, and falls back when the format asks for a time (R13)', () => {
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const control = (label: string, format: string) => row(widths, [`${label}:`, { content: p(c.dateControl({ alias: label, tag: label.toLowerCase(), format, text: 'Click or tap to enter a date.', placeholder: true })) }]);
+    const pkg = readPackage(wordPackage({
+      kind: 'docx', header: headerBlock(c, { title: 'Demo Dates', code: 'TST-94', revision: '00' }),
+      body: table(widths, [control('Day', 'dddd, d MMMM yyyy'), control('Logged', 'dd/MM/yyyy HH:mm'), control('Hinted', 'd/M/yyyy h:mm AM/PM')]) + p(),
+    }));
+    const detected = detectWord(pkg, 'docx', 'dates.docx');
+    const s: FormSchema = { ...detected, fields: detected.fields.map((f) => (f.label === 'Hinted' ? { ...f, formatHint: 'dd/MMM/yyyy' } : f)) };
+    const ids = s.fields.map((f) => f.id);
+    const { out } = fill(pkg, s, values(Object.fromEntries(ids.map((id) => [id, '2026-10-28']))));
+    const targets = locateWord(mainDoc(out), MAIN, s);
+    const shown = ids.map((id) => {
+      const t = targets.get(id)!;
+      if (t.kind !== 'sdt') throw new Error('not a control');
+      expect(all(t.sdt, W, 'date')[0].getAttributeNS(W, 'fullDate')).toBe('2026-10-28T00:00:00Z');
+      return all(t.sdt, W, 'sdtContent')[0].textContent;
+    });
+    expect(shown).toEqual(['Wednesday, 28 October 2026', '28-OCT-2026', '28/Oct/2026']);
+    expect(Object.values(readWordValues(out, s).fields)).toEqual(['2026-10-28', '2026-10-28', '2026-10-28']);
+  });
+
+  it('grows two plain groups of one table, and finds the field after them', () => {
+    const c = new Controls();
+    const widths = [4819, 4819];
+    const pkg = readPackage(wordPackage({
+      kind: 'docx', header: headerBlock(c, { title: 'Demo Two Groups', code: 'TST-95', revision: '00' }),
+      body: table(widths, [
+        headerRow(widths, ['Name', 'Rank']), ...emptyRows(widths, 2),
+        headerRow(widths, ['Item', 'Qty']), ...emptyRows(widths, 2),
+        row(widths, ['Remarks:', { content: p(c.formText()) }]),
+      ]) + p(),
+    }));
+    const s = detectWord(pkg, 'docx', 'two.docx');
+    expect(s.rowGroups.map((g) => g.capacity)).toEqual([2, 2]);
+    const [people, items] = s.rowGroups;
+    const rowsOf = (g: typeof people, prefix: string, count: number) => Array.from({ length: count }, (_, i) => ({ [g.columns[0].id]: `${prefix} ${i + 1}`, [g.columns[1].id]: String(i + 1) }));
+    const vals = values({ [s.fields[0].id]: 'all done' }, { [people.id]: rowsOf(people, 'Person', 5), [items.id]: rowsOf(items, 'Item', 4) });
+    const { out } = fill(pkg, s, vals);
+    const back = readWordValues(out, s, extraRowsOf(s, vals));
+    expect(back.fields[s.fields[0].id]).toBe('all done');
+    expect(back.rows[people.id]).toEqual(rowsOf(people, 'Person', 5));
+    expect(back.rows[items.id]).toEqual(rowsOf(items, 'Item', 4));
+    expect(all(all(mainDoc(out), W, 'tbl')[0], W, 'tr')).toHaveLength(2 + 5 + 4 + 1);
   });
 });

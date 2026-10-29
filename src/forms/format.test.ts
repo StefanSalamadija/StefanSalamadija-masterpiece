@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate, parseDate } from './format';
+import { formatDate, parseDate, usableDateHint } from './format';
 
 describe('formatDate', () => {
   it('formats with the tokens of the hint', () => {
@@ -20,7 +20,6 @@ describe('formatDate', () => {
   it('gives the display date for a hint with no day, month or year token in it', () => {
     expect(formatDate('2026-10-28', '(24:00 UTC)')).toBe('28-OCT-2026');
     expect(formatDate('2026-10-28', 'UTC')).toBe('28-OCT-2026');
-    expect(formatDate('2026-10-28', 'dddd')).toBe('28-OCT-2026');
     expect(formatDate('2026-10-28', 'yyy')).toBe('28-OCT-2026');
     expect(formatDate('not a date', '(24:00 UTC)')).toBe('not a date');
   });
@@ -57,9 +56,17 @@ describe('formatDate', () => {
     expect(formatDate('2026-10-28', 'dd MMM yyyy "UTC"')).toBe('28 Oct 2026 "UTC"');
     expect(formatDate('2026-10-28', 'dd.MM.yyyy at 12:00')).toBe('28.10.2026 at 12:00');
     expect(formatDate('2026-10-28', '(dd/MMM/yyyy)')).toBe('(28/Oct/2026)');
-    expect(formatDate('2026-10-28', 'dddd dd')).toBe('dddd 28');
+    expect(formatDate('2026-10-28', 'ddddd dd')).toBe('ddddd 28');
     expect(formatDate('2026-10-28', 'yyy yy')).toBe('yyy 26');
     expect(formatDate('2026-10-28', 'MMMMM M')).toBe('MMMMM 10');
+  });
+
+  it('writes the weekday for ddd and dddd (R13)', () => {
+    expect(formatDate('2026-10-28', 'ddd')).toBe('Wed');
+    expect(formatDate('2026-10-28', 'dddd')).toBe('Wednesday');
+    expect(formatDate('2026-10-28', 'dddd, d MMMM yyyy')).toBe('Wednesday, 28 October 2026');
+    expect(formatDate('2026-11-01', 'ddd dd.MM.')).toBe('Sun 01.11.');
+    expect(formatDate('2028-02-29', 'DDDD')).toBe('Tuesday');
   });
 
   it('formats the first and last day of a month, and the 29th of February in a leap year', () => {
@@ -78,7 +85,7 @@ describe('formatDate', () => {
 
 describe('parseDate', () => {
   it('reads back what formatDate wrote, for each kind of hint', () => {
-    const hints = ['dd/MMM/yyyy', 'DD.MM.YYYY', 'd/M/yyyy', 'd MMMM yy', 'yyyy-MM-dd', '(dd/MMM/yyyy)', 'dd.mm.yyyy', undefined, '', '(24:00 UTC)'];
+    const hints = ['dddd, d MMMM yyyy', 'ddd dd.MM.yyyy', 'dd/MMM/yyyy', 'DD.MM.YYYY', 'd/M/yyyy', 'd MMMM yy', 'yyyy-MM-dd', '(dd/MMM/yyyy)', 'dd.mm.yyyy', undefined, '', '(24:00 UTC)'];
     for (const iso of ['2026-10-28', '2026-01-01', '2026-03-05', '2028-02-29', '2026-12-31']) {
       for (const hint of hints) expect(parseDate(formatDate(iso, hint), hint), `${iso} ${hint}`).toBe(iso);
     }
@@ -92,9 +99,22 @@ describe('parseDate', () => {
     expect(parseDate('28-Oct-2026')).toBeUndefined();
     expect(parseDate('tomorrow', 'dd/MMM/yyyy')).toBeUndefined();
     expect(parseDate('', 'dd/MMM/yyyy')).toBeUndefined();
+    expect(parseDate('Monday, 28 October 2026', 'dddd, d MMMM yyyy')).toBeUndefined(); // the 28th is a Wednesday
   });
 
   it('takes a 2-digit year to be in this century', () => {
     expect(parseDate('28/10/26', 'dd/MM/yy')).toBe('2026-10-28');
+  });
+});
+
+describe('usableDateHint', () => {
+  it('drops a hint that asks for a time or AM/PM outside quotes (R13)', () => {
+    expect(usableDateHint('dd/MM/yyyy HH:mm')).toBeUndefined();
+    expect(usableDateHint('d/M/yyyy h:mm AM/PM')).toBeUndefined();
+    expect(usableDateHint('yyyy-MM-dd hh:mm:ss')).toBeUndefined();
+    expect(usableDateHint('dddd, d MMMM yyyy')).toBe('dddd, d MMMM yyyy');
+    expect(usableDateHint("d MMMM yyyy 'h'")).toBe("d MMMM yyyy 'h'");
+    expect(usableDateHint('dd.MM.yyyy "s"')).toBe('dd.MM.yyyy "s"');
+    expect(usableDateHint(undefined)).toBeUndefined();
   });
 });

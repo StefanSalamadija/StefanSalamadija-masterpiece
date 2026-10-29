@@ -1,5 +1,5 @@
 import { isValidIsoDate } from '../../domain/dates';
-import { parseDate } from '../format';
+import { parseDate, usableDateHint } from '../format';
 import { partText } from '../package';
 import type { Package } from '../package';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from '../types';
@@ -24,8 +24,9 @@ import { MC, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
  * puts in an empty one), a content control showing its prompt, an empty cell.
  */
 
-/** What Word puts in an empty FORMTEXT: en spaces (U+2002), five of them unless the field was made otherwise. */
-export const EMPTY_FORMTEXT = /^\u2002+$/;
+/** What Word puts in an empty FORMTEXT: five en spaces (U+2002). A result of only en spaces, however many, is empty. */
+export const EMPTY_FORMTEXT = '\u2002'.repeat(5);
+const EN_SPACES_ONLY = /^\u2002+$/;
 /** `w:sym` characters of a ticked box (Wingdings checked boxes, and the cross `F078`). */
 const TICKED_SYMBOLS = new Set(['F0FE', 'F0FD', 'F0FB', 'F0FC', 'F078']);
 /** A ticked box written as text: ☒ ☑ ✓ ✔ (U+2612, U+2611, U+2713, U+2714). */
@@ -88,6 +89,19 @@ function collect(el: Element, state: { out: string; paragraphs: number }): void 
   }
 }
 
+/**
+ * The text of a table cell: its paragraphs (and any table or control between them) joined by line breaks, without the
+ * empty paragraphs at the end. A cell often holds more than one empty paragraph to make its row taller; the writer
+ * fills the first and keeps the others, so they are not part of the value.
+ */
+export function cellText(tc: Element): string {
+  const blocks = kids(tc)
+    .filter((k) => k.namespaceURI === W && ['p', 'tbl', 'sdt', 'customXml'].includes(k.localName))
+    .map((k) => textIn(k));
+  while (blocks.length > 0 && blocks[blocks.length - 1] === '') blocks.pop();
+  return blocks.join('\n');
+}
+
 /** The text of a legacy field's result: what lies between its `separate` and its `end`. */
 export function resultText(begin: Element): string {
   const { separate, end } = fieldRange(begin);
@@ -108,7 +122,7 @@ export function resultText(begin: Element): string {
 }
 
 /** An on/off property: on when present, unless its `val` says off. */
-function isOn(el: Element | undefined, ns = W): boolean {
+export function isOn(el: Element | undefined, ns = W): boolean {
   if (!el) return false;
   const val = el.getAttributeNS(ns, 'val');
   return val === null || val === '' || !['0', 'false', 'off'].includes(val);
@@ -117,7 +131,7 @@ function isOn(el: Element | undefined, ns = W): boolean {
 /** Text as read: `null` when it is empty; for a date field, ISO when it is a date in the field's format. */
 function textValue(text: string, field: FieldDef, hint = field.formatHint): FormValue {
   if (text === '') return null;
-  return field.kind === 'date' ? parseDate(text, hint) ?? text : text;
+  return field.kind === 'date' ? parseDate(text, usableDateHint(hint)) ?? text : text;
 }
 
 /** Whether a tick cell shows a ticked box: a checked box symbol, a ticked box character, or the `X` the writer puts in a cell that had no box. */
@@ -144,7 +158,7 @@ export function readTarget(target: WordTarget, field: FieldDef): FormValue | und
   switch (target.kind) {
     case 'formtext': {
       const text = resultText(target.begin);
-      return EMPTY_FORMTEXT.test(text) ? null : textValue(text, field);
+      return EN_SPACES_ONLY.test(text) ? null : textValue(text, field);
     }
     case 'formcheck': {
       const box = child(child(target.begin, W, 'ffData'), W, 'checkBox');
@@ -168,7 +182,8 @@ export function readTarget(target: WordTarget, field: FieldDef): FormValue | und
       if (control.type === 'date') {
         const full = (wAttr(control.el, 'fullDate') ?? '').slice(0, 10);
         if (isValidIsoDate(full)) return full;
-        return textValue(content ? textIn(content) : '', field, wVal(control.el, 'dateFormat') || field.formatHint);
+        const own = usableDateHint(wVal(control.el, 'dateFormat') || undefined);
+        return textValue(content ? textIn(content) : '', field, own ?? field.formatHint);
       }
       return textValue(content ? textIn(content) : '', field);
     }
@@ -177,7 +192,7 @@ export function readTarget(target: WordTarget, field: FieldDef): FormValue | und
       return index < 0 ? null : field.options?.[index] ?? null;
     }
     case 'cell':
-      return textValue(textIn(target.tc), field);
+      return textValue(cellText(target.tc), field);
     default:
       return undefined;
   }

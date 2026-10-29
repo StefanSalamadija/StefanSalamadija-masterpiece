@@ -88,9 +88,9 @@ export interface Table {
 
 const FORM_FIELDS = new Set(['FORMTEXT', 'FORMCHECKBOX', 'FORMDROPDOWN']);
 /** `w:sym` characters of an empty box: Wingdings `F0A8` and `F06F`, and `F071`. */
-const BOX_CHARS = new Set(['F0A8', 'F06F', 'F071']);
+export const BOX_CHARS = new Set(['F0A8', 'F06F', 'F071']);
 /** The text of an empty box: `☐` and `□`. The group keeps each box when a text is split by it. */
-const BOX_TEXT = /([☐□])/;
+export const BOX_TEXT = /([☐□])/;
 /** Content-control types that are fields. `w15:repeatingSection` and the rest (`w:docPartObj`, `w:group` and the like) are not. */
 const CONTROL_TYPES: [ns: string, name: string, type: ControlType][] = [
   [W, 'text', 'text'], [W, 'date', 'date'], [W, 'dropDownList', 'dropDownList'], [W, 'comboBox', 'comboBox'],
