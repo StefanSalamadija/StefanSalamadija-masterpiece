@@ -87,13 +87,13 @@ export function kindOf(cell: CellModel | undefined, parts: readonly string[]): P
 
 /**
  * A field's definition. Its label is its parts joined (`Equipment 1 · Dimensions`); with none it is called `fallback`
- * with low confidence. A field whose label asks for a signature is left empty.
+ * with low confidence, and `low` also makes it low (a label that is missing a part). A field whose label asks for a signature is left empty.
  */
-export function makeField(o: { id: string; loc: string; parts: readonly string[]; cell: CellModel | undefined; section: string; fallback: string; block?: string }): FieldDef {
+export function makeField(o: { id: string; loc: string; parts: readonly string[]; cell: CellModel | undefined; section: string; fallback: string; block?: string; low?: boolean }): FieldDef {
   const parts = o.parts.filter((part) => part !== '');
   const label = parts.join(LABEL_JOIN);
   const { kind, formatHint } = kindOf(o.cell, parts);
-  const def: FieldDef = { id: o.id, kind, label: label === '' ? o.fallback : label, section: o.section, loc: o.loc, confidence: label === '' ? 'low' : 'high' };
+  const def: FieldDef = { id: o.id, kind, label: label === '' ? o.fallback : label, section: o.section, loc: o.loc, confidence: label === '' || o.low ? 'low' : 'high' };
   if (formatHint !== undefined) def.formatHint = formatHint;
   if (label !== '' && isSignatureLabel(label)) def.leftEmpty = true;
   if (o.block !== undefined) def.block = o.block;

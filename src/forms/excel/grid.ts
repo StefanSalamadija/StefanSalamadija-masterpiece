@@ -11,6 +11,10 @@ import type { Rect } from './refs';
 
 /** A number for a cell that is unique in a sheet: columns go up to 16,384. */
 const KEY = 16_385;
+/** A merge at most this tall is indexed on every row it covers; a taller one only on the rows that have cells. */
+const TALL_MERGE = 1000;
+/** At most this many (row, merge) entries are indexed, so that a crafted file cannot make the index huge. */
+const MAX_MERGE_ENTRIES = 1_000_000;
 
 /** The cell that shows at a position: the origin of the merge over it, or the cell itself. */
 export interface Origin {
@@ -27,6 +31,8 @@ export interface Origin {
 export class Grid {
   /** The last row worth looking at: of a cell, or of the print area when it ends sooner. */
   readonly maxRow: number;
+  /** The rows that have cells, up to `maxRow`, in order: the only rows that can hold text, a border or a field. */
+  readonly rows: number[];
   private readonly cells = new Map<number, CellModel>();
   /** Each row's cells that are not covered by a merge, by column. */
   private readonly byRow = new Map<number, CellModel[]>();
@@ -44,9 +50,16 @@ export class Grid {
     }
     const areaEnd = this.area ? Math.max(...this.area.map((r) => r.r2)) : Infinity;
     this.maxRow = Math.min(last, areaEnd);
+    this.rows = [...new Set([...sheet.cells.values()].map((cell) => cell.row))].filter((row) => row <= this.maxRow).sort((a, b) => a - b);
+    let entries = 0;
     for (const ref of sheet.merges) {
       const rect = parseRange(ref)!;
-      for (let row = rect.r1; row <= Math.min(rect.r2, this.maxRow + 1); row += 1) {
+      const end = Math.min(rect.r2, this.maxRow + 1);
+      const covered = end - rect.r1 < TALL_MERGE ? Array.from({ length: Math.max(0, end - rect.r1 + 1) }, (_, i) => rect.r1 + i)
+        : [rect.r1, ...this.rowsBetween(rect.r1 + 1, end)];
+      for (const row of covered) {
+        if (entries >= MAX_MERGE_ENTRIES) break;
+        entries += 1;
         const list = this.mergesByRow.get(row);
         if (list) list.push(rect);
         else this.mergesByRow.set(row, [rect]);
@@ -60,6 +73,20 @@ export class Grid {
       else this.byRow.set(cell.row, [cell]);
     }
     for (const list of this.byRow.values()) list.sort((a, b) => a.col - b.col);
+  }
+
+  /** The rows with cells from `from` to `to`, found by binary search. */
+  private rowsBetween(from: number, to: number): number[] {
+    let lo = 0;
+    let hi = this.rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.rows[mid]! < from) lo = mid + 1;
+      else hi = mid;
+    }
+    const out: number[] = [];
+    for (let i = lo; i < this.rows.length && this.rows[i]! <= to; i += 1) out.push(this.rows[i]!);
+    return out;
   }
 
   /** The cell that shows at a position. */

@@ -25,6 +25,8 @@ export interface FieldDraft {
   cell: CellModel | undefined;
   /** For a cell of a matrix: the matrix's number in the sheet, from 1, top to bottom. */
   matrix?: number;
+  /** The label is missing a part (a matrix cell in a row with no attribute): the person is asked to check it. */
+  low?: true;
 }
 
 /** A row group found in a block, before it is given its id and section. */
@@ -183,42 +185,57 @@ function namesIn(grid: Grid, row: number, cols: number[]): string {
 // Matrix
 
 /**
- * The corner of a header: the cell just left of its titles, when it is an empty bordered cell of the header row (or a
- * merge that ends there).
+ * The corner of a header: the empty bordered cells of the header row just left of its titles (one cell, a merge, or
+ * several side by side), as the first column they start at; `undefined` when the cell left of the titles is not one.
  */
-function cornerOf(grid: Grid, header: Header): Origin | undefined {
-  if (header.c1 <= 1) return undefined;
-  const corner = grid.origin(header.row, header.c1 - 1);
-  return corner.c2 === header.c1 - 1 && grid.shown(corner) && grid.bordered(corner) && grid.isEmpty(corner) ? corner : undefined;
+function cornerOf(grid: Grid, header: Header): number | undefined {
+  let left: number | undefined;
+  for (let c = header.c1 - 1; c >= 1;) {
+    if (grid.hiddenCol(c)) {
+      c -= 1;
+      continue;
+    }
+    const o = grid.origin(header.row, c);
+    if (o.row !== header.row || !grid.shown(o) || !grid.bordered(o) || !grid.isEmpty(o)) break;
+    left = o.col;
+    c = o.col - 1;
+  }
+  return left;
 }
 
 /**
- * A matrix block under a header with an empty corner, or `undefined` when it is not one: the column under the corner
- * names nothing, or the cells are typed by column (each column one kind, the columns of different kinds), which is a
- * list of rows whose first column happens to have no title.
+ * A matrix block under a header with an empty corner, or `undefined` when it is not one (R16): the columns under the
+ * corner name nothing, or no column's cells change kind from row to row. A block whose columns each hold one kind is a
+ * list of rows whose first columns happen to have no title, even when every column is text.
+ *
+ * The attribute of a row is the text of the corner's columns that name rows (merged cells give each of their rows
+ * their text), joined: `Dimensions Length`. A field whose row has no attribute is labelled by its title alone, with
+ * low confidence.
  */
-function matrixBlock(grid: Grid, header: Header, corner: Origin, cols: number[], titles: Map<number, string>, dataStart: number): Block | undefined {
-  const nameCols = shownCols(grid, corner.col, corner.c2);
-  const { rows, next } = blockRows(grid, dataStart, cols, corner.col, header.c2);
+function matrixBlock(grid: Grid, header: Header, corner: number, cols: number[], titles: Map<number, string>, dataStart: number): Block | undefined {
+  const { rows, next } = blockRows(grid, dataStart, cols, corner, header.c2);
+  const shownRows = rows.filter((r) => !r.hidden).map((r) => r.row);
+  const cornerCols = shownCols(grid, corner, header.c1 - 1);
+  const nameCols = cornerCols.filter((c) => shownRows.some((row) => {
+    const o = grid.origin(row, c);
+    return grid.shown(o) && !grid.isFormula(o) && hasLetters(grid.text(o));
+  }));
+  if (nameCols.length === 0) return undefined;
 
   const fields: FieldDraft[] = [];
   const kinds = new Map<number, Set<string>>(cols.map((c) => [c, new Set<string>()]));
-  let named = 0;
-  for (const { row, hidden } of rows) {
-    if (hidden) continue;
+  for (const row of shownRows) {
     const name = namesIn(grid, row, nameCols);
-    if (hasLetters(name)) named += 1;
     for (const c of cols) {
       const o = emptyAt(grid, row, c);
       if (!o) continue;
-      fields.push({ row, col: c, parts: [titles.get(c) ?? '', name], cell: o.cell });
+      fields.push({ row, col: c, parts: [titles.get(c) ?? '', name], cell: o.cell, ...(name === '' ? { low: true as const } : {}) });
       kinds.get(c)!.add(kindOf(o.cell, []).kind);
     }
   }
-  const byColumn = [...kinds.values()].filter((k) => k.size > 0);
-  const typedByColumn = byColumn.every((k) => k.size === 1) && new Set(byColumn.map((k) => [...k][0])).size > 1;
-  if (named === 0 || fields.length === 0 || typedByColumn) return undefined;
-  return { fields, groups: [], claimed: claimedKeys(grid, header, rows, nameCols.concat(cols)), next, matrix: true };
+  const typedByRow = [...kinds.values()].some((k) => k.size > 1);
+  if (fields.length === 0 || !typedByRow) return undefined;
+  return { fields, groups: [], claimed: claimedKeys(grid, header, rows, cornerCols.concat(cols)), next, matrix: true };
 }
 
 /** The keys of the header cells and of every cell of the block's rows. */
@@ -241,6 +258,42 @@ interface Run {
   /** Rows above the run, since the header or the previous run, with no empty cell: fixed rows when they are full. */
   before: number[];
   caption?: string;
+  /** The block's columns that hold a formula in the run's first row (a column worked out on every row). */
+  formulaCols: Set<number>;
+}
+
+/** A row that totals the rows above it: `Total`, `Sub-total`, `Grand total`, `Totals` (generic words). */
+const TOTAL = /^(?:grand\s+|sub-?\s*)?totals?\b/i;
+/** A range of cells in a formula (`E9:E13`, `$E$9:$E$13`), with its two rows. */
+const RANGE = /\$?[A-Z]{1,3}\$?(\d+)\s*:\s*\$?[A-Z]{1,3}\$?(\d+)/gi;
+/** A range of whole columns in a formula (`E:E`). */
+const COLUMNS = /(?:^|[^A-Za-z0-9_$.])\$?[A-Z]{1,3}:\$?[A-Z]{1,3}(?![A-Za-z0-9_(])/i;
+
+/** The formula works on a range that holds two rows of the run or more (`SUM(E9:E13)`), or on whole columns. */
+function sumsRun(formula: string, rows: readonly number[]): boolean {
+  if (COLUMNS.test(formula)) return true;
+  for (const m of formula.matchAll(RANGE)) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (rows.filter((row) => row >= Math.min(a, b) && row <= Math.max(a, b)).length >= 2) return true;
+  }
+  return false;
+}
+
+/**
+ * A row under a run that totals it, and so is neither a row of it nor a place to write: its first text is `Total`
+ * (or `Sub-total`, `Grand total`), or one of its formulas is in a column where the run's rows have none, or adds up
+ * the run (`SUM(E9:E13)`). A column worked out on every row (`=D9*2`) is not a total.
+ */
+function isTotalRow(grid: Grid, run: Run | undefined, row: number, cols: readonly number[]): boolean {
+  const first = cols.map((c) => grid.origin(row, c)).find((o) => o.row === row && !grid.isFormula(o) && grid.text(o) !== '');
+  if (first && TOTAL.test(grid.text(first))) return true;
+  if (!run) return false;
+  return cols.some((c) => {
+    const o = grid.origin(row, c);
+    if (o.row !== row || o.col !== c || !grid.isFormula(o)) return false;
+    return !run.formulaCols.has(c) || sumsRun(o.cell!.formula!, run.rows);
+  });
 }
 
 /**
@@ -259,13 +312,13 @@ function rowsBlock(grid: Grid, header: Header, cols: number[], titles: Map<numbe
   let run: Run | undefined;
   let before: number[] = [];
   let caption: string | undefined;
-  let lastCols: number[] = [];
+  let last: Run | undefined;
 
   const close = (): void => {
     if (!run) return;
     const r = run;
     run = undefined;
-    lastCols = r.cols;
+    last = r;
     before = [];
     caption = undefined;
     const firstCol = r.cols[0]!;
@@ -287,15 +340,17 @@ function rowsBlock(grid: Grid, header: Header, cols: number[], titles: Map<numbe
     const single = (o: Origin, firstCol: number): void => {
       fields.push({ row, col: o.col, parts: o.r2 > o.row ? [title(o.col)] : [title(o.col), rowName(row, firstCol)], cell: o.cell });
     };
-    if (run && continues(grid, run, row)) {
+    if (run && !isTotalRow(grid, run, row, cols) && continues(grid, run, row)) {
       run.rows.push(row);
       const firstCol = run.cols[0]!;
       for (const o of empties) if (!run.cols.includes(o.col)) single(o, firstCol);
       continue;
     }
+    // A row that totals the run above (or the run that ended just before) is no row to fill.
+    const total = isTotalRow(grid, run ?? last, row, cols);
     close();
-    // A row with a formula where the run above took values (a total) is no row to fill.
-    if (cols.some((c) => lastCols.includes(c) && grid.isFormula(grid.origin(row, c)))) continue;
+    if (total) continue;
+    last = undefined;
     const flat = empties.filter((o) => o.r2 === o.row);
     if (flat.length === 0) {
       for (const o of empties) single(o, header.c2 + 1);
@@ -307,6 +362,10 @@ function rowsBlock(grid: Grid, header: Header, cols: number[], titles: Map<numbe
     for (const o of empties) if (o.r2 > o.row) single(o, flat[0]!.col);
     run = {
       rows: [row], cols: flat.map((o) => o.col), widths: new Map(flat.map((o) => [o.col, o.c2 - o.col])), before, ...(caption === undefined ? {} : { caption }),
+      formulaCols: new Set(cols.filter((c) => {
+        const o = grid.origin(row, c);
+        return o.row === row && o.col === c && grid.isFormula(o);
+      })),
     };
   }
   close();
@@ -360,21 +419,17 @@ function groupOf(grid: Grid, run: Run, title: (c: number) => string, rowName: (r
 export function findTables(grid: Grid): Tables {
   const out: Tables = { fields: [], groups: [], claimed: new Set() };
   let matrices = 0;
-  for (let row = 1; row <= grid.maxRow;) {
+  let from = 1;
+  for (const row of grid.rows) {
+    if (row < from) continue;
     const header = headerAt(grid, row);
-    if (!header) {
-      row += 1;
-      continue;
-    }
+    if (!header) continue;
     const cols = shownCols(grid, header.c1, header.c2);
     const { titles, dataStart } = titlesOf(grid, header, cols);
     const corner = cornerOf(grid, header);
-    const block = (corner && matrixBlock(grid, header, corner, cols, titles, dataStart))
-      ?? rowsBlock(grid, header, corner ? shownCols(grid, corner.col, header.c2) : cols, titles, dataStart);
-    if (block.fields.length === 0 && block.groups.length === 0) {
-      row += 1;
-      continue;
-    }
+    const block = (corner !== undefined ? matrixBlock(grid, header, corner, cols, titles, dataStart) : undefined)
+      ?? rowsBlock(grid, header, corner !== undefined ? shownCols(grid, corner, header.c2) : cols, titles, dataStart);
+    if (block.fields.length === 0 && block.groups.length === 0) continue;
     if (block.matrix) {
       matrices += 1;
       for (const f of block.fields) f.matrix = matrices;
@@ -382,7 +437,7 @@ export function findTables(grid: Grid): Tables {
     out.fields.push(...block.fields);
     out.groups.push(...block.groups);
     for (const key of block.claimed) out.claimed.add(key);
-    row = Math.max(block.next, row + 1);
+    from = Math.max(block.next, row + 1);
   }
   return out;
 }

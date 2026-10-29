@@ -58,7 +58,8 @@ function usualFontSize(sheet: SheetModel): number {
  */
 function titleCell(grid: Grid): Origin | undefined {
   const candidates: Origin[] = [];
-  for (let row = 1; row <= Math.min(TITLE_ROWS, grid.maxRow); row += 1) {
+  for (const row of grid.rows) {
+    if (row > TITLE_ROWS) break;
     for (const o of grid.originsInRow(row)) {
       const text = grid.text(o);
       if (hasLetters(text) && !isIdentityText(text) && !isLabelCell(text) && !grid.isFormula(o)) candidates.push(o);
@@ -81,7 +82,7 @@ function identityOf(grid: Grid | undefined, fileName: string): { identity: FormI
   if (!grid) return { identity: identityFromText([], fileName) };
   const top: string[] = [];
   const labels: string[] = [];
-  for (let row = 1; row <= grid.maxRow; row += 1) {
+  for (const row of grid.rows) {
     const origins = grid.originsInRow(row);
     origins.forEach((o, i) => {
       const text = grid.text(o);
@@ -100,7 +101,7 @@ function identityOf(grid: Grid | undefined, fileName: string): { identity: FormI
 function headingsOf(grid: Grid, claimed: Set<number>, title: Origin | undefined): Map<number, string> {
   const base = usualFontSize(grid.sheet);
   const headings = new Map<number, string>();
-  for (let row = 1; row <= grid.maxRow; row += 1) {
+  for (const row of grid.rows) {
     const texts = grid.originsInRow(row).filter((o) => grid.text(o) !== '');
     if (texts.length !== 1) continue;
     const o = texts[0]!;
@@ -116,7 +117,7 @@ function headingsOf(grid: Grid, claimed: Set<number>, title: Origin | undefined)
 function labelFields(grid: Grid, claimed: Set<number>): FieldDraft[] {
   const fields: FieldDraft[] = [];
   const taken = new Set<number>();
-  for (let row = 1; row <= grid.maxRow; row += 1) {
+  for (const row of grid.rows) {
     for (const o of grid.originsInRow(row)) {
       if (claimed.has(o.key) || !isLabelCell(grid.text(o)) || grid.isFormula(o)) continue;
       const next = grid.origin(row, grid.nextShownCol(o.c2));
@@ -159,7 +160,7 @@ function detectSheet(grid: Grid, o: { title?: Origin; sectionDefault: string }):
 
   const fields = drafts.map((d) => makeField({
     id: `${sheet.name}!${columnLetters(d.col)}${d.row}`, loc: cellLoc(sheet.path, d.col, d.row), parts: d.parts, cell: d.cell, section: sectionAt(d.row), fallback: '',
-    ...(d.matrix === undefined ? {} : { block: `${sheet.name}!m${d.matrix}` }),
+    ...(d.matrix === undefined ? {} : { block: `${sheet.name}!m${d.matrix}` }), ...(d.low ? { low: true } : {}),
   }));
 
   const groups = [...tables.groups].sort((a, b) => a.firstRow - b.firstRow).map((g, i) => groupDef(sheet, g, i + 1, sectionAt(g.firstRow)));

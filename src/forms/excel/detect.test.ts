@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { bytesOf, partText, readPackage } from '../package';
 import type { Package } from '../package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../testing/excelFixtures';
+import { STYLE, Sheet, headerBlock } from '../testing/excelXml';
 import type { FieldDef, FormSchema, RowGroupDef } from '../types';
 import { detectExcel } from './detect';
 
@@ -34,6 +35,13 @@ function edited(bytes: Uint8Array, edits: Record<string, (xml: string) => string
 /** Sets a cell's content in the sheet XML: replaces the `<c r="ref" .../>` or `<c r="ref" ...>...</c>` element. */
 function setCell(xml: string, ref: string, cell: string): string {
   return xml.replace(new RegExp(`<c r="${ref}"[^>]*?(?:/>|>.*?</c>)`), cell);
+}
+
+/** A small sheet with the usual header block in rows 1 to 3 (columns A to D), for a layout the fixtures lack. */
+function probeSheet(name: string): Sheet {
+  const sheet = new Sheet(name);
+  headerBlock(sheet, { logo: 'A1:A3', title: 'Probe form', titleRange: 'B1:C3', code: 'TST-90', revision: '00', formRanges: ['D1', 'D2', 'D3'] });
+  return sheet;
 }
 
 const fieldSummary = (f: FieldDef) => ({
@@ -418,6 +426,76 @@ describe('detectExcel rules', () => {
       + '<xdr:txBody><a:bodyPr/><a:p><a:r><a:t>Note for the reader</a:t></a:r></a:p></xdr:txBody></xdr:sp><xdr:clientData/></xdr:twoCellAnchor>';
     const pkg = edited(inventoryXlsx(3), { 'xl/drawings/drawing1.xml': (xml) => xml.replace('</xdr:wsDr>', `${shape}</xdr:wsDr>`) });
     expect(detect(pkg).unsupported).toEqual(['Text box: "Note for the reader"']);
+  });
+
+  it('keeps a total row out of the group when only a column worked out on every row holds formulas', () => {
+    const sheet = probeSheet('Totals');
+    ['Item', 'Spec', 'Qty', 'Value'].forEach((t, i) => sheet.set(`${'BCDE'[i]}8`, t, STYLE.header));
+    for (let r = 9; r <= 13; r += 1) {
+      sheet.set(`B${r}`, `Item ${r}`, STYLE.cell).blank(`C${r}`, STYLE.cell).blank(`D${r}`, STYLE.number);
+      sheet.set(`E${r}`, { formula: `D${r}*2`, value: 0 }, STYLE.number);
+    }
+    sheet.set('B14', 'Total', STYLE.cell).blank('C14', STYLE.cell).blank('D14', STYLE.number).set('E14', { formula: 'SUM(E9:E13)', value: 0 }, STYLE.number);
+    const s = detect(sheet.toPackage({ printArea: 'A1:E16', logo: 'A1:A3' }));
+    expect(s.rowGroups.map((g) => [g.firstRow, g.capacity, g.columns.map((c) => c.label), g.rowLabels!.at(-1)])).toEqual([[9, 5, ['Spec', 'Qty'], 'Item 13']]);
+    expect(s.fields).toEqual([]);
+  });
+
+  it('keeps a total row out when it sums the rows, or is called Total, with no formula column above', () => {
+    for (const [label, formula] of [['Sum', 'SUM(D9:D13)'], ['Grand total', 'D9+D10']] as const) {
+      const sheet = probeSheet('Totals');
+      ['Item', 'Spec', 'Qty', 'Unit'].forEach((t, i) => sheet.set(`${'BCDE'[i]}8`, t, STYLE.header));
+      for (let r = 9; r <= 13; r += 1) sheet.set(`B${r}`, `Item ${r}`, STYLE.cell).blank(`C${r}`, STYLE.cell).blank(`D${r}`, STYLE.number).blank(`E${r}`, STYLE.cell);
+      // The total row is bordered all along and has its formula in the Unit column, where the rows have none.
+      sheet.set('B14', label, STYLE.cell).blank('C14:D14', STYLE.cell).set('E14', { formula, value: 0 }, STYLE.cell);
+      const s = detect(sheet.toPackage({ printArea: 'A1:E16', logo: 'A1:A3' }));
+      expect(s.rowGroups.map((g) => [g.firstRow, g.capacity])).toEqual([[9, 5]]);
+      expect(s.fields).toEqual([]);
+    }
+  });
+
+  it('merged_label_cells: reads attribute names from two columns when the corner is two cells, and flags a row with none', () => {
+    for (const mergedCorner of [false, true]) {
+      const sheet = probeSheet('Grid');
+      if (mergedCorner) sheet.merge('A6:B6', STYLE.header);
+      else sheet.set('A6', undefined, STYLE.header).set('B6', undefined, STYLE.header);
+      for (let i = 0; i < 4; i += 1) sheet.set(`${'CDEF'[i]}6`, `Eq ${i + 1}`, STYLE.header);
+      sheet.set('A7', 'Kind', STYLE.bold).blank('B7', STYLE.bold).blank('C7:F7', STYLE.cell);
+      sheet.merge('A8:A9', STYLE.bold, 'Dimensions').set('B8', 'Length', STYLE.bold).set('B9', 'Width', STYLE.bold);
+      sheet.blank('C8:F9', STYLE.number);
+      // Row 10 names nothing.
+      sheet.blank('A10:B10', STYLE.bold).blank('C10:F10', STYLE.cell);
+      const s = detect(sheet.toPackage({ printArea: 'A1:F11', logo: 'A1:A3' }));
+      const at = (ref: string) => s.fields.find((f) => f.id === `Grid!${ref}`)!;
+      expect(s.rowGroups).toEqual([]);
+      expect([at('C7').label, at('C8').label, at('D9').label]).toEqual([`Eq 1 ${DOT} Kind`, `Eq 1 ${DOT} Dimensions Length`, `Eq 2 ${DOT} Dimensions Width`]);
+      expect([at('C8').confidence, at('C10').label, at('C10').confidence]).toEqual(['high', 'Eq 1', 'low']);
+      expect(new Set(s.fields.map((f) => f.block))).toEqual(new Set(['Grid!m1']));
+    }
+  });
+
+  it('R16: a list under an empty corner whose columns are all text is a row group, not a matrix', () => {
+    const sheet = probeSheet('List');
+    sheet.set('B8', undefined, STYLE.header);
+    ['Spec', 'Location', 'Unit'].forEach((t, i) => sheet.set(`${'CDE'[i]}8`, t, STYLE.header));
+    for (let r = 9; r <= 18; r += 1) sheet.set(`B${r}`, `Item ${r}`, STYLE.bold).blank(`C${r}:E${r}`, STYLE.cell);
+    const s = detect(sheet.toPackage({ printArea: 'A1:E20', logo: 'A1:A3' }));
+    expect(s.fields).toEqual([]);
+    const g = s.rowGroups[0]!;
+    expect([s.rowGroups.length, g.shape, g.firstRow, g.capacity, g.columns.map((c) => c.label), g.rowLabels![0]])
+      .toEqual([1, 'rows', 9, 10, ['Spec', 'Location', 'Unit'], 'Item 9']);
+  });
+
+  it('handles a tall merge and a cell far down the sheet without indexing every row', () => {
+    const pkg = edited(inventoryXlsx(5), {
+      [SHEET]: (xml) => xml.replace('</sheetData>', '<row r="1048000"><c r="H1048000" t="inlineStr"><is><t>far</t></is></c></row></sheetData>')
+        .replace('<mergeCells count="7">', '<mergeCells count="8"><mergeCell ref="H20:H1048576"/>'),
+      [WORKBOOK]: (xml) => xml.replace(/<definedNames>.*<\/definedNames>/, ''),
+    });
+    const start = performance.now();
+    const s = detect(pkg);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(s.rowGroups.map((g) => g.capacity)).toEqual([5]);
   });
 
   it('refuses a package with no workbook', () => {
