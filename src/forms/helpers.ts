@@ -1,5 +1,6 @@
 import { rankLabel } from '../domain/catalogues';
 import { formatDisplayDate, isValidIsoDate, isoWeek } from '../domain/dates';
+import { todayRowIndex } from '../domain/dayGrid';
 import { parseDecimal } from '../domain/numbers';
 import type { CrewMember } from '../domain/types';
 import { fullName } from '../domain/crew';
@@ -209,18 +210,6 @@ export function allOkRows(group: RowGroupDef, okWord: string, existing: Record<s
 }
 
 /**
- * The index of the row for the ship's today in a day grid: the day of the month minus one. When the grid names its
- * rows (`rowLabels`), the row whose label starts with that number (`5`, `05`, `5th`), else `-1`; without labels, day minus
- * one while the grid has that many rows. `-1` when the grid has no such row.
- */
-export function todayRowIndex(group: RowGroupDef, shipToday: string): number {
-  if (!isValidIsoDate(shipToday)) return -1;
-  const day = Number(shipToday.slice(8, 10));
-  if (group.rowLabels !== undefined) return group.rowLabels.findIndex((l) => Number.parseInt(l, 10) === day);
-  return day - 1 < group.capacity ? day - 1 : -1;
-}
-
-/**
  * The values a new draft starts with from the last one: the rows of every `startFromLast` group and the fields of
  * every listed matrix block (R14), and nothing else, so a header field (the date, the vessel) is not carried. A
  * column that is left empty on purpose, a picture and an empty value are not copied.
@@ -356,3 +345,6 @@ export function nowValue(nowUtc: Date, offsetMinutes: number): string {
   const ship = new Date(nowUtc.getTime() + offsetMinutes * 60_000);
   return `${pad(ship.getUTCHours())}:${pad(ship.getUTCMinutes())}`;
 }
+
+// Lives in `src/domain/dayGrid.ts` so that Home can use it without loading the engine; kept here for the engine's callers.
+export { todayRowIndex };

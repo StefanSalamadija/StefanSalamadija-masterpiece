@@ -1,8 +1,10 @@
 import { isBackupDue } from '../backup/reminder';
 import type { AlertKind } from '../domain/alerts';
 import { formatOffset, nextScheduledChange } from '../domain/shipTime';
-import type { ClockChange, Settings } from '../domain/types';
+import { todayRowIndex } from '../domain/dayGrid';
+import type { ClockChange, FormDraft, FormTemplate, Settings } from '../domain/types';
 import type { BadgeKind } from './components/BandBadge';
+import { draftRows, fillHref } from './formsView';
 import { historyRows } from './shipTimeView';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -55,4 +57,38 @@ const BADGE_KIND: Record<AlertKind, BadgeKind> = {
  */
 export function alertBadgeKind(kind: AlertKind): BadgeKind {
   return BADGE_KIND[kind];
+}
+
+/** A line of `Forms in progress`; `href` is missing when the draft's form is not in the library. */
+export interface InProgressRow {
+  key: string;
+  href?: string;
+  text: string;
+}
+
+/** Whether a row of a day grid holds anything: a tick box that is off and an empty text are nothing. */
+function rowEntered(row: Record<string, string | boolean | null> | undefined): boolean {
+  return row !== undefined && Object.values(row).some((v) => v !== null && v !== false && v !== '');
+}
+
+/**
+ * The lines of `Forms in progress`, one for each live draft, in the order of the Forms screen: `<code> <title> — <period>`
+ * (`periodLabel` from the forms engine, which Home loads on demand). A month's day grid that has no value in the row for
+ * the ship's today reads `<code> <title> — today's row not entered` instead; another month's draft is not nagged about.
+ */
+export function formsInProgress(
+  drafts: FormDraft[], templates: FormTemplate[], shipToday: string, periodLabel: (period: string) => string,
+): InProgressRow[] {
+  return draftRows(drafts, templates, periodLabel).map(({ draft, template, text }): InProgressRow => {
+    if (!template) return { key: draft.id, text };
+    const grid = template.schema.rowGroups.find((g) => g.shape === 'dayGrid');
+    if (grid && draft.period === shipToday.slice(0, 7)) {
+      const index = todayRowIndex(grid, shipToday);
+      if (index >= 0 && !rowEntered(draft.values.rows[grid.id]?.[index])) {
+        const name = template.code === '' ? template.title : `${template.code} ${template.title}`;
+        return { key: draft.id, href: fillHref(template.id), text: `${name} — today's row not entered` };
+      }
+    }
+    return { key: draft.id, href: fillHref(template.id), text };
+  });
 }

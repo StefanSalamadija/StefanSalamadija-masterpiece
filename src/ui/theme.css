@@ -1870,6 +1870,23 @@ textarea {
   margin-bottom: 16px;
 }
 
+.forms-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.forms-summary p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.forms-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .form-list,
 .setup-list,
 .setup-unsupported {

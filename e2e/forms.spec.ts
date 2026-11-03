@@ -957,3 +957,55 @@ test('Remove photo takes the photo out of the table and deletes its record', asy
   expect((await stored(page, 'formPhotos'))[0]).toMatchObject({ deleted: true, jpegBase64: '' });
   await expect.poll(async () => (await liveDrafts(page))[0]?.photoIds).toEqual([]);
 });
+
+/* ---- Part 4: Home card and importing several forms (Task 17) ---- */
+
+test('Home lists the forms in progress and says when a day grid has no row for today', async ({ page }) => {
+  await startShip(page);
+  await expect(page.getByRole('region', { name: 'Forms in progress' })).toHaveCount(0);
+  await openFillOf(page, 'daygrid.xlsx', 'TST-12 Demo Day Grid');
+  await page.getByRole('button', { name: 'Show all days' }).click();
+  // A value on another day starts the draft; today's row (the 28th) is still empty.
+  await page.getByRole('group', { name: '27', exact: true }).getByLabel('Hold 1 PORT').fill('3');
+  await expect.poll(async () => (await liveDrafts(page)).length).toBe(1);
+
+  await page.goto('./#/');
+  const card = page.getByRole('region', { name: 'Forms in progress' });
+  await expect(card.getByRole('heading', { name: 'Forms in progress' })).toBeVisible();
+  const link = card.getByRole('link', { name: "TST-12 Demo Day Grid — today's row not entered" });
+  await expect(link).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await link.click();
+  await expect(page).toHaveURL(/#\/forms\/[^/]+\/fill$/);
+  await expect(page.getByRole('heading', { name: 'TST-12 Demo Day Grid', exact: true })).toBeVisible();
+
+  await page.getByRole('group', { name: '28', exact: true }).getByLabel('Hold 1 PORT').fill('4');
+  await expect.poll(async () => JSON.stringify((await liveDrafts(page))[0].values.rows).includes('"4"')).toBe(true);
+  await page.goto('./#/');
+  await expect(page.getByRole('region', { name: 'Forms in progress' }).getByRole('link', { name: 'TST-12 Demo Day Grid — October 2026' })).toBeVisible();
+});
+
+test('several forms are imported at once: a count, and a line for the file that failed', async ({ page }) => {
+  await startShip(page);
+  await openForms(page);
+  await expect(page.getByLabel('Import form')).toHaveAttribute('multiple', '');
+  await page.getByLabel('Import form').setInputFiles([paths['toolbox.docx'], paths['inventory.xlsx'], paths['old.doc']]);
+  await expect(page.getByText('2 forms imported', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText(`old.doc: ${OLD_FORMAT}`);
+  // No setup was opened; both forms are in the library.
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(library(page).getByRole('listitem')).toHaveCount(2);
+  await expect(library(page).getByRole('link', { name: /^TST-01 · / })).toBeVisible();
+  await expect(library(page).getByRole('link', { name: /^TST-11 · / })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+
+  // A second batch with a new revision asks for that file only; Cancel skips it.
+  await page.getByLabel('Import form').setInputFiles([paths['toolbox-rev01.docx'], paths['inventory.xlsx']]);
+  await expect(page.getByRole('dialog')).toContainText('Replace Revision 00 / 01.01.2026 with Revision 01 / 01.06.2026?');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Replace Revision');
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  await expect(page.getByText('1 form imported', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(library(page).getByRole('link', { name: 'TST-01 · Toolbox Talk · Rev 00 / 01.01.2026' })).toBeVisible();
+});

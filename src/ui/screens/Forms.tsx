@@ -15,6 +15,8 @@ import { Field } from '../components/Field';
 import {
   draftRows, fillHref, FORM_FILE_TYPES, libraryRows, libraryText, replacePrompt, replaceTarget, revisionNotice, setupHref,
 } from '../formsView';
+import { importMany, importProgress, importSummaryLines } from '../formsImport';
+import type { ImportSummary, ReadForm } from '../formsImport';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
 import { leaveSetupNotice } from './FormSetup';
@@ -23,6 +25,13 @@ import { leaveSetupNotice } from './FormSetup';
 interface PendingRevision {
   target: FormTemplate;
   input: Omit<TemplateInput, 'setup'>;
+}
+
+/** A file of a multi-file import that is a new revision of a form in the library, waiting for the answer. */
+interface PendingAsk {
+  target: FormTemplate;
+  input: ReadForm;
+  answer: (replace: boolean) => void;
 }
 
 /**
@@ -55,6 +64,25 @@ function ReplaceDialog({ pending, onCancel, focusFallback }: {
   );
 }
 
+/** The same question while several files are imported: Replace carries on with the next file, Cancel skips this one. */
+function ReplaceInBatchDialog({ ask, focusFallback }: {
+  ask: PendingAsk;
+  focusFallback: RefObject<HTMLElement | null>;
+}) {
+  return (
+    <ConfirmDialog
+      title={replacePrompt(ask.target.revision, ask.input.schema.identity.revision)} confirmLabel="Replace"
+      focusFallback={focusFallback} onCancel={() => ask.answer(false)} onConfirm={() => ask.answer(true)}
+      body={
+        <>
+          <p>{libraryText(ask.target)}</p>
+          <p>File: {ask.input.fileName}. Cancel skips this file and goes on with the others.</p>
+        </>
+      }
+    />
+  );
+}
+
 function FormsLibrary({ shipId }: { shipId: string }) {
   const { db } = useAppState();
   // Read together, so that a draft is never listed before the form it belongs to.
@@ -71,6 +99,8 @@ function FormsLibrary({ shipId }: { shipId: string }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingRevision>();
+  const [ask, setAsk] = useState<PendingAsk>();
+  const [summary, setSummary] = useState<ImportSummary>();
   const working = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const fileId = useId();
@@ -89,12 +119,15 @@ function FormsLibrary({ shipId }: { shipId: string }) {
    * Reads the chosen file. A form that is already in the library (the same code) asks to be replaced; any other is
    * added with the suggested setup, and its setup review opens. A file that is not a form says why, here.
    */
-  async function choose(file: File | undefined): Promise<void> {
+  async function choose(files: File[]): Promise<void> {
     const input = fileInput.current;
-    if (!file || working.current) {
+    if (files.length === 0 || working.current) {
       if (input) input.value = '';
       return;
     }
+    if (files.length > 1) return chooseMany(files);
+    const file = files[0];
+    setSummary(undefined);
     working.current = true;
     setBusy(true);
     setProblem(undefined);
@@ -133,6 +166,47 @@ function FormsLibrary({ shipId }: { shipId: string }) {
     }
   }
 
+  /**
+   * Imports several files one after another, as a single import does but without opening any setup: each form is saved
+   * with its suggested setup. A new revision still asks to be replaced, for that file. At the end the summary says how
+   * many were imported and which files failed.
+   */
+  async function chooseMany(files: File[]): Promise<void> {
+    const input = fileInput.current;
+    working.current = true;
+    setBusy(true);
+    setProblem(undefined);
+    setSummary(undefined);
+    setFileName(`${files.length} files`);
+    try {
+      const forms = await loadFormsEngine();
+      const result = await importMany(
+        files.map((f) => ({ name: f.name, bytes: async () => new Uint8Array(await f.arrayBuffer()) })),
+        {
+          read: (name, bytes) => forms.importForm(name, bytes),
+          isFileError: (err): err is Error => err instanceof forms.FormFileError,
+          findTarget: async (code) => replaceTarget(await listTemplates(db), code),
+          confirmReplace: (target, read) => new Promise<boolean>((resolve) => {
+            setAsk({ target, input: read, answer: (replace) => { setAsk(undefined); resolve(replace); } });
+          }),
+          replace: async (target, read) => void await replaceTemplate(db, target.id, read),
+          save: async (read) => void await saveTemplate(db, { ...read, setup: forms.defaultSetup(read.schema) }),
+        },
+        (n, total) => setStatus(importProgress(n, total)),
+      );
+      setStatus('');
+      setSummary(result);
+      if (result.stopped !== undefined) reportError(result.stopped);
+    } catch (err) {
+      setStatus('');
+      reportError(err);
+    } finally {
+      working.current = false;
+      setBusy(false);
+      if (input) input.value = '';
+    }
+  }
+
   const templates = data?.templates ?? [];
   const rows = libraryRows(templates, query);
   const drafts = data && engine !== undefined ? draftRows(data.drafts, data.templates, engine?.periodLabel ?? ((period) => period)) : undefined;
@@ -144,18 +218,28 @@ function FormsLibrary({ shipId }: { shipId: string }) {
         <div class="head-actions">
           {/* The input is hidden behind its label, which looks like a button; the input still takes the focus. */}
           <input
-            id={fileId} ref={fileInput} type="file" class="file-input" accept={FORM_FILE_TYPES}
+            id={fileId} ref={fileInput} type="file" multiple class="file-input" accept={FORM_FILE_TYPES}
             aria-disabled={busy ? 'true' : undefined} aria-invalid={problem ? 'true' : undefined}
             aria-describedby={fileName === undefined ? helpId : `${nameId} ${helpId}`}
-            onChange={(event) => void choose(event.currentTarget.files?.[0])}
+            onChange={(event) => void choose([...(event.currentTarget.files ?? [])])}
           />
           <label for={fileId} class="btn btn-primary">Import form</label>
         </div>
       </div>
       <div class="forms-import">
         {fileName !== undefined && <p id={nameId} class="import-file">{fileName}</p>}
-        <p id={helpId} class="helper-text">A company form in Word (.docx, .dotx) or Excel (.xlsx). It is read on this device and goes nowhere else.</p>
+        <p id={helpId} class="helper-text">Company forms in Word (.docx, .dotx) or Excel (.xlsx); you can choose several at once. They are read on this device and go nowhere else.</p>
         {problem && <p class="field-error" role="alert">{problem}</p>}
+        {summary && (
+          <div class="forms-summary">
+            <p>{importSummaryLines(summary)[0]}</p>
+            {summary.failures.length > 0 && (
+              <ul class="field-error" role="alert" aria-label="Files not imported">
+                {importSummaryLines(summary).slice(1).map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
       {/* Always on the page, with its text set after it is there, so that it is announced. */}
       <p class="live" role="status">{status}</p>
@@ -194,6 +278,7 @@ function FormsLibrary({ shipId }: { shipId: string }) {
         </section>
       )}
 
+      {ask && <ReplaceInBatchDialog ask={ask} focusFallback={fileInput} />}
       {pending && <ReplaceDialog pending={pending} onCancel={() => setPending(undefined)} focusFallback={fileInput} />}
     </section>
   );
