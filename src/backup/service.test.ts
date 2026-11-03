@@ -12,7 +12,7 @@ import { TABLE_NAMES } from '../domain/types';
 import type {
   Certificate, ClockChange, CrewDocument, CrewDraft, CrewImportMapping, CrewListColumn, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage,
 } from '../domain/types';
-import { BackupError, DamagedFileError, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
+import { BackupError, BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
 import type { FormSchema, FormSetup } from '../forms/types';
 import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
@@ -459,6 +459,32 @@ describe('exportBackup', () => {
     expect(payload.tables.voyages.map((v) => v.id)).toEqual([a.voyage.id]);
     expect(payload.tables.certificates.map((c) => c.id)).toEqual([a.cert.id]);
     expect(payload.tables.clockChanges).toHaveLength(1);
+  });
+
+  describe('a file too large to import again', () => {
+    it('is refused, by its size in bytes, so that no backup is made that could not be restored', async () => {
+      const a = await deviceA();
+      await updateSettings(a.db, { deviceName: 'Bridge laptop Š' }); // the header is UTF-8: Š takes two bytes
+      for (const kind of ['full', 'handover'] as const) {
+        const { text } = await exportBackup(a.db, kind, PW, { shipId: a.ship.id, ...FAST });
+        const bytes = new TextEncoder().encode(text).length;
+        expect(bytes).toBeGreaterThan(text.length);
+        await expect(exportBackup(a.db, kind, PW, { shipId: a.ship.id, maxBytes: bytes, ...FAST })).resolves.toMatchObject({ text: expect.any(String) });
+        const refused = exportBackup(a.db, kind, PW, { shipId: a.ship.id, maxBytes: bytes - 1, ...FAST });
+        await expect(refused).rejects.toBeInstanceOf(BackupTooLargeError);
+        await expect(refused).rejects.toThrow(
+          'This backup would be over 128 MB, more than a backup can hold. Make or discard drafts that have photos, or remove forms you no longer use, then try again.',
+        );
+      }
+    });
+
+    it('is measured against the import limit unless told otherwise, and writes no settings when refused', async () => {
+      expect(MAX_BACKUP_FILE_BYTES).toBe(128 * 1024 * 1024);
+      const a = await deviceA();
+      const before = await getSettings(a.db);
+      await expect(exportBackup(a.db, 'full', PW, { shipId: a.ship.id, maxBytes: 100, ...FAST })).rejects.toBeInstanceOf(BackupError);
+      expect(await getSettings(a.db)).toEqual(before);
+    });
   });
 
   it('rejects a ship that is not there, and exports nothing', async () => {

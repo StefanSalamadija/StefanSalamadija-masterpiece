@@ -49,6 +49,22 @@ export class DamagedFileError extends BackupError {
   constructor() { super("The file is damaged and can't be read. Nothing was changed.", 'DamagedFileError'); }
 }
 
+/**
+ * A backup is the data of a ship's office: a few megabytes, and some tens more with a library of forms and the photos of
+ * open drafts, kept as base64 inside it. Anything bigger is not one: it is not read on import, and not made on export.
+ */
+export const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
+
+/** The finished file would be larger than an import takes (`MAX_BACKUP_FILE_BYTES`), so it would be a backup that could not be restored. */
+export class BackupTooLargeError extends BackupError {
+  constructor() {
+    super(
+      `This backup would be over ${MAX_BACKUP_FILE_BYTES / (1024 * 1024)} MB, more than a backup can hold. Make or discard drafts that have photos, or remove forms you no longer use, then try again.`,
+      'BackupTooLargeError',
+    );
+  }
+}
+
 export class StaleReviewError extends BackupError {
   constructor() {
     super('The data on this device changed while you were reviewing. Nothing was changed — open the file again.', 'StaleReviewError');

@@ -120,18 +120,27 @@ export async function photosFor(db: MasterpieceDB, draftId: string): Promise<Rec
   return Object.fromEntries(photos.map((p) => [p.id, fromBase64(p.jpegBase64)]));
 }
 
-/** The ship's live last-values records of the form `code`. An empty code names no form, so it has none. */
-async function liveLastValues(db: MasterpieceDB, shipId: string, code: string): Promise<FormLastValues[]> {
-  if (code === '') return [];
-  return db.formLastValues.where('shipId').equals(shipId).filter((r) => !r.deleted && r.code === code).toArray();
+/**
+ * What a form's last values are kept under (`FormLastValues.code`): the form's code, so that they still match on a device
+ * with its own copy of the form, or `template:<templateId>` for a form without a code, so that two such forms never mix.
+ */
+export function lastValuesKey(code: string, templateId: string): string {
+  return code === '' ? `template:${templateId}` : code;
+}
+
+/** The ship's live last-values records kept under `key` (see `lastValuesKey`). */
+function liveLastValues(db: MasterpieceDB, shipId: string, key: string): Promise<FormLastValues[]> {
+  return db.formLastValues.where('shipId').equals(shipId).filter((r) => !r.deleted && r.code === key).toArray();
 }
 
 /**
- * The values of the last file made from the form `code` on the ship: the newest live record (a merge of two devices can
- * leave two), or undefined. A form without a code has none, because an empty code would mix up different forms.
+ * The values of the last file made from `template` on the ship: the newest live record under its key (see
+ * `lastValuesKey`; a merge of two devices can leave two), or undefined.
  */
-export async function lastValuesFor(db: MasterpieceDB, shipId: string, code: string): Promise<FormLastValues | undefined> {
-  return newest(await liveLastValues(db, shipId, code));
+export async function lastValuesFor(
+  db: MasterpieceDB, shipId: string, template: Pick<FormTemplate, 'id' | 'code'>,
+): Promise<FormLastValues | undefined> {
+  return newest(await liveLastValues(db, shipId, lastValuesKey(template.code, template.id)));
 }
 
 /** Tombstones the draft (unless it already is one) and its live photos, whose image is not kept. Inside a transaction. */
@@ -143,8 +152,8 @@ async function deleteDraftAndPhotos(db: MasterpieceDB, draft: FormDraft, stamp: 
 
 /**
  * Closes a draft once its file is made, in one transaction: if any write fails, nothing is written.
- * - The ship's last values of the form become `values`. The newest live record is updated (and one a merge left beside it
- *   is deleted), else one is created. A form without a code keeps none (see `lastValuesFor`).
+ * - The ship's last values of the form, under its `lastValuesKey`, become `values`. The newest live record is updated
+ *   (and one a merge left beside it is deleted), else one is created.
  * - The draft is soft-deleted, and so are its photos, whose tombstones keep no image.
  * - With `rollover`, the next draft of the same form and ship is started, for `rollover.period` with `rollover.values`
  *   (the jobs that are not finished, say), and no photos.
@@ -157,12 +166,11 @@ export async function closeDraft(
     db.transaction('rw', [db.formDrafts, db.formPhotos, db.formLastValues, db.settings], async () => {
       const draft = await liveDraft(db, draftId);
       const stamp = await stampNow(db);
-      if (draft.code !== '') {
-        const [current, ...others] = (await liveLastValues(db, draft.shipId, draft.code)).sort(newestFirst);
-        if (current) await db.formLastValues.put({ ...current, values, ...stamp });
-        else await createRecord<FormLastValues>(db, 'formLastValues', { shipId: draft.shipId, code: draft.code, values });
-        await db.formLastValues.bulkPut(others.map((r) => tombstoneOf('formLastValues', r, stamp)));
-      }
+      const key = lastValuesKey(draft.code, draft.templateId);
+      const [current, ...others] = (await liveLastValues(db, draft.shipId, key)).sort(newestFirst);
+      if (current) await db.formLastValues.put({ ...current, values, ...stamp });
+      else await createRecord<FormLastValues>(db, 'formLastValues', { shipId: draft.shipId, code: key, values });
+      await db.formLastValues.bulkPut(others.map((r) => tombstoneOf('formLastValues', r, stamp)));
       await deleteDraftAndPhotos(db, draft, stamp);
       if (rollover) {
         await createRecord<FormDraft>(db, 'formDrafts', {

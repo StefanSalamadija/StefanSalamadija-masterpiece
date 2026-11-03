@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BackupTooLargeError } from '../backup/envelope';
 import { StorageFullError } from '../db/storage';
 import { currentError, describeError, dismissError, reportError, subscribeErrors } from './errors';
 
@@ -19,6 +20,12 @@ describe('describeError', () => {
   it('uses a plain message when there is nothing readable to show', () => {
     const generic = 'Something went wrong. Please try again.';
     for (const reason of [undefined, null, 42, {}, new Error(''), '']) expect(describeError(reason), String(reason)).toEqual({ message: generic });
+  });
+
+  it('shows a backup that would be too large to import again in the words of the export dialog', () => {
+    expect(describeError(new BackupTooLargeError())).toEqual({
+      message: 'This backup would be over 128 MB, more than a backup can hold. Make or discard drafts that have photos, or remove forms you no longer use, then try again.',
+    });
   });
 
   it('shows a rejection reason that is a string', () => {

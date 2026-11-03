@@ -1,3 +1,5 @@
+import { base64ByteLength, isBase64 } from '../backup/crypto';
+import { MAX_BACKUP_FILE_BYTES } from '../backup/envelope';
 import { CREW_DOC_TYPES, RANKS } from '../domain/catalogues';
 import { CREW_LIST_COLUMNS } from '../domain/crewList';
 import { docLabel } from '../domain/crewDocs';
@@ -15,11 +17,8 @@ import { MAPPING_FIELDS } from './crewImportView';
  */
 
 export const MAX_DEVICE_NAME_SHOWN = 60;
-/**
- * A backup is the data of a ship's office: a few megabytes, and some tens more with a library of forms and the photos of
- * open drafts, kept as base64 inside it. Anything bigger is not one, and is not read.
- */
-export const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
+/** The largest backup file there is (see `MAX_BACKUP_FILE_BYTES` in the envelope): anything bigger is not read. */
+export { MAX_BACKUP_FILE_BYTES };
 const MAX_TITLE = 80;
 const MAX_VALUE = 200;
 /** Shown for a value that is empty or missing. */
@@ -192,6 +191,29 @@ function show(key: string, value: unknown): string {
 
 export interface FieldChange { label: string; local: string; incoming: string }
 
+/** "12 KB": a size as a person reads it. */
+function sizeText(bytes: number): string {
+  if (bytes < 1024) return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** "toolbox.docx (12 KB)": a template's file, by its name and the size of what is in it. */
+function fileText(r: Values): string {
+  const name = nameOf(r.fileName, '(no name)');
+  const size = typeof r.fileBase64 === 'string' && isBase64(r.fileBase64) ? sizeText(base64ByteLength(r.fileBase64)) : 'size unknown';
+  return `${name} (${size})`;
+}
+
+/**
+ * A template's file is not one of its shown fields (it is data, not words), but two copies with different files at the
+ * same revision would otherwise look the same: the change of file is listed after the revision.
+ */
+function fileChange(local: SyncRecord, incoming: SyncRecord): FieldChange | undefined {
+  const [mine, theirs] = [local as unknown as Values, incoming as unknown as Values];
+  return deepEqual(mine.fileBase64, theirs.fileBase64) ? undefined : { label: 'File', local: fileText(mine), incoming: fileText(theirs) };
+}
+
 /** The fields whose value differs between this device's record and the file's, in the order of the form, with the form's words. */
 export function changedFields(table: TableName, local: SyncRecord, incoming: SyncRecord): FieldChange[] {
   const mine = valuesOf(table, local);
@@ -212,6 +234,12 @@ export function changedFields(table: TableName, local: SyncRecord, incoming: Syn
   for (const key of keys) {
     if (deepEqual(mine[key], theirs[key])) continue;
     changes.push({ label: labels[key] ?? (plainText(key, MAX_TITLE) || EMPTY_VALUE), local: show(key, mine[key]), incoming: show(key, theirs[key]) });
+  }
+  const file = table === 'formTemplates' ? fileChange(local, incoming) : undefined;
+  if (file) {
+    // After the revision, else after the status (which always comes first), else first.
+    const revision = changes.findIndex((c) => c.label === 'Revision');
+    changes.splice(revision >= 0 ? revision + 1 : Number(local.deleted !== incoming.deleted), 0, file);
   }
   return changes;
 }
@@ -239,7 +267,9 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
     // A form without a code is named by its title.
     case 'formTemplates': return `Form ${nameOf(r.code, nameOf(r.title, '(no code)'))}`;
     case 'formDrafts': return `Form draft: ${nameOf(r.code, '(no code)')} — ${nameOf(r.period, '(no period)')}`;
-    case 'formLastValues': return `Last values: ${nameOf(r.code, '(no code)')}`;
+    // The values of a form without a code are kept under its template's id, which says nothing to a person.
+    case 'formLastValues':
+      return `Last values: ${typeof r.code === 'string' && r.code.startsWith('template:') ? '(form without a code)' : nameOf(r.code, '(no code)')}`;
     case 'formPhotos': {
       const size = [r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n));
       return size ? `Photo: ${String(r.width)} × ${String(r.height)}` : 'Photo';

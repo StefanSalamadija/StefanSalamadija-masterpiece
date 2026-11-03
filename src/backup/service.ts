@@ -11,7 +11,9 @@ import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { TABLE_NAMES } from '../domain/types';
 import type { ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
 import { isBase64 } from './crypto';
-import { DamagedFileError, StaleReviewError, openBackup, sealBackup, validatePassword } from './envelope';
+import {
+  BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, StaleReviewError, openBackup, sealBackup, validatePassword,
+} from './envelope';
 import type { BackupHeader } from './envelope';
 import { backupFileName } from './fileName';
 
@@ -37,11 +39,14 @@ export function collectHandover(t: Tables, shipId: string, opts: { includeLibrar
  * Seals this device's data into a backup file. `shipId` names the ship the file is named after (its name and its
  * current ship's time); for a handover it is also the one ship exported, with the forms library only when
  * `includeLibrary` is set (see `collectHandover`; leaving it out leaves the library out). A full export has every ship and
- * table and every tombstone, the library included. It writes nothing to the settings: the file has not left the device
- * yet, so the caller records a full backup with `recordFullBackup(db, exportedAt)` once the user has shared or saved it.
+ * table and every tombstone, the library included. A file larger than an import takes (`MAX_BACKUP_FILE_BYTES`, or
+ * `maxBytes` for tests) is refused with `BackupTooLargeError`: it would be a backup that could not be restored. It writes
+ * nothing to the settings: the file has not left the device yet, so the caller records a full backup with
+ * `recordFullBackup(db, exportedAt)` once the user has shared or saved it.
  */
 export async function exportBackup(
-  db: MasterpieceDB, kind: 'full' | 'handover', password: string, opts: { shipId: string; includeLibrary?: boolean; iterations?: number },
+  db: MasterpieceDB, kind: 'full' | 'handover', password: string,
+  opts: { shipId: string; includeLibrary?: boolean; iterations?: number; maxBytes?: number },
 ): Promise<{ fileName: string; text: string; exportedAt: string }> {
   const weak = validatePassword(password);
   if (weak) throw new Error(weak);
@@ -61,7 +66,28 @@ export async function exportBackup(
   };
   const payload = { tables: kind === 'full' ? tables : collectHandover(tables, ship.id, { includeLibrary: opts.includeLibrary === true }) };
   const text = await sealBackup(header, payload, password, { iterations: opts.iterations });
+  const limit = opts.maxBytes ?? MAX_BACKUP_FILE_BYTES;
+  if (utf8ByteLength(text, limit) > limit) throw new BackupTooLargeError();
   return { fileName, text, exportedAt: header.exportedAt };
+}
+
+/**
+ * The size of `text` as UTF-8, as the saved file has it, counted only as far as is needed to know it is over `limit`
+ * (a UTF-8 file is never smaller than its number of UTF-16 units, so a text longer than `limit` is over at once).
+ */
+function utf8ByteLength(text: string, limit: number): number {
+  if (text.length > limit) return text.length;
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i);
+    if (unit < 0x80) bytes += 1;
+    else if (unit < 0x800) bytes += 2;
+    else if (unit >= 0xd800 && unit <= 0xdbff && i + 1 < text.length) {
+      bytes += 4; // a surrogate pair is one character of 4 bytes
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
 }
 
 /** Marks a full backup as made at `exportedAt` (from `exportBackup`), which resets the backup reminder. Call it once the file was shared or saved. */

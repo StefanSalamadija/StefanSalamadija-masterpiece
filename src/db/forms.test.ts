@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
-  addPhoto, closeDraft, discardDraft, lastValuesFor, listTemplates, openDraft, photosFor, saveDraftValues, saveTemplate,
+  addPhoto, closeDraft, discardDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, saveDraftValues, saveTemplate,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
 import { openDb } from './schema';
@@ -277,9 +277,17 @@ describe('lastValuesFor', () => {
     at('2026-10-28T10:00:00.000Z');
     const gone = await createRecord<FormLastValues>(db, 'formLastValues', { shipId: 'ship-1', code: 'TST-01', values: values('Gone') });
     await softDelete(db, 'formLastValues', gone.id);
-    expect((await lastValuesFor(db, 'ship-1', 'TST-01'))?.id).toBe(newest.id);
-    expect(await lastValuesFor(db, 'ship-2', 'TST-01')).toBeUndefined();
-    expect(await lastValuesFor(db, 'ship-1', 'TST-02')).toBeUndefined();
+    const form = (code: string) => ({ id: 'tpl-x', code });
+    expect((await lastValuesFor(db, 'ship-1', form('TST-01')))?.id).toBe(newest.id);
+    expect(await lastValuesFor(db, 'ship-2', form('TST-01'))).toBeUndefined();
+    expect(await lastValuesFor(db, 'ship-1', form('TST-02'))).toBeUndefined();
+  });
+});
+
+describe('lastValuesKey', () => {
+  it("is the form's code, or the template when the form has none", () => {
+    expect(lastValuesKey('TST-01', 'tpl-1')).toBe('TST-01');
+    expect(lastValuesKey('', 'tpl-1')).toBe('template:tpl-1');
   });
 });
 
@@ -296,12 +304,12 @@ async function draftWithPhotos() {
 
 describe('closeDraft', () => {
   it('writes the last values, tombstones the draft and empties its photos', async () => {
-    const { db, draft, photo, second, otherPhoto } = await draftWithPhotos();
+    const { db, template, draft, photo, second, otherPhoto } = await draftWithPhotos();
     const { deviceId } = await getSettings(db);
     at('2026-10-28T12:00:00.000Z');
     await closeDraft(db, draft.id, values('MV OCEAN STAR'));
     const stamp = { deleted: true, updatedAt: '2026-10-28T12:00:00.000Z', updatedBy: deviceId };
-    expect(await lastValuesFor(db, 'ship-1', 'TST-01')).toMatchObject({
+    expect(await lastValuesFor(db, 'ship-1', template)).toMatchObject({
       scope: 'ship', shipId: 'ship-1', code: 'TST-01', values: values('MV OCEAN STAR'), updatedAt: '2026-10-28T12:00:00.000Z',
     });
     expect(await db.formDrafts.get(draft.id)).toMatchObject(stamp);
@@ -324,11 +332,11 @@ describe('closeDraft', () => {
   it('keeps one record of last values per ship and form: a second close updates it', async () => {
     const { db, template, draft } = await draftWithPhotos();
     await closeDraft(db, draft.id, values('First'));
-    const first = await lastValuesFor(db, 'ship-1', 'TST-01');
+    const first = await lastValuesFor(db, 'ship-1', template);
     at('2026-10-29T08:00:00.000Z');
     const next = await openDraft(db, 'ship-1', template, '2026-10-29');
     await closeDraft(db, next.id, values('Second'));
-    const second = await lastValuesFor(db, 'ship-1', 'TST-01');
+    const second = await lastValuesFor(db, 'ship-1', template);
     expect(second).toMatchObject({ id: first?.id, createdAt: first?.createdAt, values: values('Second'), updatedAt: '2026-10-29T08:00:00.000Z' });
     expect(await db.formLastValues.count()).toBe(1);
   });
@@ -344,14 +352,19 @@ describe('closeDraft', () => {
     expect(await db.formLastValues.get(older.id)).toMatchObject({ deleted: true, updatedAt: '2026-10-28T10:00:00.000Z' });
   });
 
-  it('keeps no last values for a form that has no code, which would mix up forms', async () => {
-    const { db } = await withTemplate('');
-    const template = (await listTemplates(db))[0];
-    const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
-    await closeDraft(db, draft.id, values('X'));
-    expect(await db.formLastValues.count()).toBe(0);
-    expect(await lastValuesFor(db, 'ship-1', '')).toBeUndefined();
-    expect((await db.formDrafts.get(draft.id))?.deleted).toBe(true);
+  it('keeps the last values of a form that has no code by its template, so that two such forms never mix', async () => {
+    const { db, template: first } = await withTemplate('');
+    const second = await saveTemplate(db, { fileName: 'other.docx', bytes: sampleBytes(10), kind: 'docx', schema: schema('', 'Other form'), setup });
+    await closeDraft(db, (await openDraft(db, 'ship-1', first, '2026-10-28')).id, values('First form'));
+    await closeDraft(db, (await openDraft(db, 'ship-1', second, '2026-10-28')).id, values('Second form'));
+    expect(await lastValuesFor(db, 'ship-1', first)).toMatchObject({ code: `template:${first.id}`, values: values('First form') });
+    expect(await lastValuesFor(db, 'ship-1', second)).toMatchObject({ code: `template:${second.id}`, values: values('Second form') });
+    expect(await db.formLastValues.count()).toBe(2);
+    // A second close of the first form updates its own record, and leaves the other form's alone.
+    await closeDraft(db, (await openDraft(db, 'ship-1', first, '2026-10-29')).id, values('First again'));
+    expect((await lastValuesFor(db, 'ship-1', first))?.values).toEqual(values('First again'));
+    expect((await lastValuesFor(db, 'ship-1', second))?.values).toEqual(values('Second form'));
+    expect(await db.formLastValues.count()).toBe(2);
   });
 
   it('writes nothing when a write inside fails: last values, draft and photos stay as they were', async () => {

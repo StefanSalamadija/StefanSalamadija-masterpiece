@@ -562,6 +562,7 @@ describe('forms in the review', () => {
     expect(recordTitle('formTemplates', template({ code: '<b>X</b>\u202E' }))).toBe('Form <b>X</b>');
     expect(recordTitle('formDrafts', draft({ code: 7, period: { a: 1 } }))).toBe('Form draft: (no code) — (no period)');
     expect(recordTitle('formLastValues', rec({ shipId: 's1' }))).toBe('Last values: (no code)');
+    expect(recordTitle('formLastValues', rec({ shipId: 's1', code: 'template:5f0c-77' }))).toBe('Last values: (form without a code)');
     expect(recordTitle('formPhotos', rec({ shipId: 's1', width: 'big' }))).toBe('Photo');
   });
 
@@ -573,9 +574,21 @@ describe('forms in the review', () => {
     });
     expect(changedFields('formTemplates', local, incoming)).toEqual([
       { label: 'Revision', local: '00 / 01.01.2026', incoming: '01 / 01.06.2026' },
+      { label: 'File', local: 'toolbox.docx (3 bytes)', incoming: 'toolbox-rev01.docx (3 bytes)' },
       { label: 'Setup', local: '2 filled for you · 1 left empty', incoming: '1 filled for you · 0 left empty' },
     ]);
-    expect(changedFields('formTemplates', local, template({ fileBase64: 'AQID', title: 'Other', kind: 'dotx' }))).toEqual([]);
+    expect(changedFields('formTemplates', local, template({ title: 'Other', kind: 'dotx', fileName: 'renamed.docx' }))).toEqual([]);
+  });
+
+  it('lists the file of a template conflict when only the file differs, by its name and size', () => {
+    const big = btoa('x'.repeat(2048));
+    expect(changedFields('formTemplates', template(), template({ fileBase64: big, schema: { kind: 'docx', fields: [{ id: 'f1' }] } }))).toEqual([
+      { label: 'File', local: 'toolbox.docx (3 bytes)', incoming: 'toolbox.docx (2 KB)' },
+    ]);
+    expect(changedFields('formTemplates', template(), template({ fileBase64: big, deleted: true })).map((c) => c.label)).toEqual(['Status', 'File']);
+    expect(changedFields('formTemplates', template({ fileName: 7 }), template({ fileName: '<b>x</b>\u202E.docx', fileBase64: 'not base64' }))).toEqual([
+      { label: 'File', local: '(no name) (3 bytes)', incoming: '<b>x</b>.docx (size unknown)' },
+    ]);
   });
 
   it('shows a draft conflict as its period and how many values it holds', () => {

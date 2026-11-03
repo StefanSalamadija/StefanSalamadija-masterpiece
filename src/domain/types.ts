@@ -61,7 +61,10 @@ export interface FormTemplate extends BaseRecord { code: string; title: string; 
  * can still be matched. `period` is the day, week or month it is for (see `draftPeriod`). `photoIds` are its photos'.
  */
 export interface FormDraft extends BaseRecord { shipId: string; templateId: string; code: string; period: string; values: DraftValues; photoIds: string[] }
-/** The values of the last file made from a form on a ship, by the form's code, for "start from last". One live record per ship and code. */
+/**
+ * The values of the last file made from a form on a ship, for "start from last". One live record per ship and key. `code`
+ * is the key (see `lastValuesKey`): the form's code, or `template:<templateId>` for a form that has none.
+ */
 export interface FormLastValues extends BaseRecord { shipId: string; code: string; values: DraftValues }
 /** A photo taken for a draft, as JPEG in standard base64. A deleted photo keeps no image: its `jpegBase64` is `''`. */
 export interface FormPhoto extends BaseRecord { shipId: string; draftId: string; jpegBase64: string; width: number; height: number }
