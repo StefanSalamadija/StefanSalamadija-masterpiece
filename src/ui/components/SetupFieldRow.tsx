@@ -50,7 +50,8 @@ export function SetupFieldRow({ field, choice, onChoose, name, nameError, onName
       {name !== undefined && (
         <div onFocusOut={onNameDone}>
           <Field
-            label="Name this field" value={name} onInput={onName}
+            // Each has a name of its own: the field's name as the form gives it (`Field 3`).
+            label={`Name this field (${field.label})`} value={name} onInput={onName}
             hint="The form gives this field no name of its own."
             error={nameError === undefined ? undefined : { field: field.id, severity: 'error', message: nameError }}
           />

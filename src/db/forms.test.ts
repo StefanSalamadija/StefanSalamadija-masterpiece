@@ -125,7 +125,7 @@ describe('saveTemplate and listTemplates', () => {
 });
 
 describe('saveSetup', () => {
-  const chosen: FormSetup = { ...setup, links: { f1: { source: 'none' } }, okWord: 'Good' };
+  const chosen: FormSetup = { ...setup, links: { f1: { source: 'none' } }, leftEmpty: ['f1'], okWord: 'Good' };
   const renamed: FormSchema = { ...schema('TST-01'), fields: [{ ...schema('TST-01').fields[0], label: 'Ship', leftEmpty: true }] };
 
   it('saves the setup and the schema the review made, stamped as changed now', async () => {
@@ -134,6 +134,14 @@ describe('saveSetup', () => {
     const saved = await saveSetup(db, template.id, template.updatedAt, chosen, renamed);
     expect(saved).toEqual({ ...template, setup: chosen, schema: renamed, updatedAt: '2026-10-28T09:00:00.000Z' });
     expect(await db.formTemplates.get(template.id)).toEqual(saved);
+  });
+
+  it("aligns the schema's left-empty marks with the setup, and drops helpers on left-empty fields, whatever it is given", async () => {
+    const { db, template } = await withTemplate();
+    const emptied: FormSetup = { ...setup, leftEmpty: ['f1'], helpers: { ...setup.helpers, now: ['f1'] } };
+    const saved = await saveSetup(db, template.id, template.updatedAt, emptied, schema('TST-01'));
+    expect(saved.schema.fields[0].leftEmpty).toBe(true);
+    expect(saved.setup.helpers.now).toEqual([]);
   });
 
   it('refuses, and writes nothing, when the form changed since the review was opened (a new revision came in)', async () => {
@@ -491,6 +499,25 @@ describe('replaceTemplate', () => {
     const template = await saveTemplate(db, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: rev00, setup: defaultSetup(rev00) });
     return { db, template };
   }
+
+  it("stores the new file's schema with the left-empty marks of the carried-over setup, and no helper on a left-empty field", async () => {
+    const { db, template } = await library();
+    // The person chose to fill the participants' Signature column, and to leave Time (f4) empty, which had the Now helper.
+    const chosen = { ...template.setup, leftEmpty: ['f4'], links: { ...template.setup.links, f4: { source: 'none' as const } } };
+    const reviewed = await saveSetup(db, template.id, template.updatedAt, chosen, template.schema);
+    expect(reviewed.setup.helpers.now).toEqual([]);
+    at('2026-10-29T08:00:00.000Z');
+    // A new revision replaces it, and its setup is never saved again.
+    const { template: replaced } = await replaceTemplate(db, template.id, rev01Input);
+    const stored = (await db.formTemplates.get(template.id))!;
+    expect(stored).toEqual(replaced);
+    const flagged = [...stored.schema.fields, ...stored.schema.rowGroups.flatMap((g) => g.columns)].filter((f) => f.leftEmpty).map((f) => f.id);
+    expect(flagged.sort()).toEqual([...stored.setup.leftEmpty].sort());
+    expect(stored.setup.leftEmpty).toEqual(['f5']); // Time, which is f5 in the new revision
+    expect(stored.schema.rowGroups[0].columns[2].label).toBe('Signature');
+    expect(stored.schema.rowGroups[0].columns[2]).not.toHaveProperty('leftEmpty'); // detection's flag gave way to the choice
+    for (const ids of Object.values(stored.setup.helpers)) expect(ids).not.toContain('f5');
+  });
 
   it('open_draft_migrates: an open draft keeps its values under the new ids, and a removed field is counted', async () => {
     const { db, template } = await library();

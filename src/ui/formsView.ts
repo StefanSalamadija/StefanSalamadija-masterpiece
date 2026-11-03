@@ -1,3 +1,4 @@
+import { alignLeftEmpty } from '../domain/formSetup';
 import type { BaseRecord, FormDraft, FormTemplate } from '../domain/types';
 // Types only: the forms engine is loaded on demand (see `src/forms/load.ts`). What it computes (the suggested helpers,
 // the period label) is passed in.
@@ -177,13 +178,17 @@ export function setupSections(schema: FormSchema, setup: FormSetup): SetupSectio
 /**
  * The setup with a new choice for one field: `empty` leaves it empty, `you` has the person fill it, a link value links
  * it. A field that is not linked gets `{ source: 'none' }`, so that nothing fills it in and a new revision keeps that
- * choice. An unknown value changes nothing. The setup given is not changed.
+ * choice; a field left empty is also taken out of every helper (as `alignLeftEmpty` does when the setup is stored). An
+ * unknown value changes nothing. The setup given is not changed.
  */
 export function applyChoice(setup: FormSetup, id: string, choice: string): FormSetup {
   const link = choice === 'empty' || choice === 'you' ? { source: 'none' as const } : linkFromValue(choice);
   if (!link) return setup;
   const others = setup.leftEmpty.filter((x) => x !== id);
-  return { ...setup, links: { ...setup.links, [id]: link }, leftEmpty: choice === 'empty' ? [...others, id] : others };
+  if (choice !== 'empty') return { ...setup, links: { ...setup.links, [id]: link }, leftEmpty: others };
+  // Left empty: out of every helper too, so that nothing fills it in.
+  const helpers = Object.fromEntries(Object.entries(setup.helpers).map(([key, ids]) => [key, (ids ?? []).filter((x) => x !== id)]));
+  return { ...setup, links: { ...setup.links, [id]: link }, leftEmpty: [...others, id], helpers: helpers as FormSetup['helpers'] };
 }
 
 const HELPER_ORDER: readonly HelperKey[] = ['pickCrew', 'allOk', 'todayRow', 'startFromLast', 'jobLog', 'thresholds', 'now'];
@@ -224,14 +229,15 @@ function namesOf(schema: FormSchema): Map<string, { label: string; section?: str
 
 /**
  * The switches of the `Helpers` section: for each helper, each place `suggested` (the engine's `suggestHelpers`) or the
- * setup has it, that is still in the form. All OK has one switch for the fields of each section (it sets a whole
+ * setup has it, that is still in the form and not left empty. All OK has one switch for the fields of each section (it sets a whole
  * section), and one for each group. A switch is on when the setup has the helper for every id of it.
  */
 export function helperSwitches(schema: FormSchema, setup: FormSetup, suggested: Record<HelperKey, string[]>): HelperSwitch[] {
   const names = namesOf(schema);
   const switches: HelperSwitch[] = [];
   for (const key of HELPER_ORDER) {
-    const ids = [...new Set([...suggested[key], ...(setup.helpers[key] ?? [])])].filter((id) => names.has(id));
+    // A field left empty is never offered: no helper may fill it in.
+    const ids = [...new Set([...suggested[key], ...(setup.helpers[key] ?? [])])].filter((id) => names.has(id) && !setup.leftEmpty.includes(id));
     const name = helperName(key, setup.okWord);
     const add = (label: string, of: string[]): void => {
       switches.push({ key, ids: of, label: `${name}: ${label}`, on: of.every((id) => setup.helpers[key]?.includes(id)) });
@@ -264,24 +270,29 @@ export function showsNotFinished(setup: FormSetup): boolean {
 
 export const OK_WORD_REQUIRED = 'Enter the OK word.';
 export const NAME_REQUIRED = 'Enter a name for this field.';
+export const NOT_FINISHED_REQUIRED = 'Enter the status of a job that is not finished.';
 
-/** What must be put right before the setup is saved, by `okWord` or by field id. */
-export function setupProblems(state: { okWord: string; labels: Record<string, string> }): Record<string, string> {
+/**
+ * What must be put right before the setup is saved, by `okWord`, `notFinished` or field id. `notFinished` is checked only
+ * when it is given, which the screen does while `Not finished value` is asked for (`showsNotFinished`).
+ */
+export function setupProblems(state: { okWord: string; labels: Record<string, string>; notFinished?: string }): Record<string, string> {
   const problems: Record<string, string> = {};
   if (state.okWord.trim() === '') problems.okWord = OK_WORD_REQUIRED;
+  if (state.notFinished !== undefined && state.notFinished.trim() === '') problems.notFinished = NOT_FINISHED_REQUIRED;
   for (const [id, label] of Object.entries(state.labels)) if (label.trim() === '') problems[id] = NAME_REQUIRED;
   return problems;
 }
 
 /**
- * The schema as it is saved with the setup: the fields the person named have their new label, and each field and
- * column is marked as left empty exactly when the setup leaves it empty (the writers leave such a field unwritten).
+ * The schema as it is saved with the setup: the fields the person named have their new label, and the left-empty marks
+ * follow the setup (`alignLeftEmpty`, the rule the store applies too; the writers leave such a field unwritten).
  */
 export function savedSchema(schema: FormSchema, setup: FormSetup, labels: Record<string, string>): FormSchema {
-  const fix = (f: FieldDef): FieldDef => {
-    const { leftEmpty: _old, ...rest } = f;
+  const rename = (f: FieldDef): FieldDef => {
     const label = labels[f.id]?.trim();
-    return { ...rest, ...(label ? { label } : {}), ...(setup.leftEmpty.includes(f.id) ? { leftEmpty: true } : {}) };
+    return label ? { ...f, label } : f;
   };
-  return { ...schema, fields: schema.fields.map(fix), rowGroups: schema.rowGroups.map((g) => ({ ...g, columns: g.columns.map(fix) })) };
+  const named = { ...schema, fields: schema.fields.map(rename), rowGroups: schema.rowGroups.map((g) => ({ ...g, columns: g.columns.map(rename) })) };
+  return alignLeftEmpty(named, setup).schema;
 }

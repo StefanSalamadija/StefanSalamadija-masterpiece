@@ -1,5 +1,6 @@
 // The forms engine is only ever imported for its types here: `src/db` is in the main bundle, the engine is loaded on demand.
 import { fromBase64, toBase64 } from '../backup/crypto';
+import { alignLeftEmpty } from '../domain/formSetup';
 import type { BaseRecord, FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import type { DraftValues, FormKind, FormSchema, FormSetup } from '../forms/types';
 import { createRecord, tombstoneOf, updateRecord } from './records';
@@ -53,7 +54,8 @@ export const SETUP_GONE = 'This form is no longer in the library.';
 export const SETUP_STALE = 'This form was changed since its setup was opened. Open its setup again to see the changes.';
 
 /**
- * Saves the setup review of a form: its setup, and its schema with the names and left-empty marks the person gave.
+ * Saves the setup review of a form: its setup, and its schema with the names the person gave. The schema's left-empty
+ * marks are made to follow the setup, and helpers on left-empty fields are dropped (`alignLeftEmpty`).
  * `basedOn` is the form's `updatedAt` when the review was opened. If the form changed since (a new revision came in, in
  * another tab), nothing is saved and `SETUP_STALE` is thrown, so that a schema made from the old file never overwrites
  * the new file's. A form that is gone is `SETUP_GONE`.
@@ -65,7 +67,7 @@ export function saveSetup(db: MasterpieceDB, templateId: string, basedOn: string
       const current = await db.formTemplates.get(templateId);
       if (!current || current.deleted) throw new Error(SETUP_GONE);
       if (current.updatedAt !== basedOn) throw new Error(SETUP_STALE);
-      const updated: FormTemplate = { ...current, setup, schema, ...(await stampNow(db)) };
+      const updated: FormTemplate = { ...current, ...alignLeftEmpty(schema, setup), ...(await stampNow(db)) };
       await db.formTemplates.put(updated);
       return updated;
     }),
@@ -244,7 +246,7 @@ function sameData(a: unknown, b: unknown): boolean {
  * Replaces a form in the library by its new revision (spec §4 step 5), keeping its id: the file, its name and kind, the
  * code, title and revision, and the schema become the new file's. The old fields are linked to the new ones
  * (`mapRevision`), and through that link, in one transaction (all or nothing):
- * - the setup is carried over (`migrateSetup`);
+ * - the setup is carried over (`migrateSetup`), and the stored schema's left-empty marks follow it (`alignLeftEmpty`);
  * - every live draft of the template, of every ship, moves to the new ids (`migrateValues`), and takes the new code;
  * - so do the last values kept under the form's key (`lastValuesKey`), of every ship, under the new key if it changed.
  * What cannot be carried over is counted. A picture field that is gone loses its value (the photo's id), but the photo
@@ -292,9 +294,11 @@ export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: O
       });
       await db.formLastValues.bulkPut(movedLasts);
 
+      // The new file's schema comes with detection's left-empty marks; the carried-over setup holds the person's choices,
+      // which every file-making path must follow even if the setup is never saved again.
       const template: FormTemplate = {
-        ...old, code, title, revision, kind: input.kind, fileName: input.fileName, fileBase64, schema: input.schema,
-        setup: migrateSetup(old.setup, map, input.schema), ...stamp,
+        ...old, code, title, revision, kind: input.kind, fileName: input.fileName, fileBase64,
+        ...alignLeftEmpty(input.schema, migrateSetup(old.setup, map, input.schema)), ...stamp,
       };
       await db.formTemplates.put(template);
       return { template, unmatched, removed, droppedFromDrafts, droppedFromLastValues };

@@ -107,6 +107,15 @@ test('the Forms tab imports a form, shows its setup review, and lists it once sa
   await expect(section(page, 'Helpers').getByRole('switch', { name: 'Add from crew: Participants' })).toBeChecked();
   await expect(page.getByLabel('OK word')).toHaveValue('Satisfactory');
   await expect(page.getByLabel('Not finished value')).toHaveCount(0); // the toolbox talk has no job log
+
+  // A field left empty is taken out of its helper: Time has the Now helper until it is left empty.
+  const now = section(page, 'Helpers').getByRole('switch', { name: 'Now: Time' });
+  await expect(now).toBeChecked();
+  await section(page, 'Filled for you').getByLabel('Time').selectOption({ label: 'Leave empty' });
+  await expect(now).toHaveCount(0);
+  await section(page, 'Left empty').getByLabel('Time').selectOption({ label: "Time now (ship's time)" });
+  await expect(now).not.toBeChecked(); // offered again, and off: it was taken out when the field was left empty
+  await now.check();
   await expectNoHorizontalScroll(page);
 
   // A choice moves the field to its section, and the focus goes with it (a tap on the select focuses it).
@@ -228,7 +237,7 @@ test('the setup names an unsure field, lists what cannot be filled, and asks for
   const yours = section(page, 'You fill');
   // The unsure field comes first, with an input to name it.
   await expect(yours.getByRole('listitem').first()).toContainText('Field 1');
-  const name = yours.getByLabel('Name this field');
+  const name = yours.getByLabel('Name this field (Field 1)', { exact: true }); // each such input has a name of its own
   await expect(name).toHaveValue('Field 1');
   await expect(section(page, "Can't be filled here").getByRole('listitem')).toHaveCount(2);
   await expectNoHorizontalScroll(page);
@@ -253,10 +262,41 @@ test('the setup names an unsure field, lists what cannot be filled, and asks for
   await carry.uncheck();
   await expect(page.getByLabel('Not finished value')).toHaveCount(0);
   await carry.check();
+  // Asked for while the job log is on, like the OK word.
+  await page.getByLabel('Not finished value').fill('');
+  await page.getByLabel('Not finished value').blur();
+  await expect(page.getByRole('alert')).toHaveText('Enter the status of a job that is not finished.');
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(page.getByRole('heading', { name: 'Set up TST-03' })).toBeVisible();
   await page.getByLabel('Not finished value').fill('Open');
   await page.getByRole('button', { name: 'Save form' }).click();
   await expect(library(page).getByRole('listitem')).toHaveCount(2);
   const weekly = (await stored(page, 'formTemplates')).find((t) => t.code === 'TST-03')!;
   expect(weekly.setup.notFinished).toBe('Open');
   expect(weekly.setup.helpers.jobLog).toEqual(['g1']);
+});
+
+test('a setup left open while another tab imports a new revision says at once that it is out of date, and saves nothing', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openForms(page);
+  await importFile(page, 'toolbox.docx');
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(library(page).getByRole('listitem')).toHaveCount(1);
+  await library(page).getByRole('link', { name: 'Set up' }).click();
+  await expect(page.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  const other = await page.context().newPage();
+  await other.goto('./#/forms');
+  await other.getByLabel('Import form').setInputFiles(paths['toolbox-rev01.docx']);
+  await other.getByRole('button', { name: 'Replace' }).click();
+  await expect(other.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible();
+
+  const stale = 'This form was changed since its setup was opened. Open its setup again to see the changes.';
+  await expect(page.getByRole('alert')).toHaveText(stale);
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(page.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible(); // refused: still here
+  const [template] = await stored(page, 'formTemplates');
+  expect(template.revision).toBe('01 / 01.06.2026');
+  expect(template.schema.fields.map((f: { label: string }) => f.label)).toContain('Location');
 });

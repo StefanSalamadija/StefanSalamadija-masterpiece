@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { alignLeftEmpty } from '../domain/formSetup';
 import type { FormDraft, FormTemplate } from '../domain/types';
 import { periodLabel } from '../forms/helpers';
 import type { FieldDef, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
@@ -189,6 +190,8 @@ describe('the setup review', () => {
     expect(ids(setupSections(SCHEMA, linked).filled)).toEqual(['f1', 'f4', 'f5', 'g2.c1']);
 
     expect(applyChoice(SETUP, 'g1.c3', 'you').leftEmpty).toEqual(['f5']);
+    // A field left empty is taken out of its helpers, so nothing fills it in.
+    expect(applyChoice(SETUP, 'f6', 'empty').helpers.allOk).toEqual(['f7']);
     expect(applyChoice(SETUP, 'f1', 'nonsense')).toEqual(SETUP);
     expect(SETUP).toEqual(before);
   });
@@ -205,16 +208,21 @@ describe('the setup review', () => {
     expect(on.helpers.jobLog).toEqual(['g2']);
     expect(showsNotFinished(on)).toBe(true);
     expect(showsNotFinished(SETUP)).toBe(false);
+    // A field the person leaves empty is no longer offered to a helper.
+    const emptied = applyChoice(applyChoice(SETUP, 'f6', 'empty'), 'f7', 'empty');
+    expect(helperSwitches(SCHEMA, emptied, suggested).map((s) => s.key)).toEqual(['pickCrew', 'jobLog']);
     const off = setHelper(SETUP, switches[1], false);
     expect(off.helpers.allOk).toEqual([]);
     expect(SETUP.helpers.allOk).toEqual(['f6', 'f7']);
   });
 
-  it('asks for the OK word and for a name in every renamed field', () => {
+  it('asks for the OK word, for a name in every renamed field, and for the not-finished status while it is asked', () => {
     expect(setupProblems({ okWord: 'Satisfactory', labels: { f3: 'Remarks' } })).toEqual({});
     expect(setupProblems({ okWord: '  ', labels: { f3: ' ', 'g1.c2': 'Rank' } })).toEqual({
       okWord: 'Enter the OK word.', f3: 'Enter a name for this field.',
     });
+    expect(setupProblems({ okWord: 'OK', labels: {}, notFinished: ' ' })).toEqual({ notFinished: 'Enter the status of a job that is not finished.' });
+    expect(setupProblems({ okWord: 'OK', labels: {}, notFinished: 'Pending' })).toEqual({});
   });
 
   it('saves the new names and the left-empty choices into the schema, so that the file is written as set up', () => {
@@ -228,5 +236,7 @@ describe('the setup review', () => {
     expect('leftEmpty' in saved.rowGroups[0].columns[2]).toBe(false);
     expect('leftEmpty' in saved.fields[0]).toBe(false);
     expect(SCHEMA).toEqual(before);
+    // The same rule as the store's (`alignLeftEmpty`).
+    expect(savedSchema(SCHEMA, setup, {})).toEqual(alignLeftEmpty(SCHEMA, setup).schema);
   });
 });

@@ -4,7 +4,7 @@ import { useAppState } from '../../app/AppState';
 import { describeError, reportError } from '../../app/errors';
 import { setFlash } from '../../app/flash';
 import { navigate, useRoute } from '../../app/router';
-import { saveSetup } from '../../db/forms';
+import { saveSetup, SETUP_STALE } from '../../db/forms';
 import type { FormTemplate } from '../../domain/types';
 import { loadFormsEngine } from '../../forms/load';
 import type { FormsEngine } from '../../forms/load';
@@ -91,7 +91,10 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   const naming = new Set(sections.you.filter((e) => e.field.confidence === 'low').map((e) => e.field.id));
   const problems = setupProblems({
     okWord: setup.okWord, labels: Object.fromEntries(Object.entries(labels).filter(([id]) => naming.has(id))),
+    notFinished: showsNotFinished(setup) ? setup.notFinished : undefined,
   });
+  // The form changed since this review opened (a new revision, in another tab): saving would be refused, so say so now.
+  const stale = template.updatedAt !== basedOn && !saving.current;
   const shown = (key: string): string | undefined => (attempted || touched.has(key) ? problems[key] : undefined);
   const touch = (key: string): void => setTouched((current) => (current.has(key) ? current : new Set([...current, key])));
 
@@ -136,6 +139,7 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   }
 
   const okWordError = shown('okWord');
+  const notFinishedError = shown('notFinished');
   const row = (entry: SetupEntry) => {
     const { id } = entry.field;
     const unsure = naming.has(id);
@@ -153,6 +157,7 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
       <h2>{setupHeading(template)}</h2>
       <p class="setup-identity">{[template.title, template.revision === '' ? '' : `Rev ${template.revision}`].filter(Boolean).join(' · ')}</p>
       <p class="helper-text">{foundSummary(schema)}</p>
+      {stale && <p class="field-error" role="alert">{SETUP_STALE}</p>}
       {notice.length > 0 && (
         <div class="setup-notice" role="status">
           {notice.map((line) => <p key={line}>{line}</p>)}
@@ -199,10 +204,11 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
         />
       </div>
       {showsNotFinished(setup) && (
-        <div class="setup-section">
+        <div class="setup-section" onFocusOut={() => touch('notFinished')}>
           <Field
             label="Not finished value" value={setup.notFinished}
             hint="Jobs with this status are carried over to next week's form."
+            error={notFinishedError === undefined ? undefined : { field: 'notFinished', severity: 'error', message: notFinishedError }}
             onInput={(notFinished) => setSetup((current) => ({ ...current, notFinished }))}
           />
         </div>
