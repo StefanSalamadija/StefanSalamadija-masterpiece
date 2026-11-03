@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../../src/forms/testing/excelFixtures';
-import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../../src/forms/testing/wordFixtures';
+import { jobsWithPhotosDotx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../../src/forms/testing/wordFixtures';
 
 /**
  * Writes the synthetic forms the end-to-end tests import into `dir`, which must exist, and gives the path of each by
@@ -13,6 +13,7 @@ export async function writeFormFixtures(dir: string): Promise<Record<string, str
     'toolbox-rev01.docx': toolboxTalkDocx({ revision: '01 / 01.06.2026', renameSubjectTo: 'Topic', extraFieldLabel: 'Location' }),
     'permit.docx': permitDocx(),
     'weekly.dotx': weeklyJobsDotx(),
+    'jobs-photos.dotx': jobsWithPhotosDotx(),
     'inventory.xlsx': inventoryXlsx(),
     'daygrid.xlsx': dayGridXlsx(),
     'matrix.xlsx': matrixXlsx(),

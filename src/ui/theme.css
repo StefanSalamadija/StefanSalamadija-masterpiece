@@ -1857,7 +1857,8 @@ textarea {
   outline-offset: 2px;
 }
 
-.file-input[aria-disabled='true'] + label {
+.file-input[aria-disabled='true'] + label,
+.file-input:disabled + label {
   opacity: 0.6;
   cursor: default;
 }
@@ -2169,4 +2170,14 @@ textarea {
   align-items: flex-start;
   gap: 10px;
   min-height: 44px;
+}
+
+/* The hidden file input of Add photo stays inside its row of buttons, so that it never widens the page. */
+.fill-row-actions {
+  position: relative;
+}
+
+.fill-row-actions .file-input {
+  top: 0;
+  left: 0;
 }

@@ -5,6 +5,7 @@ import { canAddRow, isFixedRows, rowCount, rowTitle, visibleColumns } from '../f
 import { remarksShown, shownRows } from '../formHelpers';
 import type { RemarksRule } from '../formHelpers';
 import { FormField } from './FormField';
+import { PhotoField } from './JobLog';
 
 /*
  * A table of a form on the fill screen: its rows, one fieldset each, named by the row's label in the form (`Item 120`)
@@ -22,8 +23,15 @@ export interface RowExtras {
   /** The columns that have a `Now` button, and what it does. */
   nowColumns?: ReadonlySet<string>;
   onNow?: (index: number, column: FieldDef) => void;
-  /** An alarm warning for a cell, from its value. */
-  warningFor?: (column: FieldDef, value: FormValue) => string | undefined;
+  /** An alarm warning for a cell, from its value (shown once the cell was left). */
+  warningFor?: (index: number, column: FieldDef, value: FormValue) => string | undefined;
+  /** Photos in the row's picture columns (a job log with pictures): a thumbnail, `Add photo` and `Remove photo` for each. */
+  photos?: {
+    busy: boolean;
+    errorFor: (index: number, column: FieldDef) => string | undefined;
+    onFile: (index: number, column: FieldDef, file: File) => void;
+    onRemove: (index: number, column: FieldDef) => void;
+  };
   /** `Last: <value>` for a cell, from its value. */
   lastFor?: (index: number, column: FieldDef, value: FormValue) => string | undefined;
   /** A column offered as a choice among these (the people onboard). */
@@ -64,6 +72,10 @@ interface RowProps {
   title: string;
   row: Record<string, FormValue> | undefined;
   errors: Record<string, string> | undefined;
+  /** Alarm warnings and photo problems of the row, by column id. */
+  notices: Record<string, string> | undefined;
+  /** A photo is being added: the row's photo buttons are off. */
+  photoBusy: boolean;
   removable: boolean;
   parent: RowGroupProps;
 }
@@ -77,12 +89,12 @@ const sameErrors = (a: Record<string, string> | undefined, b: Record<string, str
 class Row extends Component<RowProps> {
   shouldComponentUpdate(next: RowProps): boolean {
     const p = this.props;
-    return next.row !== p.row || next.index !== p.index || next.title !== p.title || next.removable !== p.removable
-      || next.group !== p.group || !sameErrors(next.errors, p.errors);
+    return next.row !== p.row || next.index !== p.index || next.title !== p.title || next.removable !== p.removable || next.photoBusy !== p.photoBusy
+      || next.group !== p.group || !sameErrors(next.errors, p.errors) || !sameErrors(next.notices, p.notices);
   }
 
   render() {
-    const { group, index, title, row, errors, removable } = this.props;
+    const { group, index, title, row, errors, notices, photoBusy, removable } = this.props;
     const extras = this.props.parent.extras;
     const rule = extras?.remarks;
     return (
@@ -97,11 +109,17 @@ class Row extends Component<RowProps> {
               onChange={(next) => this.props.parent.onCell(index, column.id, next)}
               onLeave={() => this.props.parent.onLeave(index, column.id)}
               onNow={extras?.nowColumns?.has(column.id) ? () => extras.onNow?.(index, column) : undefined}
-              warning={extras?.warningFor?.(column, value)} last={extras?.lastFor?.(index, column, value)}
+              warning={notices?.[`warn:${column.id}`]} last={extras?.lastFor?.(index, column, value)}
               choices={extras?.choicesFor?.(column)}
             />
           );
         })}
+        {extras?.photos && group.columns.filter((c) => c.kind === 'picture' && !c.leftEmpty).map((column) => (
+          <PhotoField
+            key={column.id} field={column} value={row?.[column.id] ?? null} busy={photoBusy} error={notices?.[`photo:${column.id}`]}
+            onFile={(file) => extras.photos?.onFile(index, column, file)} onRemove={() => extras.photos?.onRemove(index, column)}
+          />
+        ))}
         {removable && (
           <div class="fill-row-actions">
             <button type="button" class="btn btn-outline btn-small" onClick={() => this.props.parent.onRemove(index)}>Remove</button>
@@ -172,14 +190,22 @@ export function RowGroup(props: RowGroupProps) {
       {count === 0 && <p class="empty">No rows yet.</p>}
       {shownRows(count, only).map((i) => {
         const errors: Record<string, string> = {};
+        const notices: Record<string, string> = {};
         for (const c of columns) {
           const e = errorFor(i, c.id);
           if (e) errors[c.id] = e;
+          const w = extras?.warningFor?.(i, c, rows[i]?.[c.id] ?? null);
+          if (w) notices[`warn:${c.id}`] = w;
+        }
+        for (const c of group.columns) {
+          const e = c.kind === 'picture' ? extras?.photos?.errorFor(i, c) : undefined;
+          if (e) notices[`photo:${c.id}`] = e;
         }
         return (
           <Row
             key={i} group={group} index={i} title={rowTitle(group, i)} row={rows[i]}
-            errors={Object.keys(errors).length > 0 ? errors : undefined} removable={!fixed} parent={parent}
+            errors={Object.keys(errors).length > 0 ? errors : undefined}
+            notices={Object.keys(notices).length > 0 ? notices : undefined} photoBusy={extras?.photos?.busy ?? false} removable={!fixed} parent={parent}
           />
         );
       })}

@@ -695,12 +695,18 @@ test('the permit: All Yes for a section, asking before it replaces answers, a ga
   const gas = section(page, 'Gas readings');
   await gas.getByRole('button', { name: 'Add row' }).click();
   const row = gas.getByRole('group', { name: 'Row 1' });
-  await row.getByLabel('O2 [Vol.%]').fill('18.5');
+  // Not while it is typed (`1` on the way to `19.8`), but once the reading is left.
+  await row.getByLabel('O2 [Vol.%]').pressSequentially('18.5');
+  await expect(row.getByRole('alert')).toHaveCount(0);
+  await row.getByLabel('O2 [Vol.%]').blur();
   await expect(row.getByRole('alert')).toHaveText('O2 18.5 — below 19.5');
   await row.getByLabel('CO [ppm]').fill('31');
+  await expect(row.getByRole('alert')).toHaveCount(1); // CO is not left yet
+  await row.getByLabel('CO [ppm]').blur();
   await expect(row.getByRole('alert').filter({ hasText: 'CO 31 — above 25' })).toBeVisible();
   await row.getByLabel('H2S [ppm]').fill('4');
-  await expect(row.getByRole('alert')).toHaveCount(2);
+  await row.getByLabel('H2S [ppm]').blur();
+  await expect(row.getByRole('alert')).toHaveCount(2); // in range: none for H2S
   await row.getByLabel('O2 [Vol.%]').fill('20,5');
   await expect(row.getByRole('alert')).toHaveCount(1);
   await expectNoHorizontalScroll(page);
@@ -713,6 +719,7 @@ test('the permit: All Yes for a section, asking before it replaces answers, a ga
   await personnel.getByRole('group', { name: 'Row 1' }).getByRole('button', { name: 'Now' }).first().click();
 
   await row.getByLabel('O2 [Vol.%]').fill('18.5');
+  await row.getByLabel('O2 [Vol.%]').blur();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Make file' }).click();
   const file = await download;
@@ -901,4 +908,52 @@ test('a save that fails while the file is being made clears the "Making the file
   await expect(page.locator('p.live').first()).toHaveText('');
   await expect(page.getByRole('button', { name: 'Make file' })).not.toHaveAttribute('aria-disabled');
   await allowWrites(page);
+});
+
+test('a job log with its photos in the same table: a photo in a job row, removed photos are deleted, and the file has the jpeg', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'jobs-photos.dotx', 'TST-05 Demo Jobs With Photos');
+  const jobs = section(page, 'Jobs');
+  await jobs.getByRole('button', { name: 'Add job' }).click();
+  const row = jobs.getByRole('group', { name: 'Row 1' });
+  await row.getByLabel('Description').fill('Check the pilot ladder');
+  await expect(row.getByRole('button', { name: 'Remove photo' })).toHaveCount(0);
+  await row.getByLabel('Add photo').setInputFiles({ name: 'ladder.png', mimeType: 'image/png', buffer: Buffer.from(pngOf(10)) });
+  await expect(row.getByRole('img', { name: 'Photo' })).toBeVisible();
+  await row.getByRole('button', { name: 'Before', exact: true }).click();
+  await expectNoHorizontalScroll(page);
+  await expect.poll(async () => (await stored(page, 'formPhotos')).length).toBe(1);
+  const [first] = await stored(page, 'formPhotos');
+
+  // Replacing a photo removes the old one: it keeps no image.
+  await expect(row.getByText('Replace photo')).toBeVisible();
+  await row.getByLabel('Replace photo').setInputFiles({ name: 'ladder2.png', mimeType: 'image/png', buffer: Buffer.from(pngOf(12)) });
+  await expect.poll(async () => (await stored(page, 'formPhotos')).find((x) => x.id === first.id)?.deleted).toBe(true);
+  const photos = await stored(page, 'formPhotos');
+  expect(photos.find((x) => x.id === first.id)).toMatchObject({ deleted: true, jpegBase64: '' });
+  const [kept] = photos.filter((x) => !x.deleted);
+  expect(kept.width).toBe(12);
+  await expect.poll(async () => (await liveDrafts(page))[0]?.photoIds).toEqual([kept.id]);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const made = readPackage(await downloaded(await download));
+  expect(made.order.filter((name) => /^word\/media\/.*\.jpe?g$/.test(name))).toHaveLength(1);
+  const back = readWordValues(made, await wordSchema('jobs-photos.dotx'));
+  expect(back.rows.g1[0]).toMatchObject({ 'g1.c3': 'Check the pilot ladder', 'g1.c4': 'Pending', 'g1.c6': 'Before' });
+  expect(back.rows.g1[0]['g1.c5']).toBeTruthy();
+});
+
+test('Remove photo takes the photo out of the table and deletes its record', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'jobs-photos.dotx', 'TST-05 Demo Jobs With Photos');
+  const row = section(page, 'Jobs').getByRole('group', { name: 'Row 1' });
+  await section(page, 'Jobs').getByRole('button', { name: 'Add job' }).click();
+  await row.getByLabel('Add photo').setInputFiles({ name: 'a.png', mimeType: 'image/png', buffer: Buffer.from(pngOf(10)) });
+  await expect(row.getByRole('img', { name: 'Photo' })).toBeVisible();
+  await row.getByRole('button', { name: 'Remove photo' }).click();
+  await expect(row.getByRole('img', { name: 'Photo' })).toHaveCount(0);
+  await expect.poll(async () => (await stored(page, 'formPhotos')).filter((x) => !x.deleted).length).toBe(0);
+  expect((await stored(page, 'formPhotos'))[0]).toMatchObject({ deleted: true, jpegBase64: '' });
+  await expect.poll(async () => (await liveDrafts(page))[0]?.photoIds).toEqual([]);
 });

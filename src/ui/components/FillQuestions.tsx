@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { onboardAt, fullName } from '../../domain/crew';
 import type { ClockChange, CrewMember, FormTemplate } from '../../domain/types';
 import type { FormsEngine } from '../../forms/load';
-import type { DraftValues, FieldDef, RowGroupDef } from '../../forms/types';
+import type { DraftValues, FieldDef, FormValue, RowGroupDef } from '../../forms/types';
 import { normaliseLabel } from '../../forms/labels';
 import {
   addRow, cellKey, editField, hasPictures, removeRow, setCell, shownValue,
@@ -40,6 +40,8 @@ export interface FillQuestionsProps {
   /** The error to show for a field or cell key, if any. */
   shown: (key: string) => string | undefined;
   touch: (key: string) => void;
+  /** Whether a cell or field was left (a warning is shown from then on). */
+  isTouched: (key: string) => boolean;
   change: (update: (current: FillState) => FillState) => void;
   /** The ship's crew, for Add from crew and a job's Responsible. */
   crew: CrewMember[];
@@ -54,8 +56,10 @@ export interface FillQuestionsProps {
   revealAll: boolean;
   photoBusy: boolean;
   photoNotice: { key: string; text: string } | undefined;
-  /** Adds a photo: `place` sets the picture field once it is stored. */
-  onPhoto: (file: File, key: string, place: (photoId: string) => (current: FillState) => FillState) => void;
+  /** Adds a photo: `place` sets the picture field once it is stored; `replaces` is the photo it takes the place of, removed then. */
+  onPhoto: (file: File, key: string, place: (photoId: string) => (current: FillState) => FillState, replaces?: string) => void;
+  /** Photos no longer used (removed or replaced): their records are removed once the draft no longer holds them. */
+  onDrop: (photoIds: string[]) => void;
   /** Tells the person something about what a helper did (shown in the status line). */
   notify: (text: string) => void;
 }
@@ -71,6 +75,12 @@ function FillSectionBlock({ title, children }: { title: string; children: Compon
     </section>
   );
 }
+
+/** The id of the photo a picture value holds, if it holds one. */
+const photoIdOf = (value: FormValue | undefined): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+/** The photos a row of a table holds, in its picture columns. */
+const photoIdsOf = (group: RowGroupDef, row: Record<string, FormValue> | undefined): string[] =>
+  group.columns.flatMap((c) => (c.kind === 'picture' ? [photoIdOf(row?.[c.id])] : [])).filter((id): id is string => id !== undefined);
 
 const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 const withValues = (f: (values: DraftValues) => DraftValues) => (current: FillState): FillState => ({ ...current, values: f(current.values) });
@@ -154,9 +164,23 @@ export function FillQuestions(p: FillQuestionsProps) {
     const extras: RowExtras = {
       nowColumns: nowColumns.size > 0 ? nowColumns : undefined,
       onNow: (i, column) => change(withValues((v) => setCell(v, group, i, column.id, nowText(column)))),
-      warningFor: limits ? (column, value) => {
+      // Only once the reading was left, so that `1` on the way to `19.8` is not announced; it stays while the reading is out of range.
+      warningFor: limits ? (i, column, value) => {
         const t = limits.get(column.id);
-        return t ? readingWarning(column.label, value, t, engine.checkReading) : undefined;
+        return t && p.isTouched(cellKey(group.id, i, column.id)) ? readingWarning(column.label, value, t, engine.checkReading) : undefined;
+      } : undefined,
+      photos: hasPictures(group) ? {
+        busy: p.photoBusy,
+        errorFor: (i, column) => (p.photoNotice?.key === cellKey(group.id, i, column.id) ? p.photoNotice.text : undefined),
+        onFile: (i, column, file) => {
+          const old = state.values.rows[group.id]?.[i]?.[column.id];
+          p.onPhoto(file, cellKey(group.id, i, column.id), (photoId) => withValues((v) => setCell(v, group, i, column.id, photoId)), photoIdOf(old));
+        },
+        onRemove: (i, column) => {
+          const old = state.values.rows[group.id]?.[i]?.[column.id];
+          change(withValues((v) => setCell(v, group, i, column.id, null)));
+          p.onDrop(photoIdOf(old) ? [photoIdOf(old)!] : []);
+        },
       } : undefined,
       lastFor: lastOn ? (i, column, value) => lastShown(value, lastText(last?.rows[group.id]?.[i]?.[column.id])) : undefined,
       // A job's Responsible is one of the people onboard.
@@ -180,8 +204,11 @@ export function FillQuestions(p: FillQuestionsProps) {
       return (
         <PhotoField
           key={id} field={field} value={value} busy={p.photoBusy} error={p.photoNotice?.key === id ? p.photoNotice.text : undefined}
-          onFile={(file) => p.onPhoto(file, id, (photoId) => (current) => editField(current, id, photoId))}
-          onRemove={() => change((current) => editField(current, id, null))}
+          onFile={(file) => p.onPhoto(file, id, (photoId) => (current) => editField(current, id, photoId), photoIdOf(value))}
+          onRemove={() => {
+            change((current) => editField(current, id, null));
+            p.onDrop(photoIdOf(value) ? [photoIdOf(value)!] : []);
+          }}
         />
       );
     }
@@ -216,7 +243,10 @@ export function FillQuestions(p: FillQuestionsProps) {
               return free ? setCell(v, group, free.row, free.slot.picture.id, photoId) : v;
             }));
           }}
-          onCells={(i, patch) => change(withValues((v) => Object.entries(patch).reduce((acc, [column, value]) => setCell(acc, group, i, column, value), v)))}
+          onCells={(i, patch) => {
+            change(withValues((v) => Object.entries(patch).reduce((acc, [column, value]) => setCell(acc, group, i, column, value), v)));
+            p.onDrop(photoIdsOf(group, rows[i]));
+          }}
           onCell={(i, column, value) => change(withValues((v) => setCell(v, group, i, column, value)))}
           onLeave={(i, column) => p.touch(cellKey(group.id, i, column))}
           keyFor={(i, column) => cellKey(group.id, i, column)}
@@ -229,7 +259,10 @@ export function FillQuestions(p: FillQuestionsProps) {
         key={group.id} group={group} kind={template.kind} rows={rows} showLabel={showLabel} extras={extrasFor(group)}
         onCell={(i, column, next) => change(withValues((v) => setCell(v, group, i, column, next)))}
         onAdd={() => change(withValues((v) => addRow(v, group.id, jobs ? newJobRow(jobs, shipToday, setup.notFinished) : {})))}
-        onRemove={(i) => change(withValues((v) => removeRow(v, group.id, i)))}
+        onRemove={(i) => {
+          change(withValues((v) => removeRow(v, group.id, i)));
+          p.onDrop(photoIdsOf(group, rows[i]));
+        }}
         errorFor={(i, column) => p.shown(cellKey(group.id, i, column))}
         onLeave={(i, column) => p.touch(cellKey(group.id, i, column))}
         keyFor={(i, column) => cellKey(group.id, i, column)}

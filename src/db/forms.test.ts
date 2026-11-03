@@ -6,7 +6,7 @@ import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
 import { detectWord } from '../forms/word/detect';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
-  addPhoto, closeDraft, discardDraft, findDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
+  addPhoto, removePhoto, closeDraft, discardDraft, findDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
   saveSetup, saveTemplate, SETUP_GONE, SETUP_STALE,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
@@ -317,6 +317,21 @@ describe('addPhoto and photosFor', () => {
     const photos = await photosFor(db, draft.id);
     expect(Object.keys(photos)).toEqual([photo.id]);
     expect(photos[photo.id]).toEqual(jpeg);
+  });
+
+  it('removes a photo: it keeps no image, leaves the draft\'s list, and removing it again changes nothing', async () => {
+    const { db, template } = await withTemplate();
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
+    const keep = await addPhoto(db, 'ship-1', draft.id, sampleBytes(10), 10, 10);
+    const drop = await addPhoto(db, 'ship-1', draft.id, sampleBytes(20), 10, 10);
+    await removePhoto(db, drop.id);
+    expect(await db.formPhotos.get(drop.id)).toMatchObject({ deleted: true, jpegBase64: '' });
+    expect((await db.formDrafts.get(draft.id))?.photoIds).toEqual([keep.id]);
+    expect(Object.keys(await photosFor(db, draft.id))).toEqual([keep.id]);
+    const stamped = (await db.formPhotos.get(drop.id))?.updatedAt;
+    await removePhoto(db, drop.id);
+    await removePhoto(db, 'missing');
+    expect((await db.formPhotos.get(drop.id))?.updatedAt).toBe(stamped);
   });
 
   it("gives only the draft's live photos", async () => {

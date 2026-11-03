@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { importForm } from '../forms/engine';
 import { allOkValues, checkReading, defaultSetup, draftPeriod, jobLogColumns, startFromLast, thresholdsOf } from '../forms/helpers';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../forms/testing/excelFixtures';
-import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
+import { jobsWithPhotosDotx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
 import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
 import type { ClockChange } from '../domain/types';
 import {
@@ -190,6 +190,16 @@ describe('the job log', () => {
     const full = [{ 'g2.c1': 'p1', 'g2.c3': 'p2', 'g2.c5': 'p3' }];
     expect(nextFreeSlot(pictures, full, Infinity)).toEqual({ row: 1, slot: slots[0] });
     expect(nextFreeSlot(pictures, full, 1)).toBeUndefined();
+  });
+});
+
+describe('a job log with its photos in the same table', () => {
+  const mixed = schemaOf('jobs-photos.dotx', jobsWithPhotosDotx());
+  const jobs = mixed.rowGroups[0];
+
+  it('has picture columns and other columns to fill, so it is no pure photo table', () => {
+    expect(photoSlots(jobs).map((s) => [s.picture.id, s.choice?.id])).toEqual([['g1.c5', 'g1.c6']]);
+    expect(jobLogColumns(jobs)?.cleared.map((c) => c.id)).toEqual(['g1.c5', 'g1.c6']);
   });
 });
 

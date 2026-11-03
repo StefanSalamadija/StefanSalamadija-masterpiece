@@ -127,6 +127,36 @@ export function weeklyJobsDotx(): Uint8Array {
 }
 
 /**
+ * `TST-05 Demo Jobs With Photos`, a template (`.dotx`): one `Jobs` repeating section whose rows hold Date, Responsible,
+ * Description and Status controls and, in the same row, a picture control with a Before / After drop-down. This is the
+ * shape in which a job log carries its photos in the jobs table itself (the weekly fixture keeps them in a table of
+ * their own).
+ */
+export function jobsWithPhotosDotx(): Uint8Array {
+  const c = new Controls();
+  const widths = [1300, 1500, 2438, 1300, 1700, 1400];
+  const prompt = 'Click or tap here to enter text.';
+  const job = () => row(widths, [
+    { content: p(c.dateControl({ alias: 'Job date', tag: 'jobDate', format: 'dd.MM.yyyy', text: 'Click or tap to enter a date.', placeholder: true })) },
+    { content: p(c.textControl({ alias: 'Responsible', tag: 'jobResponsible', text: prompt, placeholder: true })) },
+    { content: p(c.textControl({ alias: 'Description', tag: 'jobDescription', text: prompt, placeholder: true, multiLine: true })) },
+    { content: p(c.formDropdown(['_ choose', 'Pending', 'Completed'])) },
+    { content: c.pictureControl({ alias: 'Picture', tag: 'jobPicture', rId: BODY_IMAGE_RID, cx: 1200000, cy: 900000 }) },
+    { content: p(c.formDropdown(['_ choose', 'Before', 'After'])) },
+  ]);
+  const jobs = table(widths, [
+    headerRow(widths, ['Date', 'Responsible', 'Description', 'Status', 'Picture', 'Photo']),
+    c.repeatingSection({ alias: 'Jobs', tag: 'jobs', title: 'Job', items: [job(), job()] }),
+  ]);
+  return wordPackage({
+    kind: 'dotx',
+    bodyUsesImage: true,
+    header: headerBlock(c, { title: 'Demo Jobs With Photos', code: 'TST-05', revision: REVISION }),
+    body: heading('Jobs') + jobs + p(),
+  });
+}
+
+/**
  * `TST-04 Demo Content Controls`: one control of each kind in a two-column table: text, date (`dd/MMM/yyyy`, a control of
  * its own between paragraphs), drop-down, combo box, `w14:checkbox`, and a text control that still shows its prompt.
  */

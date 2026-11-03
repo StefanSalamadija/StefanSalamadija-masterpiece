@@ -19,7 +19,7 @@ type Source = { source: CanvasImageSource; width: number; height: number; releas
 async function decode(blob: Blob): Promise<Source> {
   if (typeof createImageBitmap === 'function') {
     try {
-      const bitmap = await createImageBitmap(blob);
+      const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
       return { source: bitmap, width: bitmap.width, height: bitmap.height, release: () => bitmap.close() };
     } catch {
       // Some browsers cannot decode a format here; the image element may still.
@@ -50,9 +50,9 @@ export async function downsizeImage(
   } catch {
     throw new Error(PHOTO_UNREADABLE);
   }
+  const canvas = document.createElement('canvas');
   try {
     const { width, height } = fitWithin(decoded.width, decoded.height, longest);
-    const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d');
@@ -64,6 +64,7 @@ export async function downsizeImage(
     if (!jpeg) throw new Error(PHOTO_UNREADABLE);
     return { jpeg: new Uint8Array(await jpeg.arrayBuffer()), width, height };
   } finally {
+    canvas.width = 0; // lets the browser free the pixels at once
     decoded.release();
   }
 }

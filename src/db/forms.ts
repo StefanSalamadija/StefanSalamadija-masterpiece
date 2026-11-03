@@ -154,6 +154,24 @@ export function addPhoto(
   );
 }
 
+/**
+ * Removes a photo that is no longer used (taken out of the form, or replaced): the photo becomes a tombstone that keeps no
+ * image, so it stops counting toward storage and backups, and its id leaves the draft's `photoIds`. A photo that is gone
+ * already is left as it is.
+ */
+export function removePhoto(db: MasterpieceDB, photoId: string): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.formDrafts, db.formPhotos, db.settings], async () => {
+      const photo = await db.formPhotos.get(photoId);
+      if (!photo || photo.deleted) return;
+      const stamp = await stampNow(db);
+      await db.formPhotos.put(tombstoneOf('formPhotos', photo, stamp));
+      const draft = await db.formDrafts.get(photo.draftId);
+      if (draft && !draft.deleted) await db.formDrafts.put({ ...draft, photoIds: draft.photoIds.filter((id) => id !== photoId), ...stamp });
+    }),
+  );
+}
+
 /** The draft's live photos, by id, as JPEG bytes. */
 export async function photosFor(db: MasterpieceDB, draftId: string): Promise<Record<string, Uint8Array>> {
   const photos = await db.formPhotos.where('draftId').equals(draftId).filter((p) => !p.deleted).toArray();

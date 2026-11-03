@@ -6,7 +6,7 @@ import { navigate, useRoute } from '../../app/router';
 import { fromBase64 } from '../../backup/crypto';
 import { shareOrDownload } from '../../backup/share';
 import { loadFieldContext } from '../../db/fieldContext';
-import { addPhoto, closeDraft, discardDraft, findDraft, lastValuesFor, openDraft, photosFor, saveDraftValues } from '../../db/forms';
+import { addPhoto, closeDraft, removePhoto, discardDraft, findDraft, lastValuesFor, openDraft, photosFor, saveDraftValues } from '../../db/forms';
 import type { FieldContext } from '../../domain/fieldDictionary';
 import type { FormDraft, FormTemplate } from '../../domain/types';
 import { loadFormsEngine } from '../../forms/load';
@@ -154,8 +154,24 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
     return draft.current?.id;
   }
 
+  /**
+   * Removes photos no longer in the form (taken out, or replaced), so that they stop counting toward storage. The draft
+   * is saved first, so that it never refers to a photo that is gone.
+   */
+  async function dropPhotos(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      await saver.flush();
+      for (const id of ids) await removePhoto(db, id);
+    } catch (err) {
+      reportError(err);
+    }
+  }
+
   /** Adds a photo to the draft: downsized, stored with the draft, and put in the picture field `place` sets. */
-  async function addPhotoFile(file: File, key: string, place: (photoId: string) => (current: FillState) => FillState): Promise<void> {
+  async function addPhotoFile(
+    file: File, key: string, place: (photoId: string) => (current: FillState) => FillState, replaces?: string,
+  ): Promise<void> {
     if (photoWorking.current || working.current) return;
     photoWorking.current = true;
     setPhotoBusy(true);
@@ -178,6 +194,7 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
       const photo = await addPhoto(db, shipId, draftId, small.jpeg, small.width, small.height);
       change(place(photo.id));
       setStatus('Photo added.');
+      if (replaces !== undefined) void dropPhotos([replaces]);
     } catch (err) {
       setStatus('');
       reportError(err);
@@ -302,7 +319,8 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
           crew={ctx.crew} clockChanges={clockChanges} date={dateAt(nowUtc, draft.current?.period ?? period.current)}
           shipToday={shipDateAt(clockChanges, nowUtc)} last={opened.last} revealAll={attempted && Object.keys(problems).length > 0}
           photoBusy={photoBusy} photoNotice={photoNotice} notify={setStatus}
-          onPhoto={(file, key, place) => void addPhotoFile(file, key, place)}
+          onPhoto={(file, key, place, replaces) => void addPhotoFile(file, key, place, replaces)} onDrop={(ids) => void dropPhotos(ids)}
+          isTouched={(key) => touched.has(key)}
         />
       </fieldset>
 

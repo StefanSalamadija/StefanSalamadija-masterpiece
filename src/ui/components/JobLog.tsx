@@ -42,7 +42,7 @@ export function AddPhoto({ label = 'Add photo', busy, onFile }: { label?: string
   return (
     <>
       <input
-        id={id} type="file" class="file-input" accept="image/*" capture="environment" aria-disabled={busy ? 'true' : undefined}
+        id={id} type="file" class="file-input" accept="image/*" capture="environment" disabled={busy}
         onChange={(event) => {
           const input = event.currentTarget;
           const file = input.files?.[0];
