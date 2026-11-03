@@ -6,7 +6,7 @@ import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
 import { detectWord } from '../forms/word/detect';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
-  addPhoto, closeDraft, discardDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
+  addPhoto, closeDraft, discardDraft, findDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
   saveSetup, saveTemplate, SETUP_GONE, SETUP_STALE,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
@@ -253,6 +253,38 @@ describe('openDraft', () => {
     });
     const fresh = await openDraft(db, 'ship-1', noCode, '2026-10-28');
     expect(fresh.templateId).toBe(noCode.id);
+  });
+});
+
+describe('findDraft and a draft that starts with its auto values (R18)', () => {
+  it('finds the live draft as openDraft does, and writes nothing when there is none', async () => {
+    const { db, template } = await withTemplate();
+    const before = await allTables(db);
+    expect(await findDraft(db, 'ship-1', template)).toBeUndefined();
+    expect(await allTables(db)).toEqual(before);
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
+    expect(await findDraft(db, 'ship-1', template)).toEqual(draft);
+    expect(await findDraft(db, 'ship-2', template)).toBeUndefined();
+  });
+
+  it('creates a draft with the values and auto ids it starts with, and gives back one that is there as it is', async () => {
+    const { db, template } = await withTemplate();
+    const start = { values: { fields: { f1: 'MV OCEAN STAR', f2: 'Drill' }, rows: {} }, autoIds: ['f1'] };
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28', start);
+    expect(draft).toMatchObject({ period: '2026-10-28', values: start.values, autoIds: ['f1'] });
+    const again = await openDraft(db, 'ship-1', template, '2026-10-29', { values: values('Other'), autoIds: [] });
+    expect(again).toEqual(draft);
+    // Without a start, a new draft has no auto values fixed (no `autoIds`).
+    expect(await openDraft(db, 'ship-2', template, '2026-10-28')).not.toHaveProperty('autoIds');
+  });
+
+  it('saves the auto ids with the values when given, and keeps them when not', async () => {
+    const { db, template } = await withTemplate();
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28', { values: values('MV OCEAN STAR'), autoIds: ['f1'] });
+    await saveDraftValues(db, draft.id, values('MV OCEAN STAR'));
+    expect((await db.formDrafts.get(draft.id))?.autoIds).toEqual(['f1']);
+    await saveDraftValues(db, draft.id, values('MV SEA BREEZE'), []);
+    expect(await db.formDrafts.get(draft.id)).toMatchObject({ values: values('MV SEA BREEZE'), autoIds: [] });
   });
 });
 
@@ -529,6 +561,7 @@ describe('replaceTemplate', () => {
     expect(first.unmatched).toEqual(['Location']);
     expect(first.droppedFromDrafts).toBe(0);
     expect((await db.formDrafts.get(draft.id))?.values).toEqual(moved('MV OCEAN STAR'));
+    expect(await db.formDrafts.get(draft.id)).not.toHaveProperty('autoIds'); // none fixed: none made up
     // Opening the form now continues the same draft, under the new revision.
     expect((await openDraft(db, 'ship-1', first.template, '2026-10-29')).id).toBe(draft.id);
 
@@ -575,6 +608,16 @@ describe('replaceTemplate', () => {
       okWord: 'Good',
       notFinished: '',
     });
+  });
+
+  it('moves the auto marks of a draft to the new ids, and drops the mark of a field that is gone (R18)', async () => {
+    const { db, template } = await library();
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28', { values: filled('MV OCEAN STAR'), autoIds: ['f1', 'f3', 'f4'] });
+    await replaceTemplate(db, template.id, rev01Input);
+    expect((await db.formDrafts.get(draft.id))?.autoIds).toEqual(['f1', 'f4', 'f5']); // Date and Time moved down one
+    await saveDraftValues(db, draft.id, (await db.formDrafts.get(draft.id))!.values, ['f1', 'f3']); // f3 is Location now
+    await replaceTemplate(db, template.id, { fileName: 'toolbox-rev02.docx', bytes: rev02Bytes, kind: 'docx', schema: rev02 });
+    expect((await db.formDrafts.get(draft.id))?.autoIds).toEqual(['f1']);
   });
 
   it('moves every live draft and the last values of every ship, and nothing else', async () => {

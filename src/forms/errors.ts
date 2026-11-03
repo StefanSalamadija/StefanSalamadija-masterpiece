@@ -46,11 +46,29 @@ export class DamagedFormError extends FormFileError {
  * place; no file is made and the draft is not changed.
  */
 export class FormWriteError extends Error {
-  constructor(message: string) {
+  /** Why, for the screen to say in its own words (it never parses `message`). */
+  readonly code: WriteErrorCode;
+  /** The field, column or table the value was for, when the writer knows it. */
+  readonly fieldId?: string;
+
+  constructor(message: string, detail: { code: WriteErrorCode; fieldId?: string }) {
     super(message);
     this.name = 'FormWriteError';
+    this.code = detail.code;
+    if (detail.fieldId !== undefined) this.fieldId = detail.fieldId;
   }
 }
+
+/**
+ * Why a writer refused a value:
+ * - `notAnOption`: a choice that is not one of the field's options;
+ * - `tooManyRows`: more rows than a table that cannot grow holds;
+ * - `formula`: an Excel cell that holds a formula;
+ * - `photo`: a photo that is missing or is not a JPEG;
+ * - `wrongKind`: a value of the wrong kind for the field (text for a tick box, a tick for text);
+ * - `notInFile`: the field's place is not in the file as the schema says (the file and its setup no longer match).
+ */
+export type WriteErrorCode = 'notAnOption' | 'tooManyRows' | 'formula' | 'photo' | 'wrongKind' | 'notInFile';
 
 /** What the person reads when a made file fails its check (Global Constraints, exact). */
 export const INTEGRITY_MESSAGE = 'The file couldn\'t be made correctly, so it wasn\'t shared. Nothing was lost \u2014 your draft is still here.';

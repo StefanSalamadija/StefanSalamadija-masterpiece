@@ -91,27 +91,40 @@ async function liveDraftsOf(db: MasterpieceDB, shipId: string, template: FormTem
   return drafts.filter((d) => d.templateId === template.id || (byCode.includes(d) && !known.has(d.templateId)));
 }
 
+/** The ship's live draft of `template` (the newest, if a merge of two devices left two), or none. Only reads. */
+export async function findDraft(db: MasterpieceDB, shipId: string, template: FormTemplate): Promise<FormDraft | undefined> {
+  return db.transaction('r', [db.formDrafts, db.formTemplates], async () => newest(await liveDraftsOf(db, shipId, template)));
+}
+
+/** What a new draft starts with: its values, and the ids of those that are untouched auto values (R18). */
+export interface DraftStart { values: DraftValues; autoIds: string[] }
+
 /**
- * The ship's draft of `template`: the live one there is (the newest, if a merge of two devices left two), or a new, empty
- * one for `period`. There is one live draft per template and ship; looking and creating are one transaction, so two
- * calls at once still make only one.
+ * The ship's draft of `template`: the live one there is (the newest, if a merge of two devices left two), or a new one
+ * for `period`, holding `start` (empty, with no auto values fixed, when it is not given). There is one live draft per
+ * template and ship; looking and creating are one transaction, so two calls at once still make only one. A draft that
+ * is there already is given back as it is: `start` is only for a new one.
  */
-export function openDraft(db: MasterpieceDB, shipId: string, template: FormTemplate, period: string): Promise<FormDraft> {
+export function openDraft(db: MasterpieceDB, shipId: string, template: FormTemplate, period: string, start?: DraftStart): Promise<FormDraft> {
   return guardWrite(() =>
     // `settings` is in the scope because `createRecord` reads the device id from it.
     db.transaction('rw', [db.formDrafts, db.formTemplates, db.settings], async () => {
       const found = newest(await liveDraftsOf(db, shipId, template));
       if (found) return found;
       return createRecord<FormDraft>(db, 'formDrafts', {
-        shipId, templateId: template.id, code: template.code, period, values: EMPTY_VALUES, photoIds: [],
+        shipId, templateId: template.id, code: template.code, period, values: start?.values ?? EMPTY_VALUES, photoIds: [],
+        ...(start ? { autoIds: start.autoIds } : {}),
       });
     }),
   );
 }
 
-/** Saves the values of a live draft, stamped as changed now. A closed or discarded draft is refused. */
-export async function saveDraftValues(db: MasterpieceDB, draftId: string, values: DraftValues): Promise<FormDraft> {
-  return updateRecord<FormDraft>(db, 'formDrafts', draftId, { values });
+/**
+ * Saves the values of a live draft, stamped as changed now, and with `autoIds` the ids that still hold an untouched
+ * auto value (left as they are when not given). A closed or discarded draft is refused.
+ */
+export async function saveDraftValues(db: MasterpieceDB, draftId: string, values: DraftValues, autoIds?: string[]): Promise<FormDraft> {
+  return updateRecord<FormDraft>(db, 'formDrafts', draftId, autoIds === undefined ? { values } : { values, autoIds });
 }
 
 /** The draft, which must exist, be live and be the ship's when `shipId` is given. Throws otherwise. */
@@ -280,7 +293,10 @@ export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: O
       const movedDrafts = drafts.flatMap((draft) => {
         const { values, dropped } = migrateValues(draft.values, map, schemas);
         droppedFromDrafts += dropped.length;
-        return sameData([draft.values, draft.code], [values, code]) ? [] : [{ ...draft, code, values, ...stamp }];
+        // The untouched auto values keep their mark under their new ids; one whose field is gone loses it.
+        const autoIds = draft.autoIds?.flatMap((id) => (map[id] !== undefined && map[id] in values.fields ? [map[id]] : []));
+        const next = autoIds === undefined ? { ...draft, code, values } : { ...draft, code, values, autoIds };
+        return sameData([draft.values, draft.code, draft.autoIds], [values, code, autoIds]) ? [] : [{ ...next, ...stamp }];
       });
       await db.formDrafts.bulkPut(movedDrafts);
 

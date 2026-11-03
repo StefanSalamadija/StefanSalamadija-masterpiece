@@ -3,14 +3,17 @@ import { importForm, makeFile } from '../forms/engine';
 import { FormWriteError, INTEGRITY_MESSAGE, IntegrityError } from '../forms/errors';
 import { readPackage } from '../forms/package';
 import { readWordValues } from '../forms/word/read';
+import type { FieldContext } from '../domain/fieldDictionary';
+import type { ClockChange, CrewMember, ShipProfile } from '../domain/types';
+import { autoValues } from '../forms/autofill';
 import { defaultSetup, draftPeriod, isJobLogGroup, rolloverJobs } from '../forms/helpers';
-import { conditionListXlsx, dayGridXlsx, inventoryXlsx } from '../forms/testing/excelFixtures';
+import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../forms/testing/excelFixtures';
 import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
 import type { DraftValues, FieldDef, FormSchema } from '../forms/types';
 import {
-  addRow, canAddRow, choiceControl, makeAndHandOver, fileValues, fillHeading, fillProblems, fillSections, isAuto, isFixedRows, isLongText,
-  NUMBER_INVALID, numberProblem, removeRow, rolloverFor, rowCount, rowTitle, setCell, setField, shownValue, visibleColumns,
-  writeErrorText,
+  addRow, autoAt, canAddRow, choiceControl, editField, fileValues, fillHeading, fillProblems, fillSections, fixedState,
+  isAuto, isFixed, isFixedRows, isLongText, makeAndHandOver, NUMBER_INVALID, numberProblem, removeRow, rolloverFor, rowCount, rowTitle,
+  setCell, setField, shipDateAt, shownValue, visibleColumns, withAutoValues, writeErrorText,
 } from './formFill';
 
 const schemaOf = (name: string, bytes: Uint8Array): FormSchema => importForm(name, bytes).schema;
@@ -22,7 +25,6 @@ const dayGrid = schemaOf('daygrid.xlsx', dayGridXlsx());
 const conditions = schemaOf('conditions.xlsx', conditionListXlsx());
 
 const EMPTY: DraftValues = { fields: {}, rows: {} };
-const NO_AUTO = { values: {}, missing: {} };
 /** What the items of a section are, as `f1` for a field and `[g1]` for a row group. */
 const itemsOf = (s: ReturnType<typeof fillSections>[number]) => s.items.map((i) => (i.kind === 'field' ? i.field.id : `[${i.group.id}]`));
 
@@ -67,38 +69,117 @@ describe('fillSections', () => {
 describe('auto values and edits', () => {
   const auto = { values: { f1: 'MV OCEAN STAR', f3: '2026-10-25' }, missing: { f2: 'No Master onboard' } };
 
-  it('shows the auto value, marked Auto, until the field is edited', () => {
-    expect(shownValue(EMPTY, auto, 'f1')).toBe('MV OCEAN STAR');
-    expect(isAuto(EMPTY, auto, 'f1')).toBe(true);
-    expect(shownValue(EMPTY, auto, 'f2')).toBeNull();
-    expect(isAuto(EMPTY, auto, 'f2')).toBe(false);
+  it('shows a draft not stored yet with the auto values of now, marked Auto', () => {
+    const state = fixedState(undefined, auto);
+    expect(state).toEqual({ values: { fields: { f1: 'MV OCEAN STAR', f3: '2026-10-25' }, rows: {} }, autoIds: ['f1', 'f3'] });
+    expect(shownValue(state.values, 'f1')).toBe('MV OCEAN STAR');
+    expect(isAuto(state, 'f1')).toBe(true);
+    expect(shownValue(state.values, 'f2')).toBeNull();
+    expect(isAuto(state, 'f2')).toBe(false);
   });
 
-  it('keeps an edit over the auto value, and over a later auto value too', () => {
-    const edited = setField(EMPTY, 'f1', 'MV SEA BREEZE');
-    expect(EMPTY.fields).toEqual({}); // not changed in place
-    expect(shownValue(edited, auto, 'f1')).toBe('MV SEA BREEZE');
-    expect(isAuto(edited, auto, 'f1')).toBe(false);
-    const later = { values: { f1: 'MV RENAMED', f3: '2026-10-26' }, missing: {} };
-    expect(shownValue(edited, later, 'f1')).toBe('MV SEA BREEZE');
-    // An auto value cleared on purpose stays empty.
-    const cleared = setField(edited, 'f3', '');
-    expect(shownValue(cleared, later, 'f3')).toBe('');
-    expect(isAuto(cleared, later, 'f3')).toBe(false);
+  it('takes an edited field out of the auto ids, whatever the edit, without changing what it was given', () => {
+    const state = fixedState(undefined, auto);
+    const edited = editField(state, 'f1', 'MV SEA BREEZE');
+    expect(state.autoIds).toEqual(['f1', 'f3']);
+    expect(edited).toEqual({ values: { fields: { f1: 'MV SEA BREEZE', f3: '2026-10-25' }, rows: {} }, autoIds: ['f3'] });
+    const cleared = editField(edited, 'f3', '');
+    expect(shownValue(cleared.values, 'f3')).toBe('');
+    expect(isAuto(cleared, 'f3')).toBe(false);
   });
 
-  it('writes the auto values that were not edited into the file, and the edits', () => {
-    const values = setField(setField(EMPTY, 'f2', 'Fire drill'), 'f3', '2026-10-20');
-    expect(fileValues(toolbox, values, auto)).toEqual({
-      fields: { f1: 'MV OCEAN STAR', f2: 'Fire drill', f3: '2026-10-20' },
-      rows: {},
+  it('shows a fixed draft as it is stored: later auto values change nothing, and only its auto ids are marked', () => {
+    const stored = { values: { fields: { f1: 'MV SEA BREEZE', f3: '2026-10-25' }, rows: {} }, autoIds: ['f3'] };
+    const later = { values: { f1: 'MV RENAMED', f3: '2026-11-02', f4: '10:00' }, missing: {} };
+    expect(isFixed(stored)).toBe(true);
+    expect(fixedState(stored, later)).toEqual(stored);
+  });
+
+  it('fixes a stored draft that has none fixed yet over the values it holds (a carried-over job log)', () => {
+    const rolled: { values: DraftValues; autoIds?: string[] } = { values: { fields: { f1: 'kept' }, rows: { g1: [{ 'g1.c3': 'Paint hatch' }] } } };
+    expect(isFixed(rolled)).toBe(false);
+    expect(withAutoValues(auto, rolled.values)).toEqual({
+      values: { fields: { f1: 'kept', f3: '2026-10-25' }, rows: { g1: [{ 'g1.c3': 'Paint hatch' }] } }, autoIds: ['f3'],
     });
+    expect(fixedState(rolled, auto)).toEqual(withAutoValues(auto, rolled.values));
   });
 
-  it('never writes a value for a field that is left empty or not in the form', () => {
-    const values: DraftValues = { fields: { f2: 'x', gone: 'y' }, rows: {} };
+  it('writes the values as they are into the file, but never a field that is left empty or not in the form', () => {
+    const values = setField(setField(fixedState(undefined, auto).values, 'f2', 'Fire drill'), 'f3', '2026-10-20');
+    expect(fileValues(toolbox, values)).toEqual({ fields: { f1: 'MV OCEAN STAR', f2: 'Fire drill', f3: '2026-10-20' }, rows: {} });
+    const odd: DraftValues = { fields: { f2: 'x', gone: 'y' }, rows: {} };
     const leftEmpty: FormSchema = { ...toolbox, fields: toolbox.fields.map((f) => (f.id === 'f2' ? { ...f, leftEmpty: true } : f)) };
-    expect(fileValues(leftEmpty, values, NO_AUTO).fields).toEqual({});
+    expect(fileValues(leftEmpty, odd).fields).toEqual({});
+  });
+});
+
+describe('a draft reopened on a later day keeps the auto values of the moment it started (R18)', () => {
+  const base = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'd', deleted: false, scope: 'ship' as const, shipId: 's1' };
+  const ship = { ...base, id: 's1', particulars: { name: 'MV OCEAN STAR' } } as unknown as ShipProfile;
+  const person = (id: string, over: Partial<CrewMember>): CrewMember => ({
+    ...base, id, surname: 'X', givenNames: 'Y', rank: 'master', nationality: 'Croatian', dateOfBirth: '1980-03-14', placeOfBirth: 'Split',
+    passportNo: 'P1', passportExpiry: '2030-01-01', seamansBookNo: 'SB1', seamansBookExpiry: '2030-01-01', signOnDate: '2026-09-01',
+    signOnPort: 'Rijeka', ...over,
+  });
+  // The master is relieved on the 1st of November: on the day the draft is reopened another master is onboard.
+  const crew = [
+    person('m1', { surname: 'Horvat', givenNames: 'Luka', signOffDate: '2026-11-01' }),
+    person('m2', { surname: 'Babić', givenNames: 'Ivo', signOnDate: '2026-11-01' }),
+    person('c1', { rank: 'chiefOfficer', surname: 'Kovač', givenNames: 'Ana' }),
+  ];
+  const plus3: ClockChange = { ...base, id: 'cc', effectiveAt: '2026-01-01T00:00:00.000Z', toOffsetMinutes: 180 };
+  const ctx: FieldContext = { ship, crew, voyages: [], certificates: [], crewDocuments: [], clockChanges: [plus3], nowUtc: new Date(0) };
+  const STARTED = new Date('2026-10-28T05:00:00Z'); // Wednesday 28 October, 08:00 on the ship, ISO week 44
+  const REOPENED = new Date('2026-11-02T07:30:00Z'); // Monday 2 November, 10:30, week 45
+
+  /** Opens the form at `STARTED`, makes the first change, stores the draft; then reopens it at `REOPENED`. */
+  function startAndReopen(schema: FormSchema, edit: [string, string]) {
+    const setup = defaultSetup(schema);
+    const first = autoAt(autoValues, schema, setup, ctx, STARTED);
+    const state = editField(fixedState(undefined, first.auto), ...edit);
+    const stored = { values: state.values, autoIds: state.autoIds, period: draftPeriod(setup, first.shipDate) };
+    const later = autoAt(autoValues, schema, setup, ctx, REOPENED);
+    return { first, stored, later, reopened: fixedState(stored, later.auto) };
+  }
+
+  it('a day-period form keeps its Date and Time', () => {
+    const { stored, later, reopened } = startAndReopen(toolbox, ['f2', 'Fire drill']);
+    expect(stored.period).toBe('2026-10-28');
+    expect(later.auto.values).toMatchObject({ f3: '2026-11-02', f4: '10:30' }); // what it would say now
+    expect(reopened.values.fields).toEqual({ f1: 'MV OCEAN STAR', f2: 'Fire drill', f3: '2026-10-28', f4: '08:00' });
+    expect(reopened.autoIds).toEqual(['f1', 'f3', 'f4']);
+  });
+
+  it('a weekly job log keeps its week and its dates', () => {
+    const { stored, later, reopened } = startAndReopen(weekly, ['f1', 'MV OCEAN STAR']);
+    expect(stored.period).toBe('2026-W44');
+    expect(later.auto.values.f2).not.toBe(reopened.values.fields.f2);
+    expect(reopened.values.fields.f2).toMatch(/44/);
+    expect(reopened.values.fields.f2).not.toMatch(/45/);
+    expect(reopened.values.fields).toEqual(stored.values.fields);
+  });
+
+  it('a month grid keeps its month period and its date, and a Month field keeps its month', () => {
+    const grid = startAndReopen(dayGrid, ['Demo day grid!B6', 'MV OCEAN STAR']);
+    expect(grid.stored.period).toBe('2026-10');
+    expect(grid.reopened.values.fields['Demo day grid!B42']).toBe('2026-10-28');
+    const month = startAndReopen(conditions, ['Demo conditions!B6', 'MV OCEAN STAR']);
+    expect(month.later.auto.values['Demo conditions!D6']).not.toBe(month.reopened.values.fields['Demo conditions!D6']);
+    expect(month.reopened.values.fields).toEqual(month.stored.values.fields);
+    expect(String(month.reopened.values.fields['Demo conditions!D6'])).toMatch(/oct/i);
+  });
+
+  it('keeps the crew who were onboard when it started', () => {
+    const matrix = schemaOf('matrix.xlsx', matrixXlsx());
+    const { later, reopened } = startAndReopen(matrix, ['Demo matrix!B7', 'Pump']);
+    expect(later.auto.values['Demo matrix!B17']).toBe('Ivo Babić');
+    expect(reopened.values.fields['Demo matrix!B17']).toBe('Luka Horvat');
+    expect(reopened.values.fields['Demo matrix!B18']).toBe('Ana Kovač');
+  });
+
+  it('works out the ship\'s date from its clock', () => {
+    expect(shipDateAt([plus3], new Date('2026-10-28T22:30:00Z'))).toBe('2026-10-29'); // 01:30 on the ship
+    expect(shipDateAt([], new Date('2026-10-28T22:30:00Z'))).toBe('2026-10-28');
   });
 });
 
@@ -172,7 +253,7 @@ describe('rows', () => {
     let values = addRow(addRow(addRow(EMPTY, participants.id), participants.id), participants.id);
     values = setCell(values, participants, 1, 'g1.c1', 'Ann Lee');
     values = setCell(values, participants, 1, 'g1.c3', 'signed?');
-    expect(fileValues(toolbox, values, NO_AUTO).rows).toEqual({ [participants.id]: [{}, { 'g1.c1': 'Ann Lee' }] });
+    expect(fileValues(toolbox, values).rows).toEqual({ [participants.id]: [{}, { 'g1.c1': 'Ann Lee' }] });
   });
 });
 
@@ -200,20 +281,25 @@ describe('controls', () => {
 });
 
 describe('writeErrorText', () => {
-  it('names the field by its label, never by its id, in plain words', () => {
-    expect(writeErrorText('"Maybe" is not an option of the field f1 (Check 1.1).', permit))
+  it('names the field by its label, never by its id, in plain words, from the code the writer gives', () => {
+    expect(writeErrorText({ code: 'notAnOption', fieldId: 'f1' }, permit))
       .toBe('"Check 1.1" can\'t be written into this form: the value isn\'t one of the form\'s options.');
-    expect(writeErrorText('The column g1.c2 (O2 [Vol.%]) is not where it was in row 3 of the table g1.', permit))
+    expect(writeErrorText({ code: 'notInFile', fieldId: 'g1.c2' }, permit))
       .toBe('"O2 [Vol.%]" can\'t be written into this form: the file no longer matches this form\'s setup. Import the form again.');
-    expect(writeErrorText('The table g2 (Personnel) holds 8 rows, not 9.', { ...permit, rowGroups: permit.rowGroups.map((g) => ({ ...g, growable: false })) }))
+    expect(writeErrorText({ code: 'tooManyRows', fieldId: 'g2' }, permit))
       .toBe('"Personnel" can\'t be written into this form: the table has room for 8 rows only.');
-    expect(writeErrorText('The field Demo inventory!E6 (Date) is a formula cell, which is never written.', inventory))
+    expect(writeErrorText({ code: 'formula', fieldId: 'Demo inventory!E6' }, inventory))
       .toBe('"Date" can\'t be written into this form: that cell holds a formula.');
+    expect(writeErrorText({ code: 'photo', fieldId: 'g2.c1' }, weekly)).toBe('"Picture" can\'t be written into this form: its photo is missing or damaged.');
+    expect(writeErrorText({ code: 'wrongKind', fieldId: 'f8' }, permit))
+      .toBe('"Checks completed" can\'t be written into this form: the value isn\'t the kind this field takes.');
   });
 
-  it('still says something useful when no field is named', () => {
-    expect(writeErrorText('The form has no part word/document.xml.', toolbox))
+  it('still says something useful when no field is named, or the field is not in the form', () => {
+    expect(writeErrorText({ code: 'notInFile' }, toolbox))
       .toBe('A value can\'t be written into this form: the file no longer matches this form\'s setup. Import the form again.');
+    expect(writeErrorText({ code: 'tooManyRows', fieldId: 'gone' }, toolbox))
+      .toBe('A value can\'t be written into this form: the table has no room for more rows.');
   });
 });
 
@@ -253,17 +339,18 @@ describe('rolloverFor', () => {
 describe('makeAndHandOver', () => {
   const bytes = toolboxTalkDocx();
   const values: DraftValues = { fields: { f1: 'MV OCEAN STAR', f2: 'Fire drill' }, rows: { g1: [{ 'g1.c1': 'Ann Lee' }] } };
-  const isIntegrityError = (err: unknown): err is Error => err instanceof IntegrityError;
-  const isWriteError = (err: unknown): err is Error => err instanceof FormWriteError;
+  const isIntegrityError = (err: unknown): err is IntegrityError => err instanceof IntegrityError;
+  const isWriteError = (err: unknown): err is FormWriteError => err instanceof FormWriteError;
   const make = (v: DraftValues) => makeFile({ kind: 'docx', fileName: 'toolbox.docx', bytes, schema: toolbox, values: v, photos: {}, date: '2026-10-25' });
 
   function steps(result: 'shared' | 'downloaded' | 'cancelled', overrides: Partial<Parameters<typeof makeAndHandOver>[2]> = {}) {
     const shared: { name: string; data: Blob }[] = [];
     const closed: DraftValues[] = [];
+    const logged: string[] = [];
     return {
-      shared, closed,
+      shared, closed, logged,
       steps: {
-        make, isIntegrityError, isWriteError,
+        make, isIntegrityError, isWriteError, logIntegrity: (reason: string) => logged.push(reason),
         share: async (name: string, data: Blob) => {
           shared.push({ name, data });
           return result;
@@ -297,6 +384,7 @@ describe('makeAndHandOver', () => {
   it('shows the integrity message and hands nothing over when the made file fails its check', async () => {
     const run = steps('shared', { make: () => { throw new IntegrityError('word/document.xml changed'); } });
     expect(await makeAndHandOver(toolbox, values, run.steps)).toEqual({ kind: 'problem', message: INTEGRITY_MESSAGE });
+    expect(run.logged).toEqual(['word/document.xml changed']); // kept for diagnostics, never in what is shown
     expect(run.shared).toEqual([]);
     expect(run.closed).toEqual([]);
   });
@@ -313,9 +401,15 @@ describe('makeAndHandOver', () => {
     expect(run.closed).toEqual([]);
   });
 
-  it('lets any other failure through, with nothing closed', async () => {
-    const run = steps('shared', { close: async () => { throw new Error('The disk is full.'); } });
-    await expect(makeAndHandOver(toolbox, values, run.steps)).rejects.toThrow('The disk is full.');
+  it('says the file was made when the draft cannot be closed after it was handed over, so it is not made twice', async () => {
+    const full = new Error('The disk is full.');
+    const run = steps('downloaded', { close: async () => { throw full; } });
+    expect(await makeAndHandOver(toolbox, values, run.steps))
+      .toEqual({ kind: 'madeNotClosed', fileName: 'TST-01 Toolbox Talk 2026-10-25.docx', error: full });
+    expect(run.shared).toHaveLength(1);
+  });
+
+  it('lets any other failure through, with nothing handed over', async () => {
     const broken = steps('shared', { make: () => { throw new TypeError('boom'); } });
     await expect(makeAndHandOver(toolbox, values, broken.steps)).rejects.toThrow('boom');
     expect(broken.shared).toEqual([]);

@@ -336,6 +336,7 @@ test('a draft opens with its auto values, keeps every change, and Make file give
   await freshApp(page); await setupShip(page);
   await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
   await expect(page.getByText('25-OCT-2026', { exact: true })).toBeVisible(); // the period line
+  expect(await liveDrafts(page)).toEqual([]); // looking stores nothing (R18)
 
   // Filled in from the ship and the ship's clock (UTC+03:00), marked Auto, and editable.
   const vessel = page.getByLabel('Vessel', { exact: true });
@@ -364,10 +365,13 @@ test('a draft opens with its auto values, keeps every change, and Make file give
   await expect(participants.getByLabel('Signature')).toHaveCount(0);
 
   // Saved as it is typed: after a reload the draft has it all, and the edited Vessel stays edited.
-  await expect.poll(async () => (await liveDrafts(page))[0]?.values).toEqual({
-    fields: { f1: 'MV SEA BREEZE', f2: subject },
-    rows: { g1: [{ 'g1.c1': 'Ann Lee', 'g1.c2': 'Bosun' }] },
-  });
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows).toEqual({ g1: [{ 'g1.c1': 'Ann Lee', 'g1.c2': 'Bosun' }] });
+  const [saved] = await liveDrafts(page);
+  // The auto values are fixed in the draft (R18), and only the untouched ones are marked as such.
+  expect(saved.values.fields).toMatchObject({ f1: 'MV SEA BREEZE', f2: subject, f3: '2026-10-25' });
+  expect(saved.values.fields.f4).toMatch(/^12:0\d$/);
+  expect(saved.autoIds).toEqual(['f3', 'f4']);
+  expect(saved.period).toBe('2026-10-25');
   await page.reload();
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue(subject);
   await expect(page.getByLabel('Vessel', { exact: true })).toHaveValue('MV SEA BREEZE');
@@ -401,7 +405,8 @@ test('cancelled_share_keeps_draft: a share sheet closed after Make file keeps th
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
     Object.defineProperty(navigator, 'share', {
-      configurable: true, value: () => Promise.reject(new DOMException('Share canceled', 'AbortError')),
+      // The sheet stays up a moment before it is closed.
+      configurable: true, value: () => new Promise((_, reject) => setTimeout(() => reject(new DOMException('Share canceled', 'AbortError')), 400)),
     });
   });
   await freshApp(page); await setupShip(page);
@@ -411,7 +416,10 @@ test('cancelled_share_keeps_draft: a share sheet closed after Make file keeps th
   page.on('download', (d) => downloads.push(d));
 
   await page.getByRole('button', { name: 'Make file' }).click();
+  // While the file is being handed over nothing can be changed, so the file holds what the screen shows.
+  await expect(page.getByLabel('Subject', { exact: true })).toBeDisabled();
   await expect(page.getByRole('status')).toHaveText(SHARE_CANCELLED);
+  await expect(page.getByLabel('Subject', { exact: true })).toBeEnabled();
   await expect(page.getByRole('heading', { name: 'TST-01 Toolbox Talk', exact: true })).toBeVisible();
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Boat drill');
   await expect(page.getByRole('button', { name: 'Make file' })).not.toHaveAttribute('aria-disabled');
@@ -488,4 +496,87 @@ test('a 120-row inventory fills: every row is there, it scrolls to the end, and 
   expect(String(back.rows[group][0][qty])).toBe('3');
   expect(back.fields['Demo inventory!C6']).toBe('MV OCEAN STAR');
   await expect(page.getByRole('status')).toHaveText('File made: TST-11 Demo Inventory 2026-10-25.xlsx');
+});
+
+test('a form only looked at leaves no draft; Discard just leaves; Make file with no change at all still makes the file', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  await expect(page.getByLabel('Vessel', { exact: true })).toHaveValue('MV OCEAN STAR');
+  await openForms(page);
+  await expect(page.getByText('No drafts in progress.')).toBeVisible();
+  expect(await stored(page, 'formDrafts')).toEqual([]);
+
+  // Discard on a draft that was never stored asks nothing: it only leaves the screen.
+  await library(page).getByRole('link', { name: /^TST-01 · / }).click();
+  await page.getByRole('button', { name: 'Discard draft' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(/#\/forms$/);
+  expect(await stored(page, 'formDrafts')).toEqual([]);
+
+  await library(page).getByRole('link', { name: /^TST-01 · / }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('TST-01 Toolbox Talk 2026-10-25.docx');
+  const schema = detectWord(readPackage(new Uint8Array(await fs.readFile(paths['toolbox.docx']))), 'docx', 'toolbox.docx');
+  const back = readWordValues(readPackage(await downloaded(file)), schema);
+  expect(back.fields).toMatchObject({ f1: 'MV OCEAN STAR', f3: '2026-10-25' });
+  await expect(page.getByRole('status')).toHaveText('File made: TST-01 Toolbox Talk 2026-10-25.docx');
+  await expect(page.getByText('No drafts in progress.')).toBeVisible();
+  expect(await liveDrafts(page)).toEqual([]);
+  const [last] = await stored(page, 'formLastValues');
+  expect(last.values.fields).toMatchObject({ f1: 'MV OCEAN STAR', f3: '2026-10-25' });
+});
+
+test('a draft reopened on a later day keeps the auto values of when it started: date, time, week and month (R18)', async ({ page }) => {
+  await freshApp(page); await setupShip(page); // Sunday 25 October 2026, 12:00 on the ship: ISO week 43
+  // A day form: its Date and Time.
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  const time = await page.getByLabel('Time', { exact: true }).inputValue();
+  expect(time).toMatch(/^12:0\d$/);
+  await page.getByLabel('Subject', { exact: true }).fill('Fire drill');
+  // The weekly job log: its week and dates.
+  await openFillOf(page, 'weekly.dotx', 'TST-03 Demo Weekly Jobs');
+  await expect(page.getByText('Week 43, 2026', { exact: true })).toBeVisible();
+  const week = await page.getByLabel('Year / Week No.', { exact: true }).inputValue();
+  const range = await page.getByLabel('Date (from to)', { exact: true }).inputValue();
+  expect(week).toMatch(/43/);
+  expect(range).not.toBe('');
+  await page.getByLabel('Vessel', { exact: true }).fill('MV OCEAN STAR II');
+  // The month grid: its month and its date.
+  await openFillOf(page, 'daygrid.xlsx', 'TST-12 Demo Day Grid');
+  await expect(page.getByText('October 2026', { exact: true })).toBeVisible();
+  await page.getByLabel('M/V', { exact: true }).fill('MV OCEAN STAR II');
+  await expect.poll(async () => (await liveDrafts(page)).length).toBe(3);
+
+  // A week and a day later (Monday 2 November, week 45), after the app was closed and opened again.
+  await page.clock.setSystemTime(new Date('2026-11-02T07:30:00Z'));
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'TST-12 Demo Day Grid', exact: true })).toBeVisible();
+  await expect(page.getByText('October 2026', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Dated', { exact: true })).toHaveValue('2026-10-25');
+  await expect(page.getByLabel('Dated', { exact: true })).toHaveAccessibleDescription('Auto');
+
+  await openForms(page);
+  const drafts = page.getByRole('list', { name: 'In progress' });
+  await drafts.getByRole('link', { name: /^TST-03 / }).click();
+  await expect(page.getByText('Week 43, 2026', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Year / Week No.', { exact: true })).toHaveValue(week);
+  await expect(page.getByLabel('Date (from to)', { exact: true })).toHaveValue(range);
+
+  await openForms(page);
+  await drafts.getByRole('link', { name: /^TST-01 / }).click();
+  await expect(page.getByText('25-OCT-2026', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Date', { exact: true })).toHaveValue('2026-10-25');
+  await expect(page.getByLabel('Time', { exact: true })).toHaveValue(time);
+  await expect(page.getByLabel('Time', { exact: true })).toHaveAccessibleDescription('Auto');
+
+  // The file carries the values of the draft, and is named by the ship's date when it is made.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('TST-01 Toolbox Talk 2026-11-02.docx');
+  const schema = detectWord(readPackage(new Uint8Array(await fs.readFile(paths['toolbox.docx']))), 'docx', 'toolbox.docx');
+  const back = readWordValues(readPackage(await downloaded(file)), schema);
+  expect(back.fields).toMatchObject({ f2: 'Fire drill', f3: '2026-10-25', f4: time });
 });

@@ -60,7 +60,16 @@ export interface FormTemplate extends BaseRecord { code: string; title: string; 
  * is made, or discarded. `code` is the template's, so that a draft handed over to a device with its own copy of the form
  * can still be matched. `period` is the day, week or month it is for (see `draftPeriod`). `photoIds` are its photos'.
  */
-export interface FormDraft extends BaseRecord { shipId: string; templateId: string; code: string; period: string; values: DraftValues; photoIds: string[] }
+export interface FormDraft extends BaseRecord {
+  shipId: string; templateId: string; code: string; period: string; values: DraftValues; photoIds: string[];
+  /**
+   * The ids of the fields whose value is still the auto value worked out when the draft was made (R18): fixed then, never
+   * worked out again, and marked `Auto` on the fill screen. Editing a field takes its id out. Missing on a draft whose
+   * auto values were never fixed (an older record, or the next week's draft that a made file started): the fill screen
+   * works them out and fixes them at that draft's first change.
+   */
+  autoIds?: string[];
+}
 /**
  * The values of the last file made from a form on a ship, for "start from last". One live record per ship and key. `code`
  * is the key (see `lastValuesKey`): the form's code, or `template:<templateId>` for a form that has none.

@@ -2019,6 +2019,16 @@ textarea {
   color: var(--muted);
 }
 
+.fill-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .fill-section,
 .fill-group {
   display: flex;

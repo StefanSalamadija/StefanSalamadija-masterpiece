@@ -294,6 +294,7 @@ describe('writeExcel: cells and typing', () => {
     const s = schemaOf([field('E14', 'number')]);
     expect(() => writeExcel(pkg, s, values({ E14: '5' }))).toThrow(FormWriteError);
     expect(() => writeExcel(pkg, s, values({ E14: '5' }))).toThrow(/E14/);
+    expect(thrown(() => writeExcel(pkg, s, values({ E14: '5' })))).toMatchObject({ code: 'formula', fieldId: s.fields[0].id });
   });
 
   it('refuses a value in a row beyond the group\'s capacity (R1), but not blank rows', () => {
@@ -305,6 +306,7 @@ describe('writeExcel: cells and typing', () => {
     expect(() => writeExcel(pkg, s, values({}, { [group.id]: blank }))).not.toThrow();
     const over = blank.map((row, i) => (i === 5 ? { [spec]: 'too many' } : row));
     expect(() => writeExcel(pkg, s, values({}, { [group.id]: over }))).toThrow(FormWriteError);
+    expect(thrown(() => writeExcel(pkg, s, values({}, { [group.id]: over })))).toMatchObject({ code: 'tooManyRows', fieldId: group.id });
   });
 
   it('never writes a left-empty field or column, and writes nothing for blank values', () => {
@@ -325,6 +327,8 @@ describe('writeExcel: cells and typing', () => {
     expect(() => writeExcel(pkg, s, values({ J6: true }))).toThrow(FormWriteError);
     expect(() => writeExcel(pkg, s, values({ G6: 'yes' }))).toThrow(FormWriteError);
     expect(() => writeExcel(pkg, s, values({ I6: 'Maybe' }))).toThrow(FormWriteError);
+    expect(thrown(() => writeExcel(pkg, s, values({ J6: true })))).toMatchObject({ code: 'wrongKind', fieldId: s.fields[3].id });
+    expect(thrown(() => writeExcel(pkg, s, values({ I6: 'Maybe' })))).toMatchObject({ code: 'notAnOption', fieldId: s.fields[2].id });
   });
 });
 
@@ -486,4 +490,14 @@ function withoutSharedStrings(bytes: Uint8Array): Package {
   pkg.entries.set(WORKBOOK_RELS, bytesOf(partText(pkg, WORKBOOK_RELS)!.replace(/<Relationship [^>]*sharedStrings[^>]*\/>/, '')));
   pkg.entries.set(TYPES, bytesOf(partText(pkg, TYPES)!.replace(/<Override [^>]*sharedStrings[^>]*\/>/, '')));
   return pkg;
+}
+
+/** What `run` throws (a test helper: the writers' errors carry a code and the field id). */
+function thrown(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Nothing was thrown.');
 }

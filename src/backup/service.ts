@@ -124,7 +124,8 @@ function hasOwnFields(name: TableName, r: Record<string, unknown>): boolean {
     case 'crewDocuments': return typeof r.crewId === 'string';
     // A draft is filled from its template, found by its id or its code.
     case 'formDrafts':
-      return typeof r.templateId === 'string' && typeof r.code === 'string' && isObject(r.values) && Array.isArray(r.photoIds);
+      return typeof r.templateId === 'string' && typeof r.code === 'string' && isObject(r.values) && Array.isArray(r.photoIds)
+        && (r.autoIds === undefined || (Array.isArray(r.autoIds) && r.autoIds.every((id) => typeof id === 'string')));
     case 'formLastValues': return typeof r.code === 'string' && isObject(r.values);
     // A photo is found by its draft.
     case 'formPhotos': return typeof r.draftId === 'string' && isBase64Text(r.jpegBase64);

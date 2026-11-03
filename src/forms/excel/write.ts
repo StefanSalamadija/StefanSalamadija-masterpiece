@@ -88,7 +88,7 @@ function targetsOf(schema: FormSchema, values: DraftValues): Map<string, Target[
     const value = values.fields[field.id];
     if (field.leftEmpty || isBlank(value)) continue;
     const at = parseCellLoc(field.loc);
-    if (!at) throw new FormWriteError(`The field ${describe(field)} has no cell in the file.`);
+    if (!at) throw new FormWriteError(`The field ${describe(field)} has no cell in the file.`, { code: 'notInFile', fieldId: field.id });
     add(at.part, { row: at.row, col: at.col, field, value });
   }
 
@@ -102,9 +102,9 @@ function targetsOf(schema: FormSchema, values: DraftValues): Map<string, Target[
         const value = record?.[column.id];
         if (isBlank(value)) continue;
         if (i >= group.capacity) {
-          throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, so row ${i + 1} cannot be written.`);
+          throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, so row ${i + 1} cannot be written.`, { code: 'tooManyRows', fieldId: group.id });
         }
-        if (!at || firstRow === undefined || col === undefined) throw new FormWriteError(`The column ${describe(column)} has no cell in the file.`);
+        if (!at || firstRow === undefined || col === undefined) throw new FormWriteError(`The column ${describe(column)} has no cell in the file.`, { code: 'notInFile', fieldId: column.id });
         add(at.part, { row: firstRow + i, col, field: column, value });
       }
     });
@@ -116,15 +116,15 @@ function targetsOf(schema: FormSchema, values: DraftValues): Map<string, Target[
 function encode(field: FieldDef, value: string | boolean, format: FormatKind, date1904: boolean): Encoded {
   const text = (s: string): Encoded => ({ t: 's', text: xmlText(s) });
   if (field.kind === 'checkbox') {
-    if (typeof value !== 'boolean') throw new FormWriteError(`The field ${describe(field)} is a tick box, not text.`);
+    if (typeof value !== 'boolean') throw new FormWriteError(`The field ${describe(field)} is a tick box, not text.`, { code: 'wrongKind', fieldId: field.id });
     return { t: 'b', v: value ? '1' : '0' };
   }
-  if (typeof value === 'boolean') throw new FormWriteError(`The field ${describe(field)} takes text, not a tick.`);
+  if (typeof value === 'boolean') throw new FormWriteError(`The field ${describe(field)} takes text, not a tick.`, { code: 'wrongKind', fieldId: field.id });
   switch (field.kind) {
     case 'picture':
-      throw new FormWriteError(`The field ${describe(field)} is a picture, which an Excel form cannot hold.`);
+      throw new FormWriteError(`The field ${describe(field)} is a picture, which an Excel form cannot hold.`, { code: 'wrongKind', fieldId: field.id });
     case 'choice':
-      if (field.options && !field.options.includes(value)) throw new FormWriteError(`The field ${describe(field)} has no option ${value}.`);
+      if (field.options && !field.options.includes(value)) throw new FormWriteError(`The field ${describe(field)} has no option ${value}.`, { code: 'notAnOption', fieldId: field.id });
       return text(value);
     case 'number': {
       const n = numberOf(value);
@@ -172,7 +172,7 @@ class SheetEditor {
   constructor(text: string, part: string) {
     this.doc = parseXml(text);
     const sheetData = kid(this.doc.documentElement, 'sheetData');
-    if (!sheetData) throw new FormWriteError(`The sheet ${part} has no cells.`);
+    if (!sheetData) throw new FormWriteError(`The sheet ${part} has no cells.`, { code: 'notInFile' });
     this.sheetData = sheetData;
     let number = 0;
     for (const row of kids(sheetData, 'row')) {
@@ -386,7 +386,7 @@ function setFullCalcOnLoad(root: Element): boolean {
 
 function writeCell(c: Element, encoded: Encoded, field: FieldDef, strings: SharedStrings): void {
   const parts = kids(c);
-  if (parts.some((k) => k.localName === 'f')) throw new FormWriteError(`The field ${describe(field)} is a formula cell, which is never written.`);
+  if (parts.some((k) => k.localName === 'f')) throw new FormWriteError(`The field ${describe(field)} is a formula cell, which is never written.`, { code: 'formula', fieldId: field.id });
   if (c.getAttribute('t') === 's' && parts.some((k) => k.localName === 'v')) strings.release();
   for (const k of parts) if (k.localName === 'v' || k.localName === 'is') c.removeChild(k);
   c.removeAttribute('t');
@@ -410,7 +410,7 @@ function writeCell(c: Element, encoded: Encoded, field: FieldDef, strings: Share
 export function writeExcel(pkg: Package, schema: FormSchema, values: DraftValues): Map<string, Uint8Array> {
   const wbPath = workbookPath(pkg);
   const wbText = partText(pkg, wbPath);
-  if (wbText === undefined) throw new FormWriteError(`The form has no part ${wbPath}.`);
+  if (wbText === undefined) throw new FormWriteError(`The form has no part ${wbPath}.`, { code: 'notInFile' });
   const wbDoc = parseXml(wbText);
   const root = wbDoc.documentElement;
   const date1904 = isTrue(kid(root, 'workbookPr')?.getAttribute('date1904') ?? null);
@@ -423,7 +423,7 @@ export function writeExcel(pkg: Package, schema: FormSchema, values: DraftValues
   const changed = new Map<string, Uint8Array>();
   for (const [part, targets] of targetsOf(schema, values)) {
     const text = partText(pkg, part);
-    if (text === undefined) throw new FormWriteError(`The form has no part ${part}.`);
+    if (text === undefined) throw new FormWriteError(`The form has no part ${part}.`, { code: 'notInFile' });
     const sheet = new SheetEditor(text, part);
     for (const target of targets) {
       const c = sheet.cell(target.row, target.col);
@@ -439,7 +439,7 @@ export function writeExcel(pkg: Package, schema: FormSchema, values: DraftValues
       if (!stringsRel) {
         const relsPath = `${dir}_rels/${wbPath.slice(dir.length)}.rels`;
         const relsText = partText(pkg, relsPath);
-        if (relsText === undefined) throw new FormWriteError(`The form has no part ${relsPath}.`);
+        if (relsText === undefined) throw new FormWriteError(`The form has no part ${relsPath}.`, { code: 'notInFile' });
         const worksheetType = rels.find((r) => r.type.endsWith('/worksheet'))?.type;
         const type = worksheetType ? worksheetType.replace(/worksheet$/, 'sharedStrings') : SHARED_STRINGS_REL;
         changed.set(relsPath, bytesOf(withRelationship(relsText, type, strings.path.slice(dir.length))));

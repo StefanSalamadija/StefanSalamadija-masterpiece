@@ -240,6 +240,13 @@ describe('writeWord pictures', () => {
     const { pkg, s, pictures, groupId } = weekly();
     const vals = values({}, { [groupId]: [{ [pictures[1].id]: 'gone' }] });
     expect(() => writeWord(pkg, s, vals, { photos: { other: jpegOf(8, 6, 'o') } })).toThrow(FormWriteError);
+    let caught: unknown;
+    try {
+      writeWord(pkg, s, vals, { photos: { other: jpegOf(8, 6, 'o') } });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ code: 'photo', fieldId: pictures[1].id });
     expect(() => writeWord(pkg, s, vals, { photos: { other: jpegOf(8, 6, 'o') } })).toThrow(new RegExp(`${pictures[1].id}.*gone|gone.*${pictures[1].id}`));
     expect(() => writeWord(pkg, s, values({}, { [groupId]: [{ [pictures[0].id]: 'toString' }] }), { photos: {} })).toThrow(FormWriteError);
     expect(() => writeWord(pkg, s, values({}, { [groupId]: [{ [pictures[0].id]: 'png' }] }), { photos: { png: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]) } })).toThrow(/JPEG/);

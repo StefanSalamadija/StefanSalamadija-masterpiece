@@ -1,19 +1,29 @@
 import { addDays } from '../domain/dates';
+import type { FieldContext } from '../domain/fieldDictionary';
 import { parseDecimal } from '../domain/numbers';
+import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
+import type { ClockChange, FormDraft } from '../domain/types';
 // Types only: the forms engine is loaded on demand (see `src/forms/load.ts`). What the engine computes (auto values, the
 // period, the jobs that roll over) is passed in.
-import type { DraftValues, FieldDef, FormKind, FormSchema, FormSetup, FormValue, RowGroupDef } from '../forms/types';
+import type { WriteErrorCode } from '../forms/errors';
+import type { DraftValues, FieldDef, FieldLink, FormKind, FormSchema, FormSetup, FormValue, RowGroupDef } from '../forms/types';
 
 /*
  * What the fill screen (`FormFill.tsx`) shows and writes, worked out from a form's schema and a draft's values. Pure; the
  * screen and its components only draw it. Text read from a form (labels, sections, options) is untrusted and is only put
  * into strings that are rendered as text.
  *
- * Auto values and edits. The draft holds only what the person entered: `values.fields` has a key for a field once it
- * has been edited, even to empty. Auto values (`autoValues`) are worked out each time the draft is opened and are never
- * stored in the draft. A field shows its own value when it has a key, else its auto value, marked `Auto`. So an edit
- * always wins over an auto value, whenever that auto value was worked out, and clearing an auto value keeps it empty.
- * The file gets the two merged (`fileValues`), and so do the last values.
+ * When a draft starts, and its auto values (rulings R18):
+ * - Opening the fill screen stores nothing. Until the first change the screen shows auto values worked out for now
+ *   (`autoAt`), kept fresh as the clock moves.
+ * - The first change (an edit, a row added or removed, a photo, a helper) fixes them: the auto values of that moment
+ *   become the draft's values (`fixedState`), and `autoIds` lists the fields that hold one. Only then is the draft
+ *   stored, for the period of that moment.
+ * - From then on the draft's values are what they are. Reopening it on another day, after a reload or a relaunch, never
+ *   works the auto values out again: a permit started at 08:00 keeps 08:00, a W44 job log keeps W44.
+ * - An edit takes the field out of `autoIds`; only the ids in `autoIds` are marked `Auto`. So an edit always wins.
+ * - A stored draft with no `autoIds` (an older record, or the next week's draft a made file started) has never had its
+ *   auto values fixed: it is shown and fixed the same way, at its first change, over the values it already holds.
  */
 
 /** What `autoValues` gives: values by field id, and why a person field has none (`No Master onboard`). */
@@ -147,19 +157,72 @@ export function draftValuesOf(values: Partial<DraftValues> | undefined): DraftVa
   return { fields: { ...values?.fields }, rows: { ...values?.rows } };
 }
 
-/** What a field shows: its own value once edited, else its auto value, else nothing (`null`). */
-export function shownValue(values: DraftValues, auto: AutoFill, fieldId: string): FormValue {
-  if (has(values.fields, fieldId)) return values.fields[fieldId] ?? null;
-  return auto.values[fieldId] ?? null;
+/** What the fill screen holds of a draft: its values, and the ids of the fields that still hold an untouched auto value. */
+export interface FillState {
+  values: DraftValues;
+  autoIds: string[];
 }
 
-/** Whether a field shows an auto value: it has one, and it has not been edited. */
-export function isAuto(values: DraftValues, auto: AutoFill, fieldId: string): boolean {
-  return !has(values.fields, fieldId) && auto.values[fieldId] !== undefined;
+/** The auto values for `instant`, and the ship's date then (the ship's clock changes decide the offset). */
+export function autoAt(
+  autoValues: (schema: FormSchema, links: Record<string, FieldLink>, ctx: FieldContext, date: string) => AutoFill,
+  schema: FormSchema, setup: FormSetup, ctx: FieldContext, instant: Date,
+): { auto: AutoFill; shipDate: string } {
+  const shipDate = shipDateAt(ctx.clockChanges, instant);
+  return { auto: autoValues(schema, setup.links, { ...ctx, nowUtc: instant }, shipDate), shipDate };
+}
+
+/** The ship's date (`YYYY-MM-DD`) at `instant`. */
+export function shipDateAt(clockChanges: ClockChange[], instant: Date): string {
+  return toShipLocal(instant, shipOffsetAt(clockChanges, instant)).date;
+}
+
+/**
+ * The auto values fixed into a draft's values: each auto value goes into a field that has no value of its own yet (a
+ * value already there, such as a carried-over job's, is kept), and `autoIds` lists those fields.
+ */
+export function withAutoValues(auto: AutoFill, existing?: Partial<DraftValues>): FillState {
+  const values = draftValuesOf(existing);
+  const autoIds: string[] = [];
+  for (const [id, value] of Object.entries(auto.values)) {
+    if (has(values.fields, id)) continue;
+    values.fields[id] = value;
+    autoIds.push(id);
+  }
+  return { values, autoIds };
+}
+
+/** Whether a stored draft's auto values are fixed: then it is shown as it is, and its auto values are never worked out again. */
+export function isFixed(draft: Pick<FormDraft, 'autoIds'> | undefined): boolean {
+  return draft?.autoIds !== undefined;
+}
+
+/**
+ * What the screen shows for a draft: a fixed draft as it is stored; a draft not stored yet, or not fixed yet, with the
+ * auto values `fresh` gives (worked out for now). This is also what the first change starts from.
+ */
+export function fixedState(draft: Pick<FormDraft, 'values' | 'autoIds'> | undefined, fresh: AutoFill): FillState {
+  if (draft !== undefined && draft.autoIds !== undefined) return { values: draftValuesOf(draft.values), autoIds: [...draft.autoIds] };
+  return withAutoValues(fresh, draft?.values);
+}
+
+/** What a field shows (`null` when it has nothing). */
+export function shownValue(values: DraftValues, fieldId: string): FormValue {
+  return values.fields[fieldId] ?? null;
+}
+
+/** Whether a field shows an untouched auto value, marked `Auto`. */
+export function isAuto(state: FillState, fieldId: string): boolean {
+  return state.autoIds.includes(fieldId);
 }
 
 export function setField(values: DraftValues, fieldId: string, value: FormValue): DraftValues {
   return { ...values, fields: { ...values.fields, [fieldId]: value } };
+}
+
+/** An edit of a field: its value, and it no longer holds an auto value. */
+export function editField(state: FillState, fieldId: string, value: FormValue): FillState {
+  return { values: setField(state.values, fieldId, value), autoIds: state.autoIds.filter((id) => id !== fieldId) };
 }
 
 /** Whether a table names its rows (an inventory, a day grid, a checklist): then it has all its rows, always. */
@@ -208,16 +271,15 @@ export function setCell(values: DraftValues, group: RowGroupDef, index: number, 
 const isBlank = (v: FormValue | undefined): boolean => v === undefined || v === null || v === '';
 
 /**
- * The values the file is made from (and that become the last values): the auto values that were not edited, then the
- * edits, for the form's own fields that are asked for. A table keeps its rows up to the last one with a value, and
- * only the columns that are asked for, so that an empty row added and left never makes the table grow.
+ * The values the file is made from (and that become the last values): the form's own fields, but none that is left
+ * empty or not in the form. A table keeps its rows up to the last one with a value, and only the columns that are not
+ * left empty, so that an empty row added and left never makes the table grow.
  */
-export function fileValues(schema: FormSchema, values: DraftValues, auto: AutoFill): DraftValues {
+export function fileValues(schema: FormSchema, values: DraftValues): DraftValues {
   const fields: Record<string, FormValue> = {};
   for (const field of schema.fields) {
     if (field.leftEmpty) continue; // a picture is kept: its value is a photo id (Task 16)
     if (has(values.fields, field.id)) fields[field.id] = values.fields[field.id] ?? null;
-    else if (auto.values[field.id] !== undefined) fields[field.id] = auto.values[field.id];
   }
   const rows: Record<string, Record<string, FormValue>[]> = {};
   for (const group of schema.rowGroups) {
@@ -271,43 +333,52 @@ export function rolloverFor(
   return { period: nextPeriod(setup, period, shipToday, engine.draftPeriod), values: { fields: {}, rows } };
 }
 
-/** The field, column or table a writer's message names (by `<id> (<label>)`), as its label. The longest id wins. */
-function namedLabel(message: string, schema: FormSchema): string | undefined {
-  const named = [...schema.fields, ...schema.rowGroups.flatMap((g) => g.columns), ...schema.rowGroups]
-    .filter((x) => message.includes(`${x.id} (${x.label})`))
-    .sort((a, b) => b.id.length - a.id.length)[0];
-  return named?.label;
+/** The label of the field, column or table with this id. */
+function labelOf(schema: FormSchema, id: string | undefined): string | undefined {
+  if (id === undefined) return undefined;
+  return [...schema.fields, ...schema.rowGroups, ...schema.rowGroups.flatMap((g) => g.columns)].find((x) => x.id === id)?.label;
 }
 
-function writeReason(message: string): string {
-  const rows = /holds (\d+) rows/.exec(message);
-  if (rows) return `the table has room for ${rows[1]} rows only`;
-  if (/is not an option|has no option|takes one of its options/.test(message)) return "the value isn't one of the form's options";
-  if (/formula cell/.test(message)) return 'that cell holds a formula';
-  if (/photo/i.test(message) && /not among the photos|not a JPEG/.test(message)) return 'its photo is missing or damaged';
-  if (/takes true or false|tick box|takes text|takes a photo|is a picture/.test(message)) return "the value isn't the kind this field takes";
-  return "the file no longer matches this form's setup. Import the form again";
+const WRITE_REASONS: Record<Exclude<WriteErrorCode, 'tooManyRows'>, string> = {
+  notAnOption: "the value isn't one of the form's options",
+  formula: 'that cell holds a formula',
+  photo: 'its photo is missing or damaged',
+  wrongKind: "the value isn't the kind this field takes",
+  notInFile: "the file no longer matches this form's setup. Import the form again",
+};
+
+/**
+ * A writer's `FormWriteError` in plain words, from its code and field id (never from its message), naming the field
+ * by its label and never by its id: `"<label>" can't be written into this form: <reason>.`
+ */
+export function writeErrorText(err: { code: WriteErrorCode; fieldId?: string }, schema: FormSchema): string {
+  const label = labelOf(schema, err.fieldId);
+  const who = label === undefined ? 'A value' : `"${label}"`;
+  const group = schema.rowGroups.find((g) => g.id === err.fieldId);
+  const reason = err.code === 'tooManyRows'
+    ? (group ? `the table has room for ${group.capacity} rows only` : 'the table has no room for more rows')
+    : WRITE_REASONS[err.code] ?? WRITE_REASONS.notInFile;
+  return `${who} can't be written into this form: ${reason}.`;
 }
 
 /**
- * A writer's `FormWriteError` in plain words, naming the field by its label and never by its id:
- * `"<label>" can't be written into this form: <reason>.`
+ * How `Make file` ended: the file was handed over and the draft closed; it was handed over but the draft could not be
+ * closed (`error`: the person has the file, and must not make it twice); the share was cancelled; or it could not be made.
  */
-export function writeErrorText(message: string, schema: FormSchema): string {
-  const label = namedLabel(message, schema);
-  const who = label === undefined ? 'A value' : `"${label}"`;
-  return `${who} can't be written into this form: ${writeReason(message)}.`;
-}
-
-/** How `Make file` ended: the file was handed over (and the draft closed), the share was cancelled, or it could not be made. */
-export type MakeOutcome = { kind: 'made'; fileName: string } | { kind: 'cancelled' } | { kind: 'problem'; message: string };
+export type MakeOutcome =
+  | { kind: 'made'; fileName: string }
+  | { kind: 'madeNotClosed'; fileName: string; error: unknown }
+  | { kind: 'cancelled' }
+  | { kind: 'problem'; message: string };
 
 /** The steps of `Make file`, from the engine, the share sheet and the data layer. */
 export interface MakeSteps {
   /** `makeFile` for the draft: writes, checks and names the file. */
   make: (values: DraftValues) => { fileName: string; bytes: Uint8Array; mime: string };
-  isIntegrityError: (err: unknown) => err is Error;
-  isWriteError: (err: unknown) => err is Error;
+  isIntegrityError: (err: unknown) => err is Error & { reason: string };
+  isWriteError: (err: unknown) => err is Error & { code: WriteErrorCode; fieldId?: string };
+  /** Keeps a failed check's reason for diagnostics; it is never shown to the person. */
+  logIntegrity: (reason: string) => void;
   share: (fileName: string, data: Blob) => Promise<'shared' | 'downloaded' | 'cancelled'>;
   /** Closes the draft once the file is handed over (`closeDraft`, with the rollover when the job log applies). */
   close: (values: DraftValues) => Promise<void>;
@@ -316,20 +387,28 @@ export interface MakeSteps {
 /**
  * `Make file` (spec §4 step 4): makes the file from `values` (the file's values, `fileValues`), hands it to the share sheet
  * or downloads it, and only then closes the draft. A file that fails its check (`IntegrityError`, whose message is the
- * one to show) or that a value has no place in (`FormWriteError`, said in plain words) is never handed over, and a
- * cancelled share leaves the draft as it is: in both cases nothing is closed. Anything else is thrown.
+ * one to show; its reason goes to `logIntegrity`) or that a value has no place in (`FormWriteError`, said in plain
+ * words) is never handed over, and a cancelled share leaves the draft as it is: in both cases nothing is closed. A
+ * draft that cannot be closed after the file was handed over is `madeNotClosed`. Anything else is thrown.
  */
 export async function makeAndHandOver(schema: FormSchema, values: DraftValues, steps: MakeSteps): Promise<MakeOutcome> {
   let made: ReturnType<MakeSteps['make']>;
   try {
     made = steps.make(values);
   } catch (err) {
-    if (steps.isIntegrityError(err)) return { kind: 'problem', message: err.message };
-    if (steps.isWriteError(err)) return { kind: 'problem', message: writeErrorText(err.message, schema) };
+    if (steps.isIntegrityError(err)) {
+      steps.logIntegrity(err.reason);
+      return { kind: 'problem', message: err.message };
+    }
+    if (steps.isWriteError(err)) return { kind: 'problem', message: writeErrorText(err, schema) };
     throw err;
   }
   const result = await steps.share(made.fileName, new Blob([made.bytes as Uint8Array<ArrayBuffer>], { type: made.mime }));
   if (result === 'cancelled') return { kind: 'cancelled' };
-  await steps.close(values);
+  try {
+    await steps.close(values);
+  } catch (error) {
+    return { kind: 'madeNotClosed', fileName: made.fileName, error };
+  }
   return { kind: 'made', fileName: made.fileName };
 }

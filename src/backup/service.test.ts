@@ -1174,6 +1174,7 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a form draft has no templateId', 'formDrafts', { templateId: undefined }],
     ['a form draft has no values', 'formDrafts', { values: undefined }],
     ['a form draft has photo ids that are not a list', 'formDrafts', { photoIds: 'pho-1' }],
+    ['a form draft has auto ids that are not a list of ids', 'formDrafts', { autoIds: ['f1', 3] }],
     ['a form draft has no code', 'formDrafts', { code: 7 }],
     ['last values have no shipId', 'formLastValues', { shipId: undefined }],
     ['last values have no values', 'formLastValues', { values: null }],
@@ -1192,6 +1193,7 @@ describe('prepareImport rejects what it cannot trust', () => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith('formTemplates', { shipId: undefined }), PW)).resolves.toBeDefined();
     await expect(prepareImport(b, await fileWith('formPhotos', { deleted: true, jpegBase64: '' }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('formDrafts', { autoIds: ['f1', 'f3'] }), PW)).resolves.toBeDefined(); // R18
   });
 
   it('does not ask for a shipId on a ship', async () => {

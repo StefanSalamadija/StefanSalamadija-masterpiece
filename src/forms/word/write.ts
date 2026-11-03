@@ -347,8 +347,8 @@ class PartPictures {
     const known = this.byPhoto.get(photoId);
     if (known) return known;
     const bytes = Object.hasOwn(this.photos, photoId) ? this.photos[photoId] : undefined;
-    if (!bytes) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not among the photos.`);
-    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not a JPEG.`);
+    if (!bytes) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not among the photos.`, { code: 'photo', fieldId: field.id });
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new FormWriteError(`The photo "${photoId}" for the field ${describe(field)} is not a JPEG.`, { code: 'photo', fieldId: field.id });
     this.load();
     const dir = dirOf(this.part);
     const at = (n: number): string => `${dir === '' ? '' : `${dir}/`}media/mp-${n}.jpeg`;
@@ -389,7 +389,7 @@ function fitted(frame: { cx: number; cy: number }, size: { width: number; height
 function writePicture(sdt: Element, photoId: string, field: FieldDef, pictures: PartPictures, photos: Record<string, Uint8Array>): void {
   const { type, sdtPr } = controlOf(sdt);
   const blips = Array.from(sdt.getElementsByTagNameNS(A, 'blip'));
-  if (type !== 'picture' || !sdtPr || blips.length === 0) throw new FormWriteError(`The field ${describe(field)} is not a picture control in the file.`);
+  if (type !== 'picture' || !sdtPr || blips.length === 0) throw new FormWriteError(`The field ${describe(field)} is not a picture control in the file.`, { code: 'notInFile', fieldId: field.id });
   const { rId, path } = pictures.embed(photoId, field);
   const size = jpegSize(photos[photoId]);
 
@@ -461,7 +461,7 @@ function writeFormText(begin: Element, text: string, field: FieldDef): void {
   const beginRun = begin.parentNode as Element;
   const range = fieldRange(begin);
   const end = range.end;
-  if (!end) throw new FormWriteError(`The field ${describe(field)} has no end in the file.`);
+  if (!end) throw new FormWriteError(`The field ${describe(field)} has no end in the file.`, { code: 'notInFile', fieldId: field.id });
   const endRun = end.parentNode as Element;
   let separate = range.separate;
   if (!separate) {
@@ -471,7 +471,7 @@ function writeFormText(begin: Element, text: string, field: FieldDef): void {
   }
   const separateRun = separate.parentNode as Element;
   if (separateRun !== endRun && separateRun.parentNode !== endRun.parentNode) {
-    throw new FormWriteError(`The result of the field ${describe(field)} runs over more than one paragraph.`);
+    throw new FormWriteError(`The result of the field ${describe(field)} runs over more than one paragraph.`, { code: 'notInFile', fieldId: field.id });
   }
 
   const runs: Element[] = [];
@@ -540,7 +540,7 @@ function writeFormDrop(begin: Element, value: string | undefined, field: FieldDe
   if (value === undefined) return;
   const entries = kids(list).filter((k) => isEl(k, W, 'listEntry')).map((k) => wAttr(k, 'val') ?? '');
   const index = entries.indexOf(value);
-  if (index < 0 || (field.options && !field.options.includes(value))) throw new FormWriteError(`"${value}" is not an option of the field ${describe(field)}.`);
+  if (index < 0 || (field.options && !field.options.includes(value))) throw new FormWriteError(`"${value}" is not an option of the field ${describe(field)}.`, { code: 'notAnOption', fieldId: field.id });
   const result = el(begin.ownerDocument, 'result');
   setW(result, 'val', String(index));
   list.insertBefore(result, list.firstChild);
@@ -594,7 +594,7 @@ function writeControl(sdt: Element, value: string | boolean | undefined, field: 
   for (const binding of kids(sdtPr).filter((k) => k.localName === 'dataBinding')) sdtPr.removeChild(binding);
 
   if (control.type === 'checkbox') {
-    if (value !== undefined && typeof value !== 'boolean') throw new FormWriteError(`The checkbox ${describe(field)} takes true or false.`);
+    if (value !== undefined && typeof value !== 'boolean') throw new FormWriteError(`The checkbox ${describe(field)} takes true or false.`, { code: 'wrongKind', fieldId: field.id });
     const on = value === true;
     const box = control.el!;
     let checked = child(box, W14, 'checked');
@@ -609,7 +609,7 @@ function writeControl(sdt: Element, value: string | boolean | undefined, field: 
     writeControlText(sdt, glyph, !!prompt, state?.getAttributeNS(W14, 'font') || undefined);
     return;
   }
-  if (typeof value === 'boolean') throw new FormWriteError(`The field ${describe(field)} takes text.`);
+  if (typeof value === 'boolean') throw new FormWriteError(`The field ${describe(field)} takes text.`, { code: 'wrongKind', fieldId: field.id });
   const text = value ?? '';
 
   if (control.type === 'date') {
@@ -629,7 +629,7 @@ function writeControl(sdt: Element, value: string | boolean | undefined, field: 
     const list = control.el!;
     const items = kids(list).filter((k) => isEl(k, W, 'listItem'));
     const item = items.find((k) => (wAttr(k, 'displayText') ?? wAttr(k, 'value')) === text);
-    if (value !== undefined && control.type === 'dropDownList' && !item) throw new FormWriteError(`"${text}" is not an option of the field ${describe(field)}.`);
+    if (value !== undefined && control.type === 'dropDownList' && !item) throw new FormWriteError(`"${text}" is not an option of the field ${describe(field)}.`, { code: 'notAnOption', fieldId: field.id });
     if (item) setW(list, 'lastValue', wAttr(item, 'value') ?? text);
     else list.removeAttributeNS(W, 'lastValue');
   }
@@ -670,13 +670,13 @@ function writeCell(tc: Element, text: string): void {
 
 /** The text a field's value is written as: a date in the field's format (R2), anything else as it is. */
 function asText(value: FormValue, field: FieldDef): string {
-  if (typeof value !== 'string') throw new FormWriteError(`The field ${describe(field)} takes text, not ${String(value)}.`);
+  if (typeof value !== 'string') throw new FormWriteError(`The field ${describe(field)} takes text, not ${String(value)}.`, { code: 'wrongKind', fieldId: field.id });
   return field.kind === 'date' && isValidIsoDate(value) ? formatDate(value, usableDateHint(field.formatHint)) : value;
 }
 
 function asOption(value: FormValue, field: FieldDef, options: readonly string[] | undefined): number {
   const index = typeof value === 'string' && options ? options.indexOf(value) : -1;
-  if (index < 0) throw new FormWriteError(`"${String(value)}" is not an option of the field ${describe(field)}.`);
+  if (index < 0) throw new FormWriteError(`"${String(value)}" is not an option of the field ${describe(field)}.`, { code: 'notAnOption', fieldId: field.id });
   return index;
 }
 
@@ -686,24 +686,24 @@ interface PictureContext { part: PartPictures; photos: Record<string, Uint8Array
 /** Writes a value (not blank) into the target of a field or column. */
 function writeTarget(target: WordTarget, field: FieldDef, value: string | boolean, pictures: PictureContext): void {
   if (field.kind === 'picture') {
-    if (typeof value !== 'string' || target.kind !== 'sdt') throw new FormWriteError(`The picture ${describe(field)} takes a photo.`);
+    if (typeof value !== 'string' || target.kind !== 'sdt') throw new FormWriteError(`The picture ${describe(field)} takes a photo.`, { code: 'wrongKind', fieldId: field.id });
     writePicture(target.sdt, value, field, pictures.part, pictures.photos);
     return;
   }
   switch (target.kind) {
     case 'formtext': writeFormText(target.begin, asText(value, field), field); break;
     case 'formcheck':
-      if (typeof value !== 'boolean') throw new FormWriteError(`The checkbox ${describe(field)} takes true or false.`);
+      if (typeof value !== 'boolean') throw new FormWriteError(`The checkbox ${describe(field)} takes true or false.`, { code: 'wrongKind', fieldId: field.id });
       writeFormCheck(target.begin, value);
       break;
     case 'formdrop':
-      if (typeof value !== 'string') throw new FormWriteError(`The field ${describe(field)} takes one of its options.`);
+      if (typeof value !== 'string') throw new FormWriteError(`The field ${describe(field)} takes one of its options.`, { code: 'wrongKind', fieldId: field.id });
       writeFormDrop(target.begin, value, field);
       break;
     case 'sdt': writeControl(target.sdt, value, field); break;
     case 'tick': writeTick(target.cells, asOption(value, field, field.options)); break;
     case 'cell': writeCell(target.tc, asText(value, field)); break;
-    default: throw new FormWriteError(`The field ${describe(field)} is not a field in the file.`);
+    default: throw new FormWriteError(`The field ${describe(field)} is not a field in the file.`, { code: 'notInFile', fieldId: field.id });
   }
 }
 
@@ -741,8 +741,8 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
   const extra = records.length - group.capacity;
   const anyValue = records.some((record) => group.columns.some((c) => writable(c) && !isBlank(record[c.id])));
   if (!anyValue && extra <= 0) return false;
-  if (!target || target.kind !== 'group') throw new FormWriteError(`The table ${group.id} (${group.label}) is not where it was in the file.`);
-  if (extra > 0 && !group.growable) throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, not ${records.length}.`);
+  if (!target || target.kind !== 'group') throw new FormWriteError(`The table ${group.id} (${group.label}) is not where it was in the file.`, { code: 'notInFile', fieldId: group.id });
+  if (extra > 0 && !group.growable) throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, not ${records.length}.`, { code: 'tooManyRows', fieldId: group.id });
   const { rows, clones } = extra > 0 ? growRows(target.rows, extra, ids()) : { rows: target.rows, clones: new Set<Element>() };
 
   records.forEach((record, i) => {
@@ -756,7 +756,7 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
       const at = locateColumn(row, column);
       if (!at) {
         if (blank) continue;
-        throw new FormWriteError(`The column ${describe(column)} is not where it was in row ${i + 1} of the table ${group.id}.`);
+        throw new FormWriteError(`The column ${describe(column)} is not where it was in row ${i + 1} of the table ${group.id}.`, { code: 'notInFile', fieldId: column.id });
       }
       jobs.push({ column, at, value, blank });
     }
@@ -785,7 +785,7 @@ function writePart(text: string, part: string, schema: FormSchema, values: Draft
     const value = values.fields[field.id];
     if (!writable(field) || isBlank(value) || !isHere(field.loc, part)) continue;
     const target = targets.get(field.id);
-    if (!target) throw new FormWriteError(`The field ${describe(field)} is not where it was in the file.`);
+    if (!target) throw new FormWriteError(`The field ${describe(field)} is not where it was in the file.`, { code: 'notInFile', fieldId: field.id });
     writeTarget(target, field, value, pictures);
     changed = true;
   }
@@ -820,7 +820,7 @@ export function writeWord(pkg: Package, schema: FormSchema, values: DraftValues,
   const media = new Map<string, Uint8Array>();
   for (const part of partsOf(schema)) {
     const text = partText(pkg, part);
-    if (text === undefined) throw new FormWriteError(`The form has no part ${part}.`);
+    if (text === undefined) throw new FormWriteError(`The form has no part ${part}.`, { code: 'notInFile' });
     const pictures = new PartPictures(pkg, part, opts.photos, media);
     const written = writePart(text, part, schema, values, { part: pictures, photos: opts.photos });
     if (written === undefined) continue;

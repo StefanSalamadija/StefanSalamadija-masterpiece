@@ -219,6 +219,7 @@ describe('makeFile on every fixture (R1)', () => {
     expect(caught).not.toBeInstanceOf(IntegrityError);
     expect((caught as Error).message).toContain('f1');
     expect((caught as Error).message).toContain('Check 1.1');
+    expect(caught).toMatchObject({ code: 'notAnOption', fieldId: 'f1' }); // for the screen, which never parses the message
   });
 
   it('refuses a file whose date would read back as another (a 2-digit year before 2000 reads as 20xx, a known limit)', () => {
