@@ -227,7 +227,8 @@ function sameData(a: unknown, b: unknown): boolean {
  * changed is not written.
  *
  * `oldId` names the template to replace: after a handover two live templates can share a code, and the caller chooses.
- * Templates are never merged here. A missing or deleted template is refused, and nothing is written.
+ * Templates are never merged here. Refused, with nothing written: a missing or deleted template; a new file whose code
+ * is not the old one's (a form without a code can take one); a `kind` that is not the schema's.
  */
 export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: Omit<TemplateInput, 'setup'>): Promise<RevisionResult> {
   // The forms engine is loaded on demand, outside the main bundle; and a transaction must not wait for anything but the
@@ -240,6 +241,9 @@ export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: O
       const old = await db.formTemplates.get(oldId);
       if (!old) throw new Error(`There is no form template with id ${oldId}.`);
       if (old.deleted) throw new Error(`The form template is deleted: ${oldId}`);
+      // A new revision is the same form: the caller found it by its code. A different code is another form.
+      if (input.kind !== input.schema.kind) throw new Error(`The file is a ${input.kind}, but its schema says ${input.schema.kind}.`);
+      if (old.code !== '' && code !== old.code) throw new Error(`Form ${code || '(no code)'} is not a revision of form ${old.code}.`);
       const { map, unmatched, removed } = mapRevision(old.schema, input.schema);
       const schemas = { from: old.schema, to: input.schema };
       const stamp = await stampNow(db);

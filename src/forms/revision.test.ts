@@ -145,7 +145,7 @@ describe('mapRevision', () => {
     expect(map).toEqual({ f2: 'f1', f3: 'f2', f4: 'f3' });
   });
 
-  it('maps groups by label, then by place, and their columns the same way', () => {
+  it('maps groups by their own title, else by their columns, and their columns as fields', () => {
     const { map, unmatched, removed } = mapRevision(
       schemaOf([], [
         group('g1', [field('g1.c1', { label: 'Name' }), field('g1.c2', { label: 'Rank' })], { label: 'Participants' }),
@@ -165,13 +165,75 @@ describe('mapRevision', () => {
     expect(removed).toEqual([]);
   });
 
-  it('does not pair by place across a field linked by label: a moved field leaves its neighbours unlinked', () => {
-    // `Gas` was after `Participants` and `Gas readings` is before it: nothing says they are the same group.
+  it('never pairs groups by place alone', () => {
+    // `Gas` and `Gas readings` have no column in common: nothing says they are the same group.
     const { map } = mapRevision(
       schemaOf([], [group('g1', [], { label: 'Participants' }), group('g2', [], { label: 'Gas' })]),
       schemaOf([], [group('g1', [], { label: 'Gas readings' }), group('g2', [], { label: 'Participants' })]),
     );
     expect(map).toEqual({ g1: 'g2' });
+  });
+
+  it('never pairs untitled tables (`Table <n>`) by place: a table added above them does not take their values', () => {
+    const old = schemaOf([], [
+      group('g1', [field('g1.c1', { label: 'Name' }), field('g1.c2', { label: 'Rank' })], { label: 'Table 1', growable: true }),
+      group('g2', [field('g2.c1', { label: 'Job' }), field('g2.c2', { label: 'Remarks' })], { label: 'Table 2', growable: true }),
+    ]);
+    const next = schemaOf([], [
+      group('g1', [field('g1.c1', { label: 'Item' }), field('g1.c2', { label: 'Location' })], { label: 'Table 1', growable: true }),
+      group('g2', [field('g2.c1', { label: 'Name' }), field('g2.c2', { label: 'Rank' })], { label: 'Table 2', growable: true }),
+      group('g3', [field('g3.c1', { label: 'Job' }), field('g3.c2', { label: 'Remarks' })], { label: 'Table 3', growable: true }),
+    ]);
+    const { map, unmatched, removed } = mapRevision(old, next);
+    // Each table goes where its columns went.
+    expect(map).toEqual({ g1: 'g2', 'g1.c1': 'g2.c1', 'g1.c2': 'g2.c2', g2: 'g3', 'g2.c1': 'g3.c1', 'g2.c2': 'g3.c2' });
+    expect(unmatched).toEqual(['Table 1']);
+    expect(removed).toEqual([]);
+    const { values: after, dropped } = migrateValues(values({}, { g1: [{ 'g1.c1': 'Ana', 'g1.c2': 'Master' }] }), map, { from: old, to: next });
+    expect(after.rows).toEqual({ g2: [{ 'g2.c1': 'Ana', 'g2.c2': 'Master' }] });
+    expect(dropped).toEqual([]);
+  });
+
+  it('drops and counts the rows of an untitled table that no new table shares a column with', () => {
+    const old = schemaOf([], [group('g1', [field('g1.c1', { label: 'Name' }), field('g1.c2', { label: 'Rank' })], { label: 'Table 1' })]);
+    const next = schemaOf([], [group('g1', [field('g1.c1', { label: 'Item' }), field('g1.c2', { label: 'Location' })], { label: 'Table 1' })]);
+    const { map, unmatched, removed } = mapRevision(old, next);
+    expect(map).toEqual({});
+    expect(unmatched).toEqual(['Table 1']);
+    expect(removed).toEqual(['Table 1']);
+    const { values: after, dropped } = migrateValues(values({}, { g1: [{ 'g1.c1': 'Ana', 'g1.c2': 'Master' }] }), map, { from: old, to: next });
+    expect(after.rows).toEqual({});
+    expect(dropped).toEqual(['g1.c1[0]', 'g1.c2[0]']);
+  });
+
+  it('treats a group named after its section as untitled: two such tables pair by their columns', () => {
+    const old = schemaOf([], [
+      group('g1', [field('g1.c1', { label: 'Name' })], { label: 'Crew', section: 'Crew' }),
+      group('g2', [field('g2.c1', { label: 'Visitor' })], { label: 'Crew', section: 'Crew' }),
+    ]);
+    const next = schemaOf([], [
+      group('g1', [field('g1.c1', { label: 'Visitor' })], { label: 'Crew', section: 'Crew' }),
+      group('g2', [field('g2.c1', { label: 'Name' })], { label: 'Crew', section: 'Crew' }),
+    ]);
+    expect(mapRevision(old, next).map).toEqual({ g1: 'g2', 'g1.c1': 'g2.c1', g2: 'g1', 'g2.c1': 'g1.c1' });
+  });
+
+  it('never pairs tables whose columns have only placeholder labels (`Column <n>`)', () => {
+    const cols = (g: string) => [field(`${g}.c1`, { label: 'Column 1', confidence: 'low' }), field(`${g}.c2`, { label: 'Column 2', confidence: 'low' })];
+    const { map } = mapRevision(
+      schemaOf([], [group('g1', cols('g1'), { label: 'Table 1' })]),
+      schemaOf([], [group('g1', cols('g1'), { label: 'Table 1' })]),
+    );
+    expect(map).toEqual({});
+  });
+
+  it('links the placeholder columns of tables linked by a real column label, by place', () => {
+    const cols = (g: string) => [field(`${g}.c1`, { label: 'Name' }), field(`${g}.c2`, { label: 'Column 2', confidence: 'low' })];
+    const { map } = mapRevision(
+      schemaOf([], [group('g1', cols('g1'), { label: 'Table 1' })]),
+      schemaOf([], [group('g1', [field('g1.c1', { label: 'Item' })], { label: 'Table 1' }), group('g2', cols('g2'), { label: 'Table 2' })]),
+    );
+    expect(map).toEqual({ g1: 'g2', 'g1.c1': 'g2.c1', 'g1.c2': 'g2.c2' });
   });
 
   it('lists a new group, and an old one that is gone, by its label', () => {

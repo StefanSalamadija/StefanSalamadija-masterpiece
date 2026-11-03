@@ -18,9 +18,11 @@ import type { DraftValues, FieldDef, FormSchema, FormSetup, FormValue, HelperKey
  *    `Vessel` and `Date`) is. Nor is a field paired across a label-linked field that moved past it.
  * A label of a different kind is never a match. No two old fields are linked to one new field.
  *
- * Row groups are linked the same way (by section and label, then by place), and the columns of two linked groups as
- * fields are, within the group. An Excel matrix (R14) is made of plain fields tagged with their `block`: its fields are
- * linked as fields, and the matrix id with them (to the new matrix most of its fields went to).
+ * Row groups are linked by a title of their own, else by their columns (`pairGroups`), never by place alone: an untitled
+ * table is named after its section or `Table <n>`, which says nothing about which table it is. The columns of two linked
+ * groups are then linked as fields are, within the group. An Excel matrix (R14) is made of plain fields tagged with
+ * their `block`: its fields are linked as fields, and the matrix id with them (to the new matrix most of its fields went
+ * to).
  *
  * The result is one map from old id to new id, for fields, columns, groups and matrices alike: their ids never clash
  * (`f1`, `g1`, `g1.c1`; `<sheet>!B7`, `<sheet>!g1`, `<sheet>!g1.C`, `<sheet>!m1`).
@@ -41,7 +43,8 @@ export interface RevisionMap {
 
 /**
  * What is paired: a field, a column or a row group (which has no kind), with its label and section normalised. A
- * `placeholder` label (empty, or `Field <n>` / `Column <n>` given by detection) is never matched by its text.
+ * `placeholder` label (empty, `Field <n>` / `Column <n>` given by detection, or a group's fallback label, see
+ * `groupItem`) is never matched by its text.
  */
 interface Item { id: string; label: string; section: string; kind: string; placeholder: boolean }
 
@@ -52,24 +55,22 @@ function fieldItem(f: FieldDef, section = f.section): Item {
   return { id: f.id, label, section: normaliseLabel(section), kind: f.kind, placeholder: label === '' || (f.confidence === 'low' && PLACEHOLDER.test(f.label)) };
 }
 
+/** The label detection gives a group with no title and no section: `Table <n>`, numbered by place. */
+const TABLE_PLACEHOLDER = /^Table \d+$/;
+
+/**
+ * A group as an item. Its label is a placeholder unless it is a title of its own: detection names a group with no title
+ * after its section, or `Table <n>` when there is no section either, and neither says which table it is.
+ */
 function groupItem(g: RowGroupDef): Item {
   const label = normaliseLabel(g.label);
-  return { id: g.id, label, section: normaliseLabel(g.section), kind: '', placeholder: label === '' };
+  const placeholder = label === '' || TABLE_PLACEHOLDER.test(g.label.trim()) || label === normaliseLabel(g.section);
+  return { id: g.id, label, section: normaliseLabel(g.section), kind: '', placeholder };
 }
 
 /** Pairs two lists of items in document order (see the rules above). New id by old id. */
 function pair(olds: readonly Item[], news: readonly Item[]): Map<string, string> {
-  const pairs = new Map<string, string>();
-
-  // 1. By section, label and kind; repeats in document order.
-  const byKey = new Map<string, Item[]>();
-  const keyOf = (i: Item) => JSON.stringify([i.section, i.label, i.kind]);
-  for (const n of news) if (!n.placeholder) byKey.set(keyOf(n), [...(byKey.get(keyOf(n)) ?? []), n]);
-  for (const o of olds) {
-    if (o.placeholder) continue;
-    const n = byKey.get(keyOf(o))?.shift();
-    if (n) pairs.set(o.id, n.id);
-  }
+  const pairs = byLabel(olds, news);
 
   // 2. By place: between the same two label-linked neighbours. A gap is named by the old id of the linked item before it
   // in the section ('' at the start of the section); on the new side that is the old partner of the new item before it.
@@ -85,6 +86,50 @@ function pair(olds: readonly Item[], news: readonly Item[]): Map<string, string>
       const n = byKind.get(o.kind)?.shift();
       if (n) pairs.set(o.id, n.id);
     }
+  }
+  return pairs;
+}
+
+/** Stage 1 alone: the items with the same section, label and kind (not a placeholder), repeats in document order. */
+function byLabel(olds: readonly Item[], news: readonly Item[]): Map<string, string> {
+  const pairs = new Map<string, string>();
+  const byKey = new Map<string, Item[]>();
+  const keyOf = (i: Item) => JSON.stringify([i.section, i.label, i.kind]);
+  for (const n of news) if (!n.placeholder) byKey.set(keyOf(n), [...(byKey.get(keyOf(n)) ?? []), n]);
+  for (const o of olds) {
+    if (o.placeholder) continue;
+    const n = byKey.get(keyOf(o))?.shift();
+    if (n) pairs.set(o.id, n.id);
+  }
+  return pairs;
+}
+
+const columnItems = (g: RowGroupDef) => g.columns.map((c) => fieldItem(c, ''));
+
+/**
+ * Pairs the row groups. Never by place alone: a table's place says nothing once one is added or removed above it.
+ * 1. By a title of its own (not a placeholder, see `groupItem`), with the same section; repeats in document order.
+ * 2. The rest by their columns: within the same section, two groups are paired when at least one column has the same real
+ *    label and kind in both (`byLabel`). The pair with the most such columns goes first; a tie goes to the old group,
+ *    then the new group, met first. A group with no column in common with any other is not paired.
+ */
+function pairGroups(olds: readonly RowGroupDef[], news: readonly RowGroupDef[]): Map<string, string> {
+  const pairs = byLabel(olds.map(groupItem), news.map(groupItem));
+  const taken = new Set(pairs.values());
+  const candidates: { from: string; to: string; shared: number; order: number }[] = [];
+  olds.forEach((o, i) => {
+    if (pairs.has(o.id)) return;
+    news.forEach((n, j) => {
+      if (taken.has(n.id) || normaliseLabel(o.section) !== normaliseLabel(n.section)) return;
+      const shared = byLabel(columnItems(o), columnItems(n)).size;
+      if (shared > 0) candidates.push({ from: o.id, to: n.id, shared, order: i * news.length + j });
+    });
+  });
+  candidates.sort((a, b) => b.shared - a.shared || a.order - b.order);
+  for (const { from, to } of candidates) {
+    if (pairs.has(from) || taken.has(to)) continue;
+    pairs.set(from, to);
+    taken.add(to);
   }
   return pairs;
 }
@@ -117,14 +162,14 @@ export function mapRevision(oldSchema: FormSchema, newSchema: FormSchema): Revis
   const fieldPairs = pair(oldSchema.fields.map((f) => fieldItem(f)), newSchema.fields.map((f) => fieldItem(f)));
   for (const [o, n] of fieldPairs) map[o] = n;
 
-  const groupPairs = pair(oldSchema.rowGroups.map(groupItem), newSchema.rowGroups.map(groupItem));
+  const groupPairs = pairGroups(oldSchema.rowGroups, newSchema.rowGroups);
   const newGroups = new Map(newSchema.rowGroups.map((g) => [g.id, g]));
   for (const g of oldSchema.rowGroups) {
     const n = newGroups.get(groupPairs.get(g.id) ?? '');
     if (!n) continue;
     map[g.id] = n.id;
     // Columns are compared within their group: the group's section is the same for all of them.
-    for (const [o, c] of pair(g.columns.map((c) => fieldItem(c, '')), n.columns.map((c) => fieldItem(c, '')))) map[o] = c;
+    for (const [o, c] of pair(columnItems(g), columnItems(n))) map[o] = c;
   }
 
   Object.assign(map, mapBlocks(oldSchema.fields, newSchema.fields, fieldPairs));

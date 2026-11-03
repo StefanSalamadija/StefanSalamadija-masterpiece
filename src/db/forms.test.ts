@@ -610,6 +610,15 @@ describe('replaceTemplate', () => {
     expect(await allTables(db)).toEqual(before);
   });
 
+  it('refuses a file of another form (another code) or whose kind is not its schema\'s, and writes nothing', async () => {
+    const { db, template } = await library();
+    const before = await allTables(db);
+    const otherCode = { ...rev01, identity: { ...rev01.identity, code: 'TST-02' } };
+    await expect(replaceTemplate(db, template.id, { ...rev01Input, schema: otherCode })).rejects.toThrow(/not a revision/);
+    await expect(replaceTemplate(db, template.id, { ...rev01Input, kind: 'xlsx' })).rejects.toThrow(/schema says docx/);
+    expect(await allTables(db)).toEqual(before);
+  });
+
   it('writes nothing when a write inside fails: template, drafts and last values stay as they were', async () => {
     const { db, template } = await library();
     await closeDraft(db, (await openDraft(db, 'ship-2', template, '2026-10-27')).id, filled('MV NORTH WIND'));
