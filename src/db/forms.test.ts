@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defaultSetup } from '../forms/helpers';
+import { readPackage } from '../forms/package';
+import { toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
 import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
+import { detectWord } from '../forms/word/detect';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
-  addPhoto, closeDraft, discardDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, saveDraftValues, saveTemplate,
+  addPhoto, closeDraft, discardDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
+  saveTemplate,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
 import { openDb } from './schema';
@@ -419,6 +424,209 @@ describe('discardDraft', () => {
     const before = await allTables(db);
     vi.spyOn(db.formPhotos, 'bulkPut').mockRejectedValueOnce(new Error('boom'));
     await expect(discardDraft(db, draft.id)).rejects.toThrow('boom');
+    expect(await allTables(db)).toEqual(before);
+  });
+});
+
+describe('replaceTemplate', () => {
+  const rev00Bytes = toolboxTalkDocx();
+  const rev00 = detectWord(readPackage(rev00Bytes), 'docx', 'toolbox.docx');
+  // R6: `Subject` becomes `Topic`, and `Location` is added after it.
+  const rev01Bytes = toolboxTalkDocx({ revision: '01 / 01.06.2026', renameSubjectTo: 'Topic', extraFieldLabel: 'Location' });
+  const rev01 = detectWord(readPackage(rev01Bytes), 'docx', 'toolbox-rev01.docx');
+  // A later revision that takes `Location` out again.
+  const rev02Bytes = toolboxTalkDocx({ revision: '02 / 01.09.2026', renameSubjectTo: 'Topic' });
+  const rev02 = detectWord(readPackage(rev02Bytes), 'docx', 'toolbox-rev02.docx');
+  const rev01Input = { fileName: 'toolbox-rev01.docx', bytes: rev01Bytes, kind: 'docx' as const, schema: rev01 };
+
+  const filled = (vessel: string): DraftValues => ({
+    fields: { f1: vessel, f2: 'Working aloft', f3: '2026-10-28', f4: '08:30' },
+    rows: { g1: [{ 'g1.c1': 'Ana Marin', 'g1.c2': 'Chief Officer' }] },
+  });
+  const moved = (vessel: string): DraftValues => ({
+    fields: { f1: vessel, f2: 'Working aloft', f4: '2026-10-28', f5: '08:30' },
+    rows: { g1: [{ 'g1.c1': 'Ana Marin', 'g1.c2': 'Chief Officer' }] },
+  });
+
+  async function library() {
+    const db = freshDb();
+    const template = await saveTemplate(db, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: rev00, setup: defaultSetup(rev00) });
+    return { db, template };
+  }
+
+  it('open_draft_migrates: an open draft keeps its values under the new ids, and a removed field is counted', async () => {
+    const { db, template } = await library();
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
+    await saveDraftValues(db, draft.id, filled('MV OCEAN STAR'));
+    at('2026-10-29T08:00:00.000Z');
+
+    const first = await replaceTemplate(db, template.id, rev01Input);
+    expect(first.unmatched).toEqual(['Location']);
+    expect(first.droppedFromDrafts).toBe(0);
+    expect((await db.formDrafts.get(draft.id))?.values).toEqual(moved('MV OCEAN STAR'));
+    // Opening the form now continues the same draft, under the new revision.
+    expect((await openDraft(db, 'ship-1', first.template, '2026-10-29')).id).toBe(draft.id);
+
+    // The person fills the new field; the next revision takes it out again.
+    await saveDraftValues(db, draft.id, { ...moved('MV OCEAN STAR'), fields: { ...moved('MV OCEAN STAR').fields, f3: 'Bosun store' } });
+    const second = await replaceTemplate(db, template.id, { fileName: 'toolbox-rev02.docx', bytes: rev02Bytes, kind: 'docx', schema: rev02 });
+    expect(second.removed).toEqual(['Location']);
+    expect(second.droppedFromDrafts).toBe(1);
+    expect((await db.formDrafts.get(draft.id))?.values).toEqual({
+      fields: { f1: 'MV OCEAN STAR', f2: 'Working aloft', f3: '2026-10-28', f4: '08:30' },
+      rows: { g1: [{ 'g1.c1': 'Ana Marin', 'g1.c2': 'Chief Officer' }] },
+    });
+  });
+
+  it('keeps the template\'s id and replaces its file, name, identity and schema', async () => {
+    const { db, template } = await library();
+    const { deviceId } = await getSettings(db);
+    at('2026-10-29T08:00:00.000Z');
+    const { template: replaced } = await replaceTemplate(db, template.id, rev01Input);
+    expect(replaced).toMatchObject({
+      id: template.id, createdAt: template.createdAt, scope: 'personal', deleted: false, updatedAt: '2026-10-29T08:00:00.000Z', updatedBy: deviceId,
+      code: 'TST-01', title: 'Toolbox Talk', revision: '01 / 01.06.2026', kind: 'docx', fileName: 'toolbox-rev01.docx', schema: rev01,
+    });
+    expect(Uint8Array.from(atob(replaced.fileBase64), (c) => c.charCodeAt(0))).toEqual(rev01Bytes);
+    expect(await db.formTemplates.get(template.id)).toEqual(replaced);
+    expect(await db.formTemplates.count()).toBe(1);
+  });
+
+  it('carries the setup over to the new ids', async () => {
+    const { db, template } = await library();
+    const setup: FormSetup = {
+      links: { f1: { source: 'vessel.name' }, f2: { source: 'none' }, f4: { source: 'time.timeUtc' } },
+      leftEmpty: ['g1.c3', 'f3'],
+      helpers: { pickCrew: ['g1'], allOk: [], todayRow: [], startFromLast: ['g1'], jobLog: [], thresholds: [], now: ['f4'] },
+      okWord: 'Good',
+      notFinished: '',
+    };
+    await db.formTemplates.put({ ...template, setup });
+    const { template: replaced } = await replaceTemplate(db, template.id, rev01Input);
+    expect(replaced.setup).toEqual({
+      links: { f1: { source: 'vessel.name' }, f2: { source: 'none' }, f5: { source: 'time.timeUtc' } },
+      leftEmpty: ['g1.c3', 'f4'],
+      helpers: { pickCrew: ['g1'], allOk: [], todayRow: [], startFromLast: ['g1'], jobLog: [], thresholds: [], now: ['f5'] },
+      okWord: 'Good',
+      notFinished: '',
+    });
+  });
+
+  it('moves every live draft and the last values of every ship, and nothing else', async () => {
+    const { db, template } = await library();
+    const other = await saveTemplate(db, { fileName: 'other.docx', bytes: rev00Bytes, kind: 'docx', schema: { ...rev00, identity: { ...rev00.identity, code: 'TST-77' } }, setup: defaultSetup(rev00) });
+    // Ship 2 made a file: its last values. Ship 1 and ship 2 then each have a draft open.
+    await closeDraft(db, (await openDraft(db, 'ship-2', template, '2026-10-27')).id, filled('MV NORTH WIND'));
+    const one = await openDraft(db, 'ship-1', template, '2026-10-28');
+    await saveDraftValues(db, one.id, filled('MV OCEAN STAR'));
+    const two = await openDraft(db, 'ship-2', template, '2026-10-28');
+    await saveDraftValues(db, two.id, filled('MV NORTH WIND'));
+    const closed = (await db.formDrafts.where('shipId').equals('ship-2').filter((d) => d.deleted).first())!;
+    const otherDraft = await saveDraftValues(db, (await openDraft(db, 'ship-1', other, '2026-10-28')).id, filled('MV OCEAN STAR'));
+    await closeDraft(db, (await openDraft(db, 'ship-3', other, '2026-10-01')).id, filled('MV SOUTH SEA'));
+    const otherLast = (await lastValuesFor(db, 'ship-3', other))!;
+    at('2026-10-29T08:00:00.000Z');
+
+    const result = await replaceTemplate(db, template.id, rev01Input);
+    expect(result.droppedFromDrafts).toBe(0);
+    expect(result.droppedFromLastValues).toBe(0);
+    expect((await db.formDrafts.get(one.id))).toMatchObject({ values: moved('MV OCEAN STAR'), code: 'TST-01', updatedAt: '2026-10-29T08:00:00.000Z' });
+    expect((await db.formDrafts.get(two.id))?.values).toEqual(moved('MV NORTH WIND'));
+    expect((await lastValuesFor(db, 'ship-2', result.template))?.values).toEqual(moved('MV NORTH WIND'));
+    // A closed draft, and another form's draft and last values, are left as they were.
+    expect(await db.formDrafts.get(closed.id)).toEqual(closed);
+    expect(await db.formDrafts.get(otherDraft.id)).toEqual(otherDraft);
+    expect(await db.formLastValues.get(otherLast.id)).toEqual(otherLast);
+  });
+
+  it('counts what it drops from the drafts and from the last values', async () => {
+    const { db } = await library();
+    const template = await replaceTemplate(db, (await listTemplates(db))[0]!.id, rev01Input).then((r) => r.template);
+    const withLocation = (vessel: string): DraftValues => ({ ...moved(vessel), fields: { ...moved(vessel).fields, f3: 'Bosun store' } });
+    await closeDraft(db, (await openDraft(db, 'ship-1', template, '2026-10-27')).id, withLocation('MV OCEAN STAR'));
+    await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, withLocation('MV OCEAN STAR'));
+    await saveDraftValues(db, (await openDraft(db, 'ship-2', template, '2026-10-28')).id, withLocation('MV NORTH WIND'));
+    const result = await replaceTemplate(db, template.id, { fileName: 'toolbox-rev02.docx', bytes: rev02Bytes, kind: 'docx', schema: rev02 });
+    expect(result).toMatchObject({ unmatched: [], removed: ['Location'], droppedFromDrafts: 2, droppedFromLastValues: 1 });
+    expect((await lastValuesFor(db, 'ship-1', result.template))?.values.fields).toEqual({ f1: 'MV OCEAN STAR', f2: 'Working aloft', f3: '2026-10-28', f4: '08:30' });
+  });
+
+  it('drops the value of a picture field that is gone, and leaves the photo with its draft', async () => {
+    const db = freshDb();
+    const weeklyBytes = weeklyJobsDotx();
+    const weekly = detectWord(readPackage(weeklyBytes), 'dotx', 'weekly.dotx');
+    const template = await saveTemplate(db, { fileName: 'weekly.dotx', bytes: weeklyBytes, kind: 'dotx', schema: weekly, setup: defaultSetup(weekly) });
+    const draft = await openDraft(db, 'ship-1', template, '2026-W44');
+    const photos = [
+      await addPhoto(db, 'ship-1', draft.id, Uint8Array.of(0xff, 0xd8, 1), 1, 1),
+      await addPhoto(db, 'ship-1', draft.id, Uint8Array.of(0xff, 0xd8, 2), 1, 1),
+      await addPhoto(db, 'ship-1', draft.id, Uint8Array.of(0xff, 0xd8, 3), 1, 1),
+    ];
+    const row = { 'g2.c1': photos[0]!.id, 'g2.c2': 'Before', 'g2.c3': photos[1]!.id, 'g2.c4': 'After', 'g2.c5': photos[2]!.id, 'g2.c6': 'After' };
+    await saveDraftValues(db, draft.id, { fields: {}, rows: { g2: [row] } });
+    // The next revision has room for two pictures.
+    const next: FormSchema = {
+      ...weekly, identity: { ...weekly.identity, revision: '01 / 01.06.2026' },
+      rowGroups: weekly.rowGroups.map((g) => (g.id === 'g2' ? { ...g, columns: g.columns.slice(0, 4) } : g)),
+    };
+    const result = await replaceTemplate(db, template.id, { fileName: 'weekly.dotx', bytes: weeklyBytes, kind: 'dotx', schema: next });
+    expect(result.droppedFromDrafts).toBe(2);
+    const after = (await db.formDrafts.get(draft.id))!;
+    expect(after.values.rows.g2).toEqual([{ 'g2.c1': photos[0]!.id, 'g2.c2': 'Before', 'g2.c3': photos[1]!.id, 'g2.c4': 'After' }]);
+    expect(after.photoIds).toEqual(photos.map((p) => p.id));
+    expect(Object.keys(await photosFor(db, draft.id)).sort()).toEqual(photos.map((p) => p.id).sort());
+  });
+
+  it('does not rewrite a draft or last values that nothing changed (no needless conflicts in a later merge)', async () => {
+    const { db, template } = await library();
+    await closeDraft(db, (await openDraft(db, 'ship-2', template, '2026-10-27')).id, filled('MV NORTH WIND'));
+    const draft = await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, filled('MV OCEAN STAR'));
+    const last = (await lastValuesFor(db, 'ship-2', template))!;
+    at('2026-10-29T08:00:00.000Z');
+    // The same layout re-issued: only the revision changes.
+    const same = { ...rev00, identity: { ...rev00.identity, revision: '01 / 01.06.2026' } };
+    const result = await replaceTemplate(db, template.id, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: same });
+    expect(result).toMatchObject({ unmatched: [], removed: [], droppedFromDrafts: 0, droppedFromLastValues: 0 });
+    expect(result.template.revision).toBe('01 / 01.06.2026');
+    expect(await db.formDrafts.get(draft.id)).toEqual(draft);
+    expect(await db.formLastValues.get(last.id)).toEqual(last);
+  });
+
+  it('moves the last values of a form without a code, kept under its template id', async () => {
+    const db = freshDb();
+    const noCode = { ...rev00, identity: { ...rev00.identity, code: '' } };
+    const template = await saveTemplate(db, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: noCode, setup: defaultSetup(noCode) });
+    await closeDraft(db, (await openDraft(db, 'ship-1', template, '2026-10-27')).id, filled('MV OCEAN STAR'));
+    const result = await replaceTemplate(db, template.id, { ...rev01Input, schema: { ...rev01, identity: { ...rev01.identity, code: '' } } });
+    expect((await lastValuesFor(db, 'ship-1', result.template))?.values).toEqual(moved('MV OCEAN STAR'));
+  });
+
+  it('refuses a template that is missing or deleted, and writes nothing', async () => {
+    const { db, template } = await library();
+    await softDelete(db, 'formTemplates', template.id);
+    const before = await allTables(db);
+    await expect(replaceTemplate(db, template.id, rev01Input)).rejects.toThrow();
+    await expect(replaceTemplate(db, 'missing', rev01Input)).rejects.toThrow(/missing/);
+    expect(await allTables(db)).toEqual(before);
+  });
+
+  it('writes nothing when a write inside fails: template, drafts and last values stay as they were', async () => {
+    const { db, template } = await library();
+    await closeDraft(db, (await openDraft(db, 'ship-2', template, '2026-10-27')).id, filled('MV NORTH WIND'));
+    await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, filled('MV OCEAN STAR'));
+    const before = await allTables(db);
+    // The drafts and the last values are written; the template after them fails.
+    vi.spyOn(db.formTemplates, 'put').mockRejectedValueOnce(new Error('boom'));
+    await expect(replaceTemplate(db, template.id, rev01Input)).rejects.toThrow('boom');
+    expect(await allTables(db)).toEqual(before);
+  });
+
+  it('reports a full disk as such, and writes nothing', async () => {
+    const { db, template } = await library();
+    await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, filled('MV OCEAN STAR'));
+    const before = await allTables(db);
+    vi.spyOn(db.formTemplates, 'put').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
+    await expect(replaceTemplate(db, template.id, rev01Input)).rejects.toBeInstanceOf(StorageFullError);
     expect(await allTables(db)).toEqual(before);
   });
 });

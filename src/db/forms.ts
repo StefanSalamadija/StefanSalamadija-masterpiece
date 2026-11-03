@@ -195,3 +195,80 @@ export async function discardDraft(db: MasterpieceDB, draftId: string): Promise<
     }),
   );
 }
+
+/** What `replaceTemplate` did. */
+export interface RevisionResult {
+  /** The template as it is now: the same id, with the new revision's file, identity, schema and the carried-over setup. */
+  template: FormTemplate;
+  /** The new fields nothing was linked to, by label, for the setup screen's `New fields to check: <labels>`. */
+  unmatched: string[];
+  /** The old fields nothing was linked to, by label: what the form no longer asks for. */
+  removed: string[];
+  /** How many values in the open drafts (every ship's) could not be carried over. */
+  droppedFromDrafts: number;
+  /** How many of the last values (every ship's) could not be carried over. */
+  droppedFromLastValues: number;
+}
+
+/** Whether two records hold the same data (the same JSON). */
+function sameData(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Replaces a form in the library by its new revision (spec §4 step 5), keeping its id: the file, its name and kind, the
+ * code, title and revision, and the schema become the new file's. The old fields are linked to the new ones
+ * (`mapRevision`), and through that link, in one transaction (all or nothing):
+ * - the setup is carried over (`migrateSetup`);
+ * - every live draft of the template, of every ship, moves to the new ids (`migrateValues`), and takes the new code;
+ * - so do the last values kept under the form's key (`lastValuesKey`), of every ship, under the new key if it changed.
+ * What cannot be carried over is counted. A picture field that is gone loses its value (the photo's id), but the photo
+ * stays with its draft until the draft is closed, as every photo does. A draft or last-values record that nothing
+ * changed is not written.
+ *
+ * `oldId` names the template to replace: after a handover two live templates can share a code, and the caller chooses.
+ * Templates are never merged here. A missing or deleted template is refused, and nothing is written.
+ */
+export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: Omit<TemplateInput, 'setup'>): Promise<RevisionResult> {
+  // The forms engine is loaded on demand, outside the main bundle; and a transaction must not wait for anything but the
+  // database. So the module is loaded, and the file encoded, before the transaction starts.
+  const { mapRevision, migrateSetup, migrateValues } = await import('../forms/revision');
+  const fileBase64 = toBase64(input.bytes);
+  const { code, title, revision } = input.schema.identity;
+  return guardWrite(() =>
+    db.transaction('rw', [db.formTemplates, db.formDrafts, db.formLastValues, db.settings], async () => {
+      const old = await db.formTemplates.get(oldId);
+      if (!old) throw new Error(`There is no form template with id ${oldId}.`);
+      if (old.deleted) throw new Error(`The form template is deleted: ${oldId}`);
+      const { map, unmatched, removed } = mapRevision(old.schema, input.schema);
+      const schemas = { from: old.schema, to: input.schema };
+      const stamp = await stampNow(db);
+
+      let droppedFromDrafts = 0;
+      const drafts = await db.formDrafts.where('templateId').equals(oldId).filter((d) => !d.deleted).toArray();
+      const movedDrafts = drafts.flatMap((draft) => {
+        const { values, dropped } = migrateValues(draft.values, map, schemas);
+        droppedFromDrafts += dropped.length;
+        return sameData([draft.values, draft.code], [values, code]) ? [] : [{ ...draft, code, values, ...stamp }];
+      });
+      await db.formDrafts.bulkPut(movedDrafts);
+
+      let droppedFromLastValues = 0;
+      const key = lastValuesKey(code, oldId);
+      const lasts = await db.formLastValues.where('code').equals(lastValuesKey(old.code, oldId)).filter((r) => !r.deleted).toArray();
+      const movedLasts = lasts.flatMap((last) => {
+        const { values, dropped } = migrateValues(last.values, map, schemas);
+        droppedFromLastValues += dropped.length;
+        return sameData([last.values, last.code], [values, key]) ? [] : [{ ...last, code: key, values, ...stamp }];
+      });
+      await db.formLastValues.bulkPut(movedLasts);
+
+      const template: FormTemplate = {
+        ...old, code, title, revision, kind: input.kind, fileName: input.fileName, fileBase64, schema: input.schema,
+        setup: migrateSetup(old.setup, map, input.schema), ...stamp,
+      };
+      await db.formTemplates.put(template);
+      return { template, unmatched, removed, droppedFromDrafts, droppedFromLastValues };
+    }),
+  );
+}
