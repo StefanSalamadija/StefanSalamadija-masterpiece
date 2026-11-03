@@ -89,16 +89,26 @@ export function isJobLogGroup(group: RowGroupDef): boolean {
   return jobColumns(group) !== undefined;
 }
 
+/** Columns that never hold a gas reading: times, dates, units, names, remarks. */
+const NOT_READING = /^(?:time(?: in| out)?|date|units?|remarks?|name|rank)$/;
+
+/** Whether a column can hold a reading: a number column, or a text column whose title is not one of `NOT_READING`. */
+function canHoldReading(c: FieldDef): boolean {
+  return c.kind === 'number' || (c.kind === 'text' && !NOT_READING.test(norm(c)));
+}
+
 /** The alarm rows of a group that carry numbers, as cells lined up with the group's columns. */
 function alarmRows(g: RowGroupDef): { cells: (number | undefined)[] }[] {
   const rows: { cells: (number | undefined)[] }[] = [];
   for (const row of g.fixedRows ?? []) {
     if (!ALARM_ROW.test(row.label)) continue;
     // Word repeats the label as the first cell (the label column is the group's first column); Excel's cells do not.
-    const labelFirst = row.cells.length === g.columns.length && row.cells[0] !== undefined
-      && normaliseLabel(row.cells[0]) === normaliseLabel(row.label);
-    const cells = g.columns.map((_, i) => {
-      if (labelFirst && i === 0) return undefined;
+    // So cell 0 is the label when it equals the row label or is not a number, whatever the row's length.
+    const first = row.cells[0];
+    const labelFirst = first !== undefined
+      && (normaliseLabel(first) === normaliseLabel(row.label) || typeof parseDecimal(first) !== 'number');
+    const cells = g.columns.map((c, i) => {
+      if ((labelFirst && i === 0) || !canHoldReading(c)) return undefined;
       const parsed = parseDecimal(row.cells[i] ?? '');
       return typeof parsed === 'number' ? parsed : undefined;
     });
@@ -114,9 +124,9 @@ function matrixBlocks(schema: FormSchema): string[] {
   return seen;
 }
 
-/** Whether `startFromLast` copies this group: a plain list with row names, or a matrix-shaped group. */
+/** Whether `startFromLast` copies this group: a plain list with row names (matrices are fields with a block, R14). */
 function copiesFromLast(g: RowGroupDef): boolean {
-  return (g.shape === 'rows' && (g.rowLabels?.length ?? 0) > 0) || g.shape === 'matrix';
+  return g.shape === 'rows' && (g.rowLabels?.length ?? 0) > 0;
 }
 
 /** For each helper, the ids of the groups or fields it applies to. See the table at the top of this file. */
@@ -200,13 +210,13 @@ export function allOkRows(group: RowGroupDef, okWord: string, existing: Record<s
 
 /**
  * The index of the row for the ship's today in a day grid: the day of the month minus one. When the grid names its
- * rows (`rowLabels`) and one of them is the day, that row's index. `-1` when the grid has no such row.
+ * rows (`rowLabels`), the row whose label starts with that number (`5`, `05`, `5th`), else `-1`; without labels, day minus
+ * one while the grid has that many rows. `-1` when the grid has no such row.
  */
 export function todayRowIndex(group: RowGroupDef, shipToday: string): number {
   if (!isValidIsoDate(shipToday)) return -1;
   const day = Number(shipToday.slice(8, 10));
-  const named = group.rowLabels?.findIndex((l) => l.trim() === String(day)) ?? -1;
-  if (named >= 0) return named;
+  if (group.rowLabels !== undefined) return group.rowLabels.findIndex((l) => Number.parseInt(l, 10) === day);
   return day - 1 < group.capacity ? day - 1 : -1;
 }
 

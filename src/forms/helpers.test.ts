@@ -140,6 +140,15 @@ describe('todayRowIndex', () => {
     expect(todayRowIndex(g, '2026-11-01')).toBe(0);
     expect(todayRowIndex(g, '2026-10-31')).toBe(30);
   });
+  it('matches row labels numerically, and is -1 when labels exist but miss the day', () => {
+    const g = group(dayGrid, 'Demo day grid!g1');
+    const labelled = (labels: string[]): RowGroupDef => ({ ...g, rowLabels: labels });
+    const range = (from: number, to: number, f: (n: number) => string) => Array.from({ length: to - from + 1 }, (_, i) => f(from + i));
+    expect(todayRowIndex(labelled(range(2, 31, String)), '2026-10-01')).toBe(-1);
+    expect(todayRowIndex(labelled(range(1, 31, (n) => String(n).padStart(2, '0'))), '2026-10-05')).toBe(4);
+    expect(todayRowIndex(labelled(range(1, 31, (n) => `${n}st`)), '2026-10-12')).toBe(11);
+    expect(todayRowIndex(labelled(['Mon', 'Tue']), '2026-10-02')).toBe(-1);
+  });
   it('is -1 when the grid has no row for the day', () => {
     expect(todayRowIndex({ ...group(dayGrid, 'Demo day grid!g1'), capacity: 28, rowLabels: undefined }, '2026-10-30')).toBe(-1);
   });
@@ -250,6 +259,17 @@ describe('thresholds', () => {
   it('CO2 is not oxygen; a text cell is skipped', () => {
     const x: RowGroupDef = { ...g, columns: [field('a', { label: 'CO2 [%]' }), field('b', { label: 'LEL' })], fixedRows: [{ label: 'Alarm 1', cells: ['0.5', 'n/a'] }, { label: 'Alarm 2', cells: ['1', '10'] }] };
     expect(thresholdsOf(x, { fields: {}, rows: {} })).toEqual([{ column: 'a', high: 0.5 }, { column: 'b', high: 10 }]);
+  });
+  it('a short alarm row still lines up with its columns', () => {
+    const x: RowGroupDef = { ...g, fixedRows: [{ label: 'Alarm 1', cells: ['Alarm 1', '19.5'] }] };
+    expect(thresholdsOf(x, { fields: {}, rows: {} })).toEqual([{ column: 'g1.c2', high: 19.5 }]);
+  });
+  it('a number under a Time column gets no threshold', () => {
+    const x: RowGroupDef = {
+      ...g, columns: [field('t', { label: 'Time' }), field('a', { label: 'CO [ppm]', kind: 'number' })],
+      fixedRows: [{ label: 'Alarm 1', cells: ['Alarm 1', '25'] }, { label: 'Alarm 2', cells: ['12', '50'] }],
+    };
+    expect(thresholdsOf(x, { fields: {}, rows: {} })).toEqual([{ column: 'a', high: 25 }]);
   });
   it('none for a group without alarm rows', () => {
     expect(thresholdsOf(group(toolbox, 'g1'), { fields: {}, rows: {} })).toEqual([]);
