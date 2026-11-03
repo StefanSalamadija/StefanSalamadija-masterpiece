@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Certificate, ClockChange, CrewDocument, CrewDraft, CrewMember, ShipProfile, Voyage } from '../domain/types';
+import type {
+  Certificate, ClockChange, CrewDocument, CrewDraft, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, ShipProfile, Voyage,
+} from '../domain/types';
 import { allTables, createRecord, listForShip, softDelete, updateRecord } from './records';
 import { openDb } from './schema';
 import { getSettings, updateSettings } from './settings';
@@ -107,6 +109,30 @@ describe('deleteShip', () => {
     await deleteShip(db, a.id);
     expect((await listShips(db)).map((s) => s.particulars.name)).toEqual(['MV SEA BREEZE']);
     expect((await getSettings(db)).activeShipId).toBe(b.id);
+  });
+
+  it("tombstones the ship's form drafts, last values and photos (keeping no image), and keeps the forms library", async () => {
+    const { db, a, b } = await twoShips();
+    const template = await createRecord<FormTemplate>(db, 'formTemplates', {
+      code: 'TST-01', title: 'Toolbox Talk', revision: '00', kind: 'docx', fileName: 't.docx', fileBase64: 'AAEC',
+      schema: { kind: 'docx', identity: { code: 'TST-01', title: 'Toolbox Talk', revision: '00' }, fields: [], rowGroups: [], unsupported: [] },
+      setup: { links: {}, leftEmpty: [], helpers: { pickCrew: [], allOk: [], todayRow: [], startFromLast: [], jobLog: [], thresholds: [], now: [] }, okWord: 'Satisfactory', notFinished: '' },
+    }, { scope: 'personal' });
+    const formDraft = (shipId: string) => createRecord<FormDraft>(db, 'formDrafts', {
+      shipId, templateId: template.id, code: 'TST-01', period: '2026-10-28', values: { fields: {}, rows: {} }, photoIds: [],
+    });
+    const mine = await formDraft(a.id);
+    const theirs = await formDraft(b.id);
+    const photo = await createRecord<FormPhoto>(db, 'formPhotos', { shipId: a.id, draftId: mine.id, jpegBase64: '/9j/', width: 1, height: 1 });
+    const theirPhoto = await createRecord<FormPhoto>(db, 'formPhotos', { shipId: b.id, draftId: theirs.id, jpegBase64: '/9j/', width: 1, height: 1 });
+    const last = await createRecord<FormLastValues>(db, 'formLastValues', { shipId: a.id, code: 'TST-01', values: { fields: {}, rows: {} } });
+    await deleteShip(db, a.id);
+    expect(await db.formDrafts.get(mine.id)).toMatchObject({ deleted: true });
+    expect(await db.formPhotos.get(photo.id)).toMatchObject({ deleted: true, jpegBase64: '' });
+    expect(await db.formLastValues.get(last.id)).toMatchObject({ deleted: true });
+    expect(await db.formTemplates.get(template.id)).toEqual(template);
+    expect(await db.formDrafts.get(theirs.id)).toEqual(theirs);
+    expect(await db.formPhotos.get(theirPhoto.id)).toEqual(theirPhoto);
   });
 
   it('tombstones every record of the ship, stamped with the time and device, and nothing of other ships', async () => {

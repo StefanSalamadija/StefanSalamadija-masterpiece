@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TableName } from '../domain/types';
 import {
-  cleanDeviceName, DEVICE_NAME_MAX, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, parseReminderDays, PASSWORD_MISMATCH,
+  cleanDeviceName, DEVICE_NAME_MAX, INCLUDE_LIBRARY_LABEL, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, parseReminderDays, PASSWORD_MISMATCH,
   oldestRemovedNote, passwordProblems, REMINDER_ERROR, restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from './settingsView';
 
@@ -120,7 +120,10 @@ describe('snapshotDate', () => {
 
 describe('snapshotCountsText', () => {
   const counts = (over: Partial<Record<TableName, number>>): Record<TableName, number> =>
-    ({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, ...over });
+    ({
+      ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0,
+      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, ...over,
+    });
 
   it('lists what the snapshot holds, with the right plural', () => {
     expect(snapshotCountsText(counts({ ships: 1, crew: 12, voyages: 1, certificates: 30, clockChanges: 2 })))
@@ -133,17 +136,29 @@ describe('snapshotCountsText', () => {
     expect(snapshotCountsText(counts({ crewDocuments: 1 }))).toBe('1 crew document');
   });
 
+  it('counts the forms in the library, the form drafts and their photos after the rest, but not the last values', () => {
+    expect(snapshotCountsText(counts({ ships: 1, formTemplates: 3, formDrafts: 2, formLastValues: 4, formPhotos: 5 })))
+      .toBe('1 ship · 3 forms · 2 form drafts · 5 photos');
+    expect(snapshotCountsText(counts({ formTemplates: 1, formDrafts: 1, formPhotos: 1 }))).toBe('1 form · 1 form draft · 1 photo');
+  });
+
   it('leaves out what it does not hold', () => {
     expect(snapshotCountsText(counts({ ships: 1, clockChanges: 1 }))).toBe('1 ship · 1 clock change');
   });
 
   it('does not fail on a count a snapshot taken before a table existed does not have', () => {
-    const { crewDocuments: _none, ...before } = counts({ ships: 1 });
+    const { crewDocuments: _none, formTemplates: _t, formDrafts: _d, formLastValues: _l, formPhotos: _p, ...before } = counts({ ships: 1 });
     expect(snapshotCountsText(before as Record<TableName, number>)).toBe('1 ship');
   });
 
   it('says so when there is nothing', () => {
     expect(snapshotCountsText(counts({}))).toBe('No records');
+  });
+});
+
+describe('INCLUDE_LIBRARY_LABEL', () => {
+  it('is the words of the handover choice', () => {
+    expect(INCLUDE_LIBRARY_LABEL).toBe('Include forms library');
   });
 });
 
@@ -177,9 +192,9 @@ describe('oldestRemovedNote', () => {
 });
 
 describe('restoreExplanation', () => {
-  it('says what a restore puts back, the crew documents included, and from which snapshot', () => {
+  it('says what a restore puts back, the crew documents and the forms included, and from which snapshot', () => {
     expect(restoreExplanation({ createdAt: '2026-10-25T09:05:59.000Z', reason: 'before-import' })).toBe(
-      'This puts back the ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:05 UTC (Before import), in place of what is on this device now.',
+      'This puts back the ships, crew, crew documents, certificates, voyages, clock changes and forms of the snapshot from 2026-10-25 09:05 UTC (Before import), in place of what is on this device now.',
     );
   });
 

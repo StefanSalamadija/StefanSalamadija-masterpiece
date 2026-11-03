@@ -5,7 +5,7 @@ import {
   openBackup, readHeader, sealBackup, validatePassword,
 } from './envelope';
 import type { BackupHeader, BackupPayload } from './envelope';
-import type { CrewDocument, CrewMember } from '../domain/types';
+import type { CrewDocument, CrewMember, SyncRecord } from '../domain/types';
 
 const PW = 'lozinka-ćevapi';
 const FAST = { iterations: 1000 };
@@ -32,11 +32,24 @@ function docRec(patch: Partial<CrewDocument> = {}): CrewDocument {
 const H: BackupHeader = {
   format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-A', deviceName: 'Android device', exportedAt: '2026-10-25T10:00:00.000Z',
 };
+/** A form in the library, as a backup holds it: the file as base64, on the personal side. Invented. */
+const templateRec = (): SyncRecord => ({
+  id: 'tpl-1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'dev-A', deleted: false,
+  scope: 'personal', code: 'TST-01', title: 'Toolbox Talk — Š', revision: '00', kind: 'docx', fileName: 'toolbox.docx', fileBase64: 'UEsDBA==',
+  schema: { kind: 'docx', identity: { code: 'TST-01', title: 'Toolbox Talk — Š', revision: '00' }, fields: [], rowGroups: [], unsupported: [] },
+  setup: { links: {}, leftEmpty: [], helpers: { pickCrew: [], allOk: [], todayRow: [], startFromLast: [], jobLog: [], thresholds: [], now: [] }, okWord: 'Satisfactory', notFinished: '' },
+}) as SyncRecord;
 const P: BackupPayload = {
-  tables: { ships: [], crew: [crewRec({ surname: 'Šašić' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [docRec()] },
+  tables: {
+    ships: [], crew: [crewRec({ surname: 'Šašić' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [docRec()],
+    formTemplates: [templateRec()], formDrafts: [], formLastValues: [], formPhotos: [],
+  },
 };
-/** The tables of a backup made before crew documents existed. */
-const { crewDocuments: _added, ...VERSION_1_TABLES } = P.tables;
+/** The forms tables of a file made before they existed, as they are read: empty. */
+const NO_FORMS = { formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] };
+/** The tables of a backup made before crew documents existed, and of one made before the forms existed. */
+const { crewDocuments: _added, formTemplates: _t, formDrafts: _d, formLastValues: _l, formPhotos: _p, ...VERSION_1_TABLES } = P.tables;
+const VERSION_2_TABLES = { ...VERSION_1_TABLES, crewDocuments: P.tables.crewDocuments };
 
 /** Replace one character in the middle of a base64 string with a different base64 character. */
 function flipChar(s: string): string {
@@ -309,7 +322,23 @@ describe('sealBackup / openBackup', () => {
       const old = await sealBackup(H, { tables: { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [] } } as never, 'pw-12345678', { iterations: 1000 });
       expect((await openBackup(old, 'pw-12345678')).payload.tables.crewDocuments).toEqual([]);
       const withCrew = await sealBackup(H, { tables: VERSION_1_TABLES } as never, PW, FAST);
-      expect((await openBackup(withCrew, PW)).payload.tables).toEqual({ ...VERSION_1_TABLES, crewDocuments: [] });
+      expect((await openBackup(withCrew, PW)).payload.tables).toEqual({ ...VERSION_1_TABLES, crewDocuments: [], ...NO_FORMS });
+    });
+
+    it('opens a payload made before the forms existed, with the four forms tables empty', async () => {
+      const old = await sealBackup(H, { tables: VERSION_2_TABLES } as never, PW, FAST);
+      expect((await openBackup(old, PW)).payload.tables).toEqual({ ...VERSION_2_TABLES, ...NO_FORMS });
+    });
+
+    it('keeps the forms library of a file that has it', async () => {
+      expect((await openBackup(await sealedText(), PW)).payload.tables.formTemplates).toEqual([templateRec()]);
+    });
+
+    it.each(['formTemplates', 'formDrafts', 'formLastValues', 'formPhotos'])('rejects a %s table that is there but is not a list of records', async (table) => {
+      for (const rows of [{}, null, [{ updatedAt: 'x' }], [null]]) {
+        const plain = JSON.stringify({ tables: { ...VERSION_2_TABLES, [table]: rows } });
+        await expect(openBackup(await fileWithPlaintext(plain), PW)).rejects.toBeInstanceOf(DamagedFileError);
+      }
     });
 
     it('keeps the crew documents of a file that has them', async () => {

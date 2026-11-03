@@ -15,8 +15,11 @@ import { MAPPING_FIELDS } from './crewImportView';
  */
 
 export const MAX_DEVICE_NAME_SHOWN = 60;
-/** A backup is the data of a ship's office, a few megabytes at most. Anything bigger is not one, and is not read. */
-export const MAX_BACKUP_FILE_BYTES = 64 * 1024 * 1024;
+/**
+ * A backup is the data of a ship's office: a few megabytes, and some tens more with a library of forms and the photos of
+ * open drafts, kept as base64 inside it. Anything bigger is not one, and is not read.
+ */
+export const MAX_BACKUP_FILE_BYTES = 128 * 1024 * 1024;
 const MAX_TITLE = 80;
 const MAX_VALUE = 200;
 /** Shown for a value that is empty or missing. */
@@ -100,15 +103,30 @@ const CREW_DOCUMENT_LABELS: Record<string, string> = {
 };
 // A clock change is stored as an instant; the form's "Change at (ship's time)" is that instant on the ship's clock.
 const CLOCK_LABELS: Record<string, string> = { effectiveAt: 'Change at (UTC)', toOffsetMinutes: 'New offset', note: 'Note' };
+// A form in the library is told apart by its revision and how it is set up; its file and what was detected in it are not read here.
+const FORM_TEMPLATE_LABELS: Record<string, string> = { revision: 'Revision', setup: 'Setup' };
+const FORM_DRAFT_LABELS: Record<string, string> = { period: 'Period', values: 'Values' };
+const FORM_LAST_VALUES_LABELS: Record<string, string> = { values: 'Values' };
+const FORM_PHOTO_LABELS: Record<string, string> = { width: 'Width', height: 'Height' };
 
 const LABELS: Record<TableName, Record<string, string>> = {
   ships: PARTICULARS_LABELS, crew: CREW_LABELS, voyages: VOYAGE_LABELS, certificates: CERTIFICATE_LABELS, clockChanges: CLOCK_LABELS,
-  crewDocuments: CREW_DOCUMENT_LABELS,
+  crewDocuments: CREW_DOCUMENT_LABELS, formTemplates: FORM_TEMPLATE_LABELS, formDrafts: FORM_DRAFT_LABELS,
+  formLastValues: FORM_LAST_VALUES_LABELS, formPhotos: FORM_PHOTO_LABELS,
 };
 
-/** Bookkeeping that is never a change to show. A certificate's catalogue key is told by its name; the contract a document belongs to is not something the person edits. */
+/**
+ * Bookkeeping that is never a change to show. A certificate's catalogue key is told by its name; the contract a document
+ * belongs to is not something the person edits. Of a form, only the revision and the setup are shown: its code and title
+ * name it (in the title of the line), and its file and schema are data, not words. A draft's template and photo list,
+ * and a photo's draft and image, are the same kind of data.
+ */
 const BOOKKEEPING: ReadonlySet<string> = new Set(['id', 'createdAt', 'updatedAt', 'updatedBy', 'scope', 'shipId', 'deleted']);
-const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = { certificates: new Set(['key']), crewDocuments: new Set(['crewId']) };
+const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = {
+  certificates: new Set(['key']), crewDocuments: new Set(['crewId']),
+  formTemplates: new Set(['code', 'title', 'kind', 'fileName', 'fileBase64', 'schema']),
+  formDrafts: new Set(['templateId', 'code', 'photoIds']), formLastValues: new Set(['code']), formPhotos: new Set(['draftId', 'jpegBase64']),
+};
 
 /** The fields of a record that the review compares, by the name they have in the file. A ship's particulars are at the top level, with its other settings. */
 function valuesOf(table: TableName, record: SyncRecord): Values {
@@ -135,6 +153,23 @@ function columnsText(columns: unknown[]): string {
 
 const ETA_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
+/** "3 values entered": the values of a draft that someone has given, in its fields and in its rows. */
+function valuesText(values: Values): string {
+  const fields = isObject(values.fields) ? Object.values(values.fields) : [];
+  const groups = isObject(values.rows) ? Object.values(values.rows) : [];
+  const cells = groups.flatMap((rows) => (Array.isArray(rows) ? rows.flatMap((row) => (isObject(row) ? Object.values(row) : [])) : []));
+  const given = [...fields, ...cells].filter((value) => value !== null && value !== undefined && value !== '').length;
+  return given === 0 ? 'No values entered' : `${given} ${given === 1 ? 'value' : 'values'} entered`;
+}
+
+/** "2 filled for you · 1 left empty": what a form's setup does, counted. A field linked to nothing is not filled for you. */
+function setupText(setup: Values): string {
+  const links = isObject(setup.links) ? Object.values(setup.links) : [];
+  const filled = links.filter((link) => isObject(link) && link.source !== 'none').length;
+  const leftEmpty = Array.isArray(setup.leftEmpty) ? setup.leftEmpty.length : 0;
+  return `${filled} filled for you · ${leftEmpty} left empty`;
+}
+
 function show(key: string, value: unknown): string {
   if (value === undefined || value === null || value === '') return EMPTY_VALUE;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -150,6 +185,8 @@ function show(key: string, value: unknown): string {
   }
   if (key === 'crewListColumns' && Array.isArray(value)) return columnsText(value);
   if (key === 'crewImportMapping' && isObject(value) && isObject(value.byHeader)) return `${Object.keys(value.byHeader).length} mapped columns`;
+  if (key === 'values' && isObject(value)) return valuesText(value);
+  if (key === 'setup' && isObject(value)) return setupText(value);
   return plainText(JSON.stringify(value), MAX_VALUE);
 }
 
@@ -198,6 +235,14 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
     case 'crewDocuments': {
       const typeOther = typeof r.typeOther === 'string' ? r.typeOther : undefined;
       return `Document: ${nameOf(docLabel({ type: r.type as CrewDocType, typeOther }), '(no name)')}`;
+    }
+    // A form without a code is named by its title.
+    case 'formTemplates': return `Form ${nameOf(r.code, nameOf(r.title, '(no code)'))}`;
+    case 'formDrafts': return `Form draft: ${nameOf(r.code, '(no code)')} — ${nameOf(r.period, '(no period)')}`;
+    case 'formLastValues': return `Last values: ${nameOf(r.code, '(no code)')}`;
+    case 'formPhotos': {
+      const size = [r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n));
+      return size ? `Photo: ${String(r.width)} × ${String(r.height)}` : 'Photo';
     }
   }
 }

@@ -13,6 +13,8 @@ export interface ExportRequest {
   shipId: string;
   /** Keep the password in memory until the app is closed, so the next full export can use it. Never done for a handover. */
   remember: boolean;
+  /** A handover only: put the forms library into the file too (see `collectHandover`). A full backup always has it. */
+  includeLibrary?: boolean;
   /** Only for tests: the key derivation takes a moment at its real cost. */
   iterations?: number;
 }
@@ -24,8 +26,8 @@ export interface ExportRequest {
  * never recorded. The password of a handover file is its own: it is never remembered, and the remembered one is left alone.
  */
 export async function exportAndShare(db: MasterpieceDB, request: ExportRequest): Promise<ExportOutcome> {
-  const { kind, password, shipId, remember, iterations } = request;
-  const { fileName, text, exportedAt } = await exportBackup(db, kind, password, { shipId, iterations });
+  const { kind, password, shipId, remember, includeLibrary, iterations } = request;
+  const { fileName, text, exportedAt } = await exportBackup(db, kind, password, { shipId, includeLibrary, iterations });
   if (kind === 'full') {
     if (remember) rememberPassword(password);
     else forgetPassword();

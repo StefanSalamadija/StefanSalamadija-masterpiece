@@ -2,7 +2,8 @@ import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type {
-  Certificate, ClockChange, CrewDocument, CrewMember, Settings, ShipProfile, Snapshot, SyncRecord, TableName, Voyage,
+  Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, Settings, ShipProfile, Snapshot,
+  SyncRecord, TableName, Voyage,
 } from '../domain/types';
 import { connectionWatch } from './connection';
 import { snapshotInUpgrade } from './snapshots';
@@ -24,6 +25,10 @@ export class MasterpieceDB extends Dexie {
   declare certificates: Table<Certificate, string>;
   declare clockChanges: Table<ClockChange, string>;
   declare crewDocuments: Table<CrewDocument, string>;
+  declare formTemplates: Table<FormTemplate, string>;
+  declare formDrafts: Table<FormDraft, string>;
+  declare formLastValues: Table<FormLastValues, string>;
+  declare formPhotos: Table<FormPhoto, string>;
   declare settings: Table<Settings, 'device'>;
   declare snapshots: Table<Snapshot, string>;
 
@@ -40,6 +45,16 @@ export class MasterpieceDB extends Dexie {
     });
     // Crew documents. The upgrade saves the data as it was before this version touched it; the tables of version 1 stay as they are.
     this.version(2).stores({ crewDocuments: 'id, shipId, crewId' }).upgrade(async (tx) => {
+      await snapshotInUpgrade(tx);
+    });
+    // SMS forms: the library of templates (personal, so not indexed by ship), and each ship's drafts, last values and photos.
+    // An upgrade from version 1 runs both upgrades in one transaction; `snapshotInUpgrade` then saves the data only once.
+    this.version(3).stores({
+      formTemplates: 'id, code',
+      formDrafts: 'id, shipId, templateId',
+      formLastValues: 'id, shipId, code',
+      formPhotos: 'id, shipId, draftId',
+    }).upgrade(async (tx) => {
       await snapshotInUpgrade(tx);
     });
   }

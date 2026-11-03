@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { saveTemplate } from '../db/forms';
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
 import { getSettings } from '../db/settings';
 import { createShip } from '../db/ships';
-import { readHeader } from './envelope';
+import { openBackup, readHeader } from './envelope';
 import { exportAndShare } from './exportFlow';
 import { forgetPassword, getRememberedPassword, rememberPassword } from './passwordCache';
 import { shareOrDownload } from './share';
@@ -86,6 +87,23 @@ describe('exportAndShare, a full backup', () => {
 });
 
 describe('exportAndShare, a handover file', () => {
+  it('carries the forms library only when asked to', async () => {
+    share.mockResolvedValue('downloaded');
+    await saveTemplate(db, {
+      fileName: 'toolbox.docx', bytes: new Uint8Array([80, 75, 3, 4]), kind: 'docx',
+      schema: { kind: 'docx', identity: { code: 'TST-01', title: 'Toolbox Talk', revision: '00' }, fields: [], rowGroups: [], unsupported: [] },
+      setup: { links: {}, leftEmpty: [], helpers: { pickCrew: [], allOk: [], todayRow: [], startFromLast: [], jobLog: [], thresholds: [], now: [] }, okWord: 'Satisfactory', notFinished: '' },
+    });
+    const templatesIn = async (includeLibrary: boolean): Promise<string[]> => {
+      share.mockClear();
+      await exportAndShare(db, { kind: 'handover', password: 'relief-pass-1', shipId, remember: false, includeLibrary, ...FAST });
+      const { payload } = await openBackup(sharedText(share.mock.calls[0]), 'relief-pass-1');
+      return payload.tables.formTemplates.map((t) => (t as { code: string }).code);
+    };
+    expect(await templatesIn(true)).toEqual(['TST-01']);
+    expect(await templatesIn(false)).toEqual([]);
+  });
+
   it('is not a full backup: it records nothing, whatever happened to the file', async () => {
     for (const outcome of ['shared', 'downloaded', 'cancelled'] as const) {
       share.mockResolvedValue(outcome);

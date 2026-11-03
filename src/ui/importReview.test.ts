@@ -378,8 +378,8 @@ describe('conflictViews', () => {
   });
 
   it('works on a plan the merge made', () => {
-    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
-    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
+    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] };
+    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] };
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
@@ -387,7 +387,9 @@ describe('conflictViews', () => {
 });
 
 describe("a merge of the contract length, the planned relief, the ship's limit and its crew list columns", () => {
-  const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], ...extra });
+  const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
+    formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], ...extra,
+  });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');
   const planned = { reliefPlannedDate: '2026-11-05', reliefPlannedPort: 'Santos' };
@@ -491,7 +493,7 @@ describe('unresolvedCount', () => {
 
 describe('isTooBigForBackup', () => {
   it('turns away a file too big to be a backup, so that picking a video by mistake does not read it all into memory', () => {
-    expect(MAX_BACKUP_FILE_BYTES).toBe(64 * 1024 * 1024);
+    expect(MAX_BACKUP_FILE_BYTES).toBe(128 * 1024 * 1024);
     expect(isTooBigForBackup(0)).toBe(false);
     expect(isTooBigForBackup(5 * 1024 * 1024)).toBe(false);
     expect(isTooBigForBackup(MAX_BACKUP_FILE_BYTES)).toBe(false);
@@ -512,7 +514,7 @@ describe('shownFileName', () => {
 
 describe('TOO_LARGE_MESSAGE', () => {
   it('says that the file is too big, in megabytes of the limit', () => {
-    expect(TOO_LARGE_MESSAGE).toBe('This file is too large to be a Masterpiece backup (over 64 MB).');
+    expect(TOO_LARGE_MESSAGE).toBe('This file is too large to be a Masterpiece backup (over 128 MB).');
   });
 });
 
@@ -529,5 +531,70 @@ describe('changedFields compares values like the merge does', () => {
     const one = { byHeader: { surname: 'surname' }, dateFormat: 'day-first', ignored: ['a', 'b'] };
     expect(changedFields('ships', ship(one), ship({ ...one, byHeader: { surname: 'rank' } }))).toHaveLength(1);
     expect(changedFields('ships', ship(one), ship({ ...one, ignored: ['b', 'a'] }))).toHaveLength(1);
+  });
+});
+
+describe('forms in the review', () => {
+  const setup = (extra: object = {}) => ({
+    links: { f1: { source: 'vessel.name' }, f2: { source: 'time.date' }, f3: { source: 'none' } }, leftEmpty: ['f9'],
+    helpers: { pickCrew: [], allOk: [], todayRow: [], startFromLast: [], jobLog: [], thresholds: [], now: [] }, okWord: 'Satisfactory',
+    notFinished: '', ...extra,
+  });
+  const template = (extra: object = {}): SyncRecord => rec({
+    scope: 'personal', code: 'TST-01', title: 'Toolbox Talk', revision: '00 / 01.01.2026', kind: 'docx', fileName: 'toolbox.docx',
+    fileBase64: 'AAEC', schema: { kind: 'docx', fields: [] }, setup: setup(), ...extra,
+  });
+  const values = (vessel: string | null) => ({ fields: { f1: vessel, f2: '2026-10-28', f3: null }, rows: { g1: [{ 'g1.c1': 'Ivan', 'g1.c2': '' }] } });
+  const draft = (extra: object = {}): SyncRecord => rec({
+    shipId: 's1', templateId: 't1', code: 'TST-01', period: '2026-10-28', values: values('MV OCEAN STAR'), photoIds: [], ...extra,
+  });
+
+  it('names a template by its code, a draft by its code and period, last values by the code, and a photo by its size', () => {
+    expect(recordTitle('formTemplates', template())).toBe('Form TST-01');
+    expect(recordTitle('formDrafts', draft())).toBe('Form draft: TST-01 — 2026-10-28');
+    expect(recordTitle('formLastValues', rec({ shipId: 's1', code: 'TST-01', values: values(null) }))).toBe('Last values: TST-01');
+    expect(recordTitle('formPhotos', rec({ shipId: 's1', draftId: 'd1', jpegBase64: '', width: 1600, height: 1200 }))).toBe('Photo: 1600 × 1200');
+  });
+
+  it('names a form that has no code by its title, and is never fooled by what the file holds', () => {
+    expect(recordTitle('formTemplates', template({ code: '' }))).toBe('Form Toolbox Talk');
+    expect(recordTitle('formTemplates', template({ code: '', title: '' }))).toBe('Form (no code)');
+    expect(recordTitle('formTemplates', template({ code: '<b>X</b>\u202E' }))).toBe('Form <b>X</b>');
+    expect(recordTitle('formDrafts', draft({ code: 7, period: { a: 1 } }))).toBe('Form draft: (no code) — (no period)');
+    expect(recordTitle('formLastValues', rec({ shipId: 's1' }))).toBe('Last values: (no code)');
+    expect(recordTitle('formPhotos', rec({ shipId: 's1', width: 'big' }))).toBe('Photo');
+  });
+
+  it('shows a template conflict as its revision and its setup, never the file or the detected fields', () => {
+    const local = template();
+    const incoming = template({
+      revision: '01 / 01.06.2026', fileBase64: 'AQID', schema: { kind: 'docx', fields: [{ id: 'f1' }] }, fileName: 'toolbox-rev01.docx',
+      setup: setup({ links: { f1: { source: 'vessel.name' } }, leftEmpty: [] }),
+    });
+    expect(changedFields('formTemplates', local, incoming)).toEqual([
+      { label: 'Revision', local: '00 / 01.01.2026', incoming: '01 / 01.06.2026' },
+      { label: 'Setup', local: '2 filled for you · 1 left empty', incoming: '1 filled for you · 0 left empty' },
+    ]);
+    expect(changedFields('formTemplates', local, template({ fileBase64: 'AQID', title: 'Other', kind: 'dotx' }))).toEqual([]);
+  });
+
+  it('shows a draft conflict as its period and how many values it holds', () => {
+    expect(changedFields('formDrafts', draft(), draft({ period: '2026-10-29', values: values(null), photoIds: ['p1'], templateId: 't2' }))).toEqual([
+      { label: 'Period', local: '2026-10-28', incoming: '2026-10-29' },
+      { label: 'Values', local: '3 values entered', incoming: '2 values entered' },
+    ]);
+    expect(changedFields('formLastValues', rec({ shipId: 's1', code: 'A', values: { fields: { f1: true }, rows: {} } }), rec({ shipId: 's1', code: 'A', values: { fields: {}, rows: {} } })))
+      .toEqual([{ label: 'Values', local: '1 value entered', incoming: 'No values entered' }]);
+  });
+
+  it('lists a form deletion by what it is', () => {
+    const p = plan([item('delete', 'formDrafts', draft(), draft({ deleted: true }))]);
+    expect(deletionTitles(p)).toEqual(['Form draft: TST-01 — 2026-10-28']);
+  });
+
+  it('shows a deleted photo as a status change only, without the image', () => {
+    const photo = (extra: object) => rec({ shipId: 's1', draftId: 'd1', jpegBase64: '/9j/', width: 10, height: 10, ...extra });
+    expect(changedFields('formPhotos', photo({}), photo({ deleted: true, jpegBase64: '' })))
+      .toEqual([{ label: 'Status', local: 'Active', incoming: 'Deleted' }]);
   });
 });

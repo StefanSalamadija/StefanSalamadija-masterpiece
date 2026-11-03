@@ -21,8 +21,9 @@ const FORMAT = 'masterpiece-backup';
 const KINDS: readonly string[] = ['full', 'handover'];
 const MIN_PASSWORD_LENGTH = 8;
 /**
- * The tables every backup file has. A table added after the first release (`crewDocuments`) is not in this list: a file
- * made before it lacks it, and it is read as empty. The file format itself, and its version, do not change.
+ * The tables every backup file has. A table added after the first release (`crewDocuments`, and the four forms tables) is
+ * not in this list: a file made before it lacks it, and it is read as empty. The file format itself, and its version, do
+ * not change.
  */
 const FIRST_TABLES: readonly TableName[] = ['ships', 'crew', 'voyages', 'certificates', 'clockChanges'];
 
