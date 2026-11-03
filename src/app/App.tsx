@@ -27,6 +27,7 @@ import { Settings } from '../ui/screens/Settings';
 import { ShipTime } from '../ui/screens/ShipTime';
 import { Voyage } from '../ui/screens/Voyage';
 import { AppStateProvider, useAppState } from './AppState';
+import { lazyScreen } from './lazyScreen';
 import { gateScreen } from './lockGate';
 import { useRoute } from './router';
 import type { RoutePath } from './router';
@@ -53,6 +54,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/time': ShipTime,
   '/forms': Forms,
   '/forms/:id/setup': FormSetup,
+  // Loaded on demand, so that the fill screen and its helpers stay out of the main chunk.
+  '/forms/:id/fill': lazyScreen(() => import('../ui/screens/FormFill').then((m) => m.FormFill)),
   '/profiles': Profiles,
   '/settings': Settings,
   '/settings/import': ImportBackup,

@@ -1998,3 +1998,119 @@ textarea {
   padding-left: 20px;
   list-style: disc;
 }
+
+/* ---- Fill a form ---- */
+
+.fill-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.fill-form > h2 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.fill-period {
+  margin: -12px 0 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.fill-section,
+.fill-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fill-section h3 {
+  margin: 8px 0 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.fill-group h4 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.fill-group:focus {
+  outline: none;
+}
+
+.fill-group .empty {
+  margin: 0;
+}
+
+/* A fieldset is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
+.fill-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.fill-row legend {
+  padding: 0 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fill-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fill-field,
+.fill-field label,
+.field-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.auto-mark {
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.segmented .btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}

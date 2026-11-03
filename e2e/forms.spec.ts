@@ -1,8 +1,13 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Download, Page } from '@playwright/test';
+import { detectExcel } from '../src/forms/excel/detect';
+import { readExcelValues } from '../src/forms/excel/read';
+import { readPackage } from '../src/forms/package';
 import { oddLayoutsDocx } from '../src/forms/testing/wordFixtures';
+import { detectWord } from '../src/forms/word/detect';
+import { readWordValues } from '../src/forms/word/read';
 import { writeFormFixtures } from './fixtures/makeForms';
 import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 
@@ -299,4 +304,188 @@ test('a setup left open while another tab imports a new revision says at once th
   const [template] = await stored(page, 'formTemplates');
   expect(template.revision).toBe('01 / 01.06.2026');
   expect(template.schema.fields.map((f: { label: string }) => f.label)).toContain('Location');
+});
+
+/* ---- Part 2: the fill screen and making the file (Task 15) ---- */
+
+const SHARE_CANCELLED = 'File not shared — your draft is still here.';
+
+/** Imports a form, saves its setup as suggested, and opens its fill screen from the library. */
+async function openFillOf(page: Page, file: string, heading: string): Promise<void> {
+  await openForms(page);
+  await importFile(page, file);
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(page.getByRole('status')).toHaveText('Form saved.');
+  await library(page).getByRole('link', { name: new RegExp(`^${heading.split(' ')[0]} · `) }).click();
+  await expect(page).toHaveURL(/#\/forms\/[^/]+\/fill$/);
+  await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+}
+
+async function downloaded(download: Download): Promise<Uint8Array> {
+  const path = await download.path();
+  if (path === null) throw new Error('The download has no file.');
+  return new Uint8Array(await fs.readFile(path));
+}
+
+/** The ship's live drafts, as stored. */
+async function liveDrafts(page: Page): Promise<Record<string, any>[]> {
+  return (await stored(page, 'formDrafts')).filter((d) => !d.deleted);
+}
+
+test('a draft opens with its auto values, keeps every change, and Make file gives the form filled in', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  await expect(page.getByText('25-OCT-2026', { exact: true })).toBeVisible(); // the period line
+
+  // Filled in from the ship and the ship's clock (UTC+03:00), marked Auto, and editable.
+  const vessel = page.getByLabel('Vessel', { exact: true });
+  await expect(vessel).toHaveValue('MV OCEAN STAR');
+  await expect(vessel).toHaveAccessibleDescription('Auto');
+  await expect(page.getByLabel('Date', { exact: true })).toHaveValue('2026-10-25');
+  await expect(page.getByLabel('Time', { exact: true })).toHaveValue(/^12:0\d$/);
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('');
+  // The participants' Signature column is signed by hand: it is not asked for.
+  const participants = section(page, 'Participants');
+  await expect(participants.getByText('No rows yet.')).toBeVisible();
+  await expectNoHorizontalScroll(page);
+
+  const subject = 'Fire drill & <muster> "Šćđ"';
+  await page.getByLabel('Subject', { exact: true }).fill(subject);
+  await vessel.fill('MV SEA BREEZE'); // an edit wins over the auto value
+  await expect(vessel).not.toHaveAccessibleDescription('Auto');
+  await participants.getByRole('button', { name: 'Add row' }).click();
+  await expect(participants.getByRole('group', { name: 'Row 1' }).getByLabel('Name')).toBeFocused();
+  await participants.getByRole('group', { name: 'Row 1' }).getByLabel('Name').fill('Ann Lee');
+  await participants.getByRole('group', { name: 'Row 1' }).getByLabel('Rank').fill('Bosun');
+  await participants.getByRole('button', { name: 'Add row' }).click();
+  await participants.getByRole('group', { name: 'Row 2' }).getByLabel('Name').fill('Ben Ode');
+  await participants.getByRole('group', { name: 'Row 2' }).getByRole('button', { name: 'Remove' }).click();
+  await expect(participants.getByRole('group')).toHaveCount(1);
+  await expect(participants.getByLabel('Signature')).toHaveCount(0);
+
+  // Saved as it is typed: after a reload the draft has it all, and the edited Vessel stays edited.
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values).toEqual({
+    fields: { f1: 'MV SEA BREEZE', f2: subject },
+    rows: { g1: [{ 'g1.c1': 'Ann Lee', 'g1.c2': 'Bosun' }] },
+  });
+  await page.reload();
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue(subject);
+  await expect(page.getByLabel('Vessel', { exact: true })).toHaveValue('MV SEA BREEZE');
+  await expect(page.getByLabel('Vessel', { exact: true })).not.toHaveAccessibleDescription('Auto');
+  await expect(page.getByLabel('Date', { exact: true })).toHaveAccessibleDescription('Auto');
+  await expectNoHorizontalScroll(page);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('TST-01 Toolbox Talk 2026-10-25.docx');
+  // Read back with the template's own field addresses, as the app's check does.
+  const schema = detectWord(readPackage(new Uint8Array(await fs.readFile(paths['toolbox.docx']))), 'docx', 'toolbox.docx');
+  const back = readWordValues(readPackage(await downloaded(file)), schema);
+  expect(back.fields.f1).toBe('MV SEA BREEZE');
+  expect(back.fields.f2).toBe(subject);
+  expect(back.fields.f3).toBe('2026-10-25');
+  expect(back.fields.f4).toMatch(/^12:0\d$/);
+  expect(back.rows.g1[0]).toMatchObject({ 'g1.c1': 'Ann Lee', 'g1.c2': 'Bosun' });
+
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(page.getByRole('status')).toHaveText('File made: TST-01 Toolbox Talk 2026-10-25.docx');
+  await expect(page.getByText('No drafts in progress.')).toBeVisible();
+  expect(await liveDrafts(page)).toEqual([]);
+  const [last] = await stored(page, 'formLastValues');
+  expect(last.values.fields).toMatchObject({ f1: 'MV SEA BREEZE', f2: subject, f3: '2026-10-25' });
+});
+
+test('cancelled_share_keeps_draft: a share sheet closed after Make file keeps the draft and its values', async ({ page }) => {
+  // A phone with a share sheet, which the person closes: the browser rejects the share with an AbortError.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true, value: () => Promise.reject(new DOMException('Share canceled', 'AbortError')),
+    });
+  });
+  await freshApp(page); await setupShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  await page.getByLabel('Subject', { exact: true }).fill('Boat drill');
+  const downloads: Download[] = [];
+  page.on('download', (d) => downloads.push(d));
+
+  await page.getByRole('button', { name: 'Make file' }).click();
+  await expect(page.getByRole('status')).toHaveText(SHARE_CANCELLED);
+  await expect(page.getByRole('heading', { name: 'TST-01 Toolbox Talk', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Boat drill');
+  await expect(page.getByRole('button', { name: 'Make file' })).not.toHaveAttribute('aria-disabled');
+  expect(downloads).toEqual([]); // not downloaded instead
+  expect(await stored(page, 'formLastValues')).toEqual([]); // the last values are not updated
+  await expectNoHorizontalScroll(page);
+
+  // The draft is still in progress, with what was typed: leaving the screen saved it.
+  await page.getByLabel('Subject', { exact: true }).fill('Boat drill, port side');
+  await openForms(page);
+  const drafts = page.getByRole('list', { name: 'In progress' });
+  await expect(drafts.getByRole('listitem')).toHaveText(['TST-01 Toolbox Talk — 25-OCT-2026']);
+  await drafts.getByRole('link').click();
+  await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Boat drill, port side');
+  expect(await liveDrafts(page)).toHaveLength(1);
+
+  // Discard asks first; Cancel keeps it, Discard draft throws it away.
+  await page.getByRole('button', { name: 'Discard draft' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Discard this draft?' });
+  await expect(dialog).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await liveDrafts(page)).toHaveLength(1);
+  await page.getByRole('button', { name: 'Discard draft' }).click();
+  await page.getByRole('dialog', { name: 'Discard this draft?' }).getByRole('button', { name: 'Discard draft' }).click();
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(page.getByRole('status')).toHaveText('Draft discarded.');
+  await expect(page.getByText('No drafts in progress.')).toBeVisible();
+  expect(await liveDrafts(page)).toEqual([]);
+  expect(await stored(page, 'formLastValues')).toEqual([]);
+});
+
+test('a 120-row inventory fills: every row is there, it scrolls to the end, and the last row is saved and written', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openFillOf(page, 'inventory.xlsx', 'TST-11 Demo Inventory');
+  const rows = page.getByRole('group', { name: /^Item \d{3}$/ });
+  await expect(rows).toHaveCount(120);
+  // A table that names its rows has them all, always: no Add row and no Remove.
+  await expect(page.getByRole('button', { name: 'Add row' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Remove' })).toHaveCount(0);
+  await expect(page.getByLabel('Signature C/O')).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+
+  const last = page.getByRole('group', { name: 'Item 120' });
+  await last.getByLabel('Qty').fill('7,5');
+  await expect(last.getByLabel('Qty')).toBeInViewport();
+  await page.getByRole('button', { name: 'Make file' }).scrollIntoViewIfNeeded();
+  const atEnd = await page.evaluate(() => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2);
+  expect(atEnd).toBe(true);
+  const [template] = await stored(page, 'formTemplates');
+  const group = template.schema.rowGroups[0].id as string;
+  const qty = 'Demo inventory!g1.E';
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows[group]?.[119]?.[qty]).toBe('7,5');
+
+  // A number is checked once the field is left, and Make file goes to it.
+  const first = page.getByRole('group', { name: 'Item 001' });
+  await first.getByLabel('Qty').fill('lots');
+  await expect(first.getByRole('alert')).toHaveCount(0);
+  await first.getByLabel('Specification').focus();
+  await expect(first.getByRole('alert')).toHaveText('Enter a number, such as 12.5 or 12,5.');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  await expect(first.getByLabel('Qty')).toBeFocused();
+  await first.getByLabel('Qty').fill('3');
+  await expect(first.getByRole('alert')).toHaveCount(0);
+
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('TST-11 Demo Inventory 2026-10-25.xlsx');
+  const schema = detectExcel(readPackage(new Uint8Array(await fs.readFile(paths['inventory.xlsx']))), 'inventory.xlsx');
+  const back = readExcelValues(readPackage(await downloaded(file)), schema);
+  expect(String(back.rows[group][119][qty])).toMatch(/^7[.,]5$/);
+  expect(String(back.rows[group][0][qty])).toBe('3');
+  expect(back.fields['Demo inventory!C6']).toBe('MV OCEAN STAR');
+  await expect(page.getByRole('status')).toHaveText('File made: TST-11 Demo Inventory 2026-10-25.xlsx');
 });
