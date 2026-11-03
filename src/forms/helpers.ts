@@ -71,7 +71,7 @@ function checklistColumn(g: RowGroupDef): FieldDef | undefined {
 }
 
 /** The date, status, picture and photo columns of a job log group, or `undefined` when the group is not one. */
-function jobColumns(g: RowGroupDef): { date: FieldDef; status: FieldDef; cleared: FieldDef[] } | undefined {
+export function jobLogColumns(g: RowGroupDef): { date: FieldDef; status: FieldDef; cleared: FieldDef[] } | undefined {
   if (!g.growable) return undefined;
   const date = g.columns.find((c) => c.kind === 'date' || norm(c) === 'date');
   const status = g.columns.find((c) => c.kind !== 'picture' && norm(c).split(' ').includes('status'));
@@ -86,7 +86,7 @@ function jobColumns(g: RowGroupDef): { date: FieldDef; status: FieldDef; cleared
  * neither, so it is never a job log and `rolloverJobs` never carries it; that is how the photos are cleared.
  */
 export function isJobLogGroup(group: RowGroupDef): boolean {
-  return jobColumns(group) !== undefined;
+  return jobLogColumns(group) !== undefined;
 }
 
 /** Columns that never hold a gas reading: times, dates, units, names, remarks. */
@@ -288,7 +288,7 @@ export function defaultNotFinished(options: string[]): string {
 export function defaultSetup(schema: FormSchema): FormSetup {
   const helpers = suggestHelpers(schema);
   const jobs = schema.rowGroups.find((g) => g.id === helpers.jobLog[0]);
-  const status = jobs === undefined ? undefined : jobColumns(jobs)?.status;
+  const status = jobs === undefined ? undefined : jobLogColumns(jobs)?.status;
   return {
     links: suggestLinks(schema),
     leftEmpty: [
@@ -308,7 +308,7 @@ export function defaultSetup(schema: FormSchema): FormSetup {
  * as it was. A group that is not a job log (the pictures group of the weekly form) carries nothing: only the jobs group is rolled over.
  */
 export function rolloverJobs(group: RowGroupDef, rows: Record<string, FormValue>[], notFinished: string): Record<string, FormValue>[] {
-  const cols = jobColumns(group);
+  const cols = jobLogColumns(group);
   if (cols === undefined || notFinished === '') return [];
   const cleared = new Set(cols.cleared.map((c) => c.id));
   return rows

@@ -1,7 +1,9 @@
 import { Component } from 'preact';
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
-import type { FormKind, FormValue, RowGroupDef } from '../../forms/types';
+import type { FieldDef, FormKind, FormValue, RowGroupDef } from '../../forms/types';
 import { canAddRow, isFixedRows, rowCount, rowTitle, visibleColumns } from '../formFill';
+import { remarksShown, shownRows } from '../formHelpers';
+import type { RemarksRule } from '../formHelpers';
 import { FormField } from './FormField';
 
 /*
@@ -11,8 +13,30 @@ import { FormField } from './FormField';
  * all of them, always, and has neither.
  *
  * A form can have long tables (an inventory of 120 rows), so a row is drawn again only when its own values, its errors
- * or its place change, not on every key typed elsewhere.
+ * or its place change, not on every key typed elsewhere. What the helpers add to a row (`RowExtras`) is therefore worked
+ * out from the row's own values only.
  */
+
+/** What the helpers add to a table (spec §7). All of it is optional. */
+export interface RowExtras {
+  /** The columns that have a `Now` button, and what it does. */
+  nowColumns?: ReadonlySet<string>;
+  onNow?: (index: number, column: FieldDef) => void;
+  /** An alarm warning for a cell, from its value. */
+  warningFor?: (column: FieldDef, value: FormValue) => string | undefined;
+  /** `Last: <value>` for a cell, from its value. */
+  lastFor?: (index: number, column: FieldDef, value: FormValue) => string | undefined;
+  /** A column offered as a choice among these (the people onboard). */
+  choicesFor?: (column: FieldDef) => string[] | undefined;
+  /** A checklist's Remarks column is shown under a row that is not OK only. */
+  remarks?: RemarksRule;
+  /** A day grid opens on today's row (`row`); `all` shows every day. */
+  today?: { row: number; all: boolean; onToggle: () => void };
+  /** The text of the button that adds a row, `Add row` unless it is a job log (`Add job`). */
+  addLabel?: string;
+  /** `Add from crew`. */
+  onAddCrew?: () => void;
+}
 
 export interface RowGroupProps {
   group: RowGroupDef;
@@ -31,6 +55,7 @@ export interface RowGroupProps {
   onLeave: (index: number, columnId: string) => void;
   /** The `data-key` of a cell's input. */
   keyFor: (index: number, columnId: string) => string;
+  extras?: RowExtras;
 }
 
 interface RowProps {
@@ -58,17 +83,25 @@ class Row extends Component<RowProps> {
 
   render() {
     const { group, index, title, row, errors, removable } = this.props;
+    const extras = this.props.parent.extras;
+    const rule = extras?.remarks;
     return (
       <fieldset class="fill-row" data-row={index}>
         <legend>{title}</legend>
-        {visibleColumns(group).map((column) => (
-          <FormField
-            key={column.id} field={column} value={row?.[column.id] ?? null} error={errors?.[column.id]}
-            dataKey={this.props.parent.keyFor(index, column.id)}
-            onChange={(value) => this.props.parent.onCell(index, column.id, value)}
-            onLeave={() => this.props.parent.onLeave(index, column.id)}
-          />
-        ))}
+        {visibleColumns(group).filter((c) => !(rule && c.id === rule.remarks && !remarksShown(rule, row))).map((column) => {
+          const value = row?.[column.id] ?? null;
+          return (
+            <FormField
+              key={column.id} field={column} value={value} error={errors?.[column.id]}
+              dataKey={this.props.parent.keyFor(index, column.id)}
+              onChange={(next) => this.props.parent.onCell(index, column.id, next)}
+              onLeave={() => this.props.parent.onLeave(index, column.id)}
+              onNow={extras?.nowColumns?.has(column.id) ? () => extras.onNow?.(index, column) : undefined}
+              warning={extras?.warningFor?.(column, value)} last={extras?.lastFor?.(index, column, value)}
+              choices={extras?.choicesFor?.(column)}
+            />
+          );
+        })}
         {removable && (
           <div class="fill-row-actions">
             <button type="button" class="btn btn-outline btn-small" onClick={() => this.props.parent.onRemove(index)}>Remove</button>
@@ -80,7 +113,7 @@ class Row extends Component<RowProps> {
 }
 
 export function RowGroup(props: RowGroupProps) {
-  const { group, kind, rows, showLabel, errorFor } = props;
+  const { group, kind, rows, showLabel, errorFor, extras } = props;
   const headingId = useId();
   const box = useRef<HTMLDivElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
@@ -90,11 +123,22 @@ export function RowGroup(props: RowGroupProps) {
   const count = rowCount(group, rows);
   const canAdd = canAddRow(group, kind, count);
   const columns = visibleColumns(group);
+  /** The data-key of a cell to focus once the rows are drawn: the Remarks of a row just answered with something that is not OK. */
+  const focusCell = useRef<string | undefined>(undefined);
+  const rule = extras?.remarks;
   const parent: RowGroupProps = {
     ...props,
     onRemove: (index) => {
       focusNext.current = 'add';
       props.onRemove(index);
+    },
+    onCell: (index, columnId, value) => {
+      // Choosing an answer that is not OK opens the row's Remarks and moves to it (typing one does not: the focus stays in the answer).
+      const column = columns.find((c) => c.id === columnId);
+      if (rule && columnId === rule.status && column?.kind === 'choice' && !remarksShown(rule, rows[index]) && remarksShown(rule, { ...rows[index], [columnId]: value })) {
+        focusCell.current = props.keyFor(index, rule.remarks);
+      }
+      props.onCell(index, columnId, value);
     },
   };
 
@@ -106,11 +150,27 @@ export function RowGroup(props: RowGroupProps) {
     else box.current?.querySelector<HTMLElement>(`[data-row="${next.row}"] :is(input, select, textarea, button)`)?.focus();
   }, [count]);
 
+  useLayoutEffect(() => {
+    const key = focusCell.current;
+    focusCell.current = undefined;
+    if (key !== undefined) box.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.focus();
+  }, [rows]);
+
+  const today = extras?.today;
+  const only = today && !today.all ? today.row : undefined;
+
   return (
     <div ref={box} class="fill-group" tabIndex={-1} aria-labelledby={showLabel ? headingId : undefined} role={showLabel ? 'group' : undefined}>
       {showLabel && <h4 id={headingId}>{group.label}</h4>}
+      {today && (
+        <div class="fill-row-actions">
+          <button type="button" class="btn btn-outline btn-small" onClick={today.onToggle}>
+            {today.all ? 'Show today only' : 'Show all days'}
+          </button>
+        </div>
+      )}
       {count === 0 && <p class="empty">No rows yet.</p>}
-      {Array.from({ length: count }, (_, i) => {
+      {shownRows(count, only).map((i) => {
         const errors: Record<string, string> = {};
         for (const c of columns) {
           const e = errorFor(i, c.id);
@@ -123,17 +183,20 @@ export function RowGroup(props: RowGroupProps) {
           />
         );
       })}
-      {canAdd && (
+      {(canAdd || extras?.onAddCrew) && (
         <div class="fill-row-actions">
-          <button
-            ref={addButton} type="button" class="btn btn-outline btn-small"
-            onClick={() => {
-              focusNext.current = { row: count };
-              props.onAdd();
-            }}
-          >
-            Add row
-          </button>
+          {canAdd && (
+            <button
+              ref={addButton} type="button" class="btn btn-outline btn-small"
+              onClick={() => {
+                focusNext.current = { row: count };
+                props.onAdd();
+              }}
+            >
+              {extras?.addLabel ?? 'Add row'}
+            </button>
+          )}
+          {extras?.onAddCrew && <button type="button" class="btn btn-outline btn-small" onClick={extras.onAddCrew}>Add from crew</button>}
         </div>
       )}
     </div>

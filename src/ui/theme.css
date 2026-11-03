@@ -2124,3 +2124,49 @@ textarea {
   color: var(--on-accent);
   font-weight: 600;
 }
+
+/* ---- Helpers on the fill screen ---- */
+
+/* An input with a button beside it (Now): the input takes the room that is left. */
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.input-row > :is(input, textarea) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fill-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+.crew-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crew-pick .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+}

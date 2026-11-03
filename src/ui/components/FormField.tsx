@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useId } from 'preact/hooks';
+import { useId, useState } from 'preact/hooks';
 import type { FieldDef, FormValue } from '../../forms/types';
 import { choiceControl, isLongText } from '../formFill';
 
@@ -9,8 +9,12 @@ import { choiceControl, isLongText } from '../formFill';
  *
  * Values are the draft's canonical values (rulings R2): a date input gives ISO `YYYY-MM-DD`, a time input `HH:mm`, a
  * checkbox a boolean, a choice the text of its option; text and numbers keep what was typed (a number is a text input
- * with the decimal keyboard, checked with `parseDecimal` by the screen). A `picture` field shows nothing here: photos
- * come with Task 16, which adds its own control.
+ * with the decimal keyboard, checked with `parseDecimal` by the screen). A `picture` field shows nothing here: photos have
+ * their own control (`PhotoField`).
+ *
+ * The helpers add to a field (Task 16): a `Now` button beside a time, a line `Last: <value>` under a value that is not
+ * the last file's, an alarm warning under a reading, and, for a text field such as a job's Responsible, a list of the
+ * people onboard to choose from (with `Someone else` for a name that is not in it).
  */
 
 export interface FormFieldProps {
@@ -27,19 +31,32 @@ export interface FormFieldProps {
   onLeave?: () => void;
   /** Put on the input as `data-key`, so the screen can find it (to focus the first invalid one). */
   dataKey?: string;
-  /** More under the field, for Task 16's helpers (a `Now` button, an alarm warning). */
+  /** Puts the ship's time now in the field: shows a `Now` button beside it. */
+  onNow?: () => void;
+  /** An alarm warning under the input (`role="alert"`). Advice only: it is never written to the file. */
+  warning?: string;
+  /** `Last: <value>` under the input, for a value that is not the last file's. */
+  last?: string;
+  /** A text field offered as a choice among these (the people onboard), besides any other text. */
+  choices?: string[];
+  /** More under the field. */
   children?: ComponentChildren;
 }
 
+/** The value of the `Someone else` option of a list of choices; no person's name is this. */
+const OTHER = '\u0000other';
 const text = (value: FormValue): string => (typeof value === 'string' ? value : '');
 
-export function FormField({ field, value, onChange, auto, note, error, onLeave, dataKey, children }: FormFieldProps) {
+export function FormField({ field, value, onChange, auto, note, error, onLeave, dataKey, onNow, warning, last, choices, children }: FormFieldProps) {
   const id = useId();
   const labelId = `${id}-label`;
   const autoId = `${id}-auto`;
   const noteId = `${id}-note`;
   const errorId = `${id}-error`;
-  const describedBy = [auto && autoId, note && noteId, error && errorId].filter(Boolean).join(' ') || undefined;
+  const warningId = `${id}-warning`;
+  const lastId = `${id}-last`;
+  const [other, setOther] = useState(false);
+  const describedBy = [auto && autoId, note && noteId, error && errorId, warning && warningId, last && lastId].filter(Boolean).join(' ') || undefined;
   const invalid = error ? true : undefined;
   const common = { 'aria-describedby': describedBy, 'aria-invalid': invalid, 'data-key': dataKey, onBlur: onLeave };
 
@@ -48,6 +65,8 @@ export function FormField({ field, value, onChange, auto, note, error, onLeave, 
     <>
       {note && <p id={noteId} class="helper-text">{note}</p>}
       {error && <p id={errorId} class="field-error" role="alert">{error}</p>}
+      {warning && <p id={warningId} class="field-warning" role="alert">{warning}</p>}
+      {last && <p id={lastId} class="helper-text">{last}</p>}
       {children}
     </>
   );
@@ -105,6 +124,36 @@ export function FormField({ field, value, onChange, auto, note, error, onLeave, 
     );
   }
 
+  if (choices && field.kind === 'text') {
+    // A single choice among the people onboard; a name that is not in the list is typed under `Someone else`.
+    const current = text(value);
+    const typed = other || (current !== '' && !choices.includes(current));
+    return (
+      <div class="field fill-field">
+        <div class="field-head"><label for={id}>{field.label}</label>{mark}</div>
+        <select
+          id={id} value={typed ? OTHER : current} {...common}
+          onChange={(event) => {
+            const chosen = event.currentTarget.value;
+            setOther(chosen === OTHER);
+            onChange(chosen === '' || chosen === OTHER ? null : chosen);
+          }}
+        >
+          <option value="">Not chosen</option>
+          {choices.map((name) => <option key={name} value={name}>{name}</option>)}
+          <option value={OTHER}>Someone else</option>
+        </select>
+        {typed && (
+          <input
+            type="text" aria-label={`${field.label}, someone else`} autocomplete="off" value={current} onInput={(event) => onChange(event.currentTarget.value)}
+            onBlur={onLeave}
+          />
+        )}
+        {under}
+      </div>
+    );
+  }
+
   const input = (() => {
     if (isLongText(field)) {
       return <textarea id={id} rows={3} value={text(value)} {...common} onInput={(event) => onChange(event.currentTarget.value)} />;
@@ -120,8 +169,13 @@ export function FormField({ field, value, onChange, auto, note, error, onLeave, 
 
   return (
     <div class="field fill-field">
-      <div class="field-head"><label for={id}>{field.label}</label>{mark}</div>
-      {input}
+      <div class="field-head"><label id={labelId} for={id}>{field.label}</label>{mark}</div>
+      {onNow ? (
+        <div class="input-row">
+          {input}
+          <button type="button" class="btn btn-outline btn-small" aria-describedby={labelId} onClick={onNow}>Now</button>
+        </div>
+      ) : input}
       {under}
     </div>
   );

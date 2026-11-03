@@ -9,7 +9,7 @@ import { oddLayoutsDocx } from '../src/forms/testing/wordFixtures';
 import { detectWord } from '../src/forms/word/detect';
 import { readWordValues } from '../src/forms/word/read';
 import { writeFormFixtures } from './fixtures/makeForms';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -579,4 +579,326 @@ test('a draft reopened on a later day keeps the auto values of when it started: 
   const schema = detectWord(readPackage(new Uint8Array(await fs.readFile(paths['toolbox.docx']))), 'docx', 'toolbox.docx');
   const back = readWordValues(readPackage(await downloaded(file)), schema);
   expect(back.fields).toMatchObject({ f2: 'Fire drill', f3: '2026-10-25', f4: time });
+});
+
+/* ---- Part 3: the helpers in the fill screen (Task 16) ---- */
+
+// The clock is 2026-10-28T13:00Z and the ship is at UTC+01:00, so the ship's today is 2026-10-28 and its clock reads 14:00.
+const HELPERS_TIME = { time: '2026-10-28T13:00:00Z' };
+const startShip = async (page: Page): Promise<void> => {
+  await freshApp(page, HELPERS_TIME);
+  await setupShip(page, 'MV OCEAN STAR', 'UTC+01:00');
+};
+
+/**
+ * A valid PNG of `size` × `size` pixels, made here (the browser decodes it and draws it as a JPEG). Its data is stored
+ * in a deflate stream without compression, which every decoder reads.
+ */
+function pngOf(size = 10): Uint8Array {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (bytes: number[]): number => bytes.reduce((c, b) => crcTable[(c ^ b) & 0xff] ^ (c >>> 8), 0xffffffff) ^ 0xffffffff;
+  const u32 = (n: number): number[] => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const ascii = (text: string): number[] => [...text].map((ch) => ch.charCodeAt(0));
+  const chunk = (type: string, data: number[]): number[] => [...u32(data.length), ...ascii(type), ...data, ...u32(crc([...ascii(type), ...data]) >>> 0)];
+  const raw: number[] = [];
+  for (let y = 0; y < size; y += 1) raw.push(0, ...Array<number>(size * 3).fill(0x80)); // filter 0, grey pixels
+  let a = 1;
+  let b = 0;
+  for (const byte of raw) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  // zlib header, one stored block (final), its length and its complement, the data, and the Adler-32.
+  const idat = [0x78, 0x01, 0x01, raw.length & 255, raw.length >> 8, ~raw.length & 255, (~raw.length >> 8) & 255, ...raw, ...u32(((b << 16) | a) >>> 0)];
+  const header = [...u32(size), ...u32(size), 8, 2, 0, 0, 0]; // 8 bits, RGB
+  return Uint8Array.from([0x89, ...ascii('PNG'), 0x0d, 0x0a, 0x1a, 0x0a, ...chunk('IHDR', header), ...chunk('IDAT', idat), ...chunk('IEND', [])]);
+}
+
+/** Puts a crew onboard (and one who has signed off) straight into the ship's crew store. */
+async function seedCrew(page: Page): Promise<void> {
+  const [ship] = await stored(page, 'ships');
+  const base = {
+    createdAt: '2026-10-01T09:00:00.000Z', updatedAt: '2026-10-01T09:00:00.000Z', updatedBy: 'x', deleted: false, scope: 'ship', shipId: ship.id,
+    nationality: 'Croatia', dateOfBirth: '1980-01-01', placeOfBirth: 'Split', passportNo: 'P1', passportExpiry: '2030-01-01',
+    seamansBookNo: 'S1', seamansBookExpiry: '2030-01-01', signOnDate: '2026-06-01', signOnPort: 'Split',
+  };
+  await putRecords(page, 'crew', [
+    { ...base, id: 'c1', surname: 'Babic', givenNames: 'Ivo', rank: 'master' },
+    { ...base, id: 'c2', surname: 'Lee', givenNames: 'Ann', rank: 'bosun' },
+    { ...base, id: 'c3', surname: 'Ode', givenNames: 'Ben', rank: 'ab' },
+    { ...base, id: 'c4', surname: 'Gone', givenNames: 'Old', rank: 'os', signOffDate: '2026-09-01' },
+  ]);
+}
+
+const wordSchema = async (name: string) => detectWord(readPackage(new Uint8Array(await fs.readFile(paths[name]))), name.endsWith('dotx') ? 'dotx' : 'docx', name);
+
+test('Add from crew: the crew onboard as checkboxes fill the next free rows, and the signature column stays empty', async ({ page }) => {
+  await startShip(page);
+  await seedCrew(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  const participants = section(page, 'Participants');
+  await participants.getByRole('button', { name: 'Add row' }).click();
+  await participants.getByRole('group', { name: 'Row 1' }).getByLabel('Name').fill('Cy Dee'); // a row in use stays
+
+  await participants.getByRole('button', { name: 'Add from crew' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add from crew' });
+  await expect(dialog.getByRole('checkbox')).toHaveCount(3); // the one who signed off is not onboard
+  await expect(dialog.getByRole('checkbox')).toHaveCount(3);
+  await expect(dialog.getByText('Old Gone')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Add', exact: true })).toBeDisabled();
+  await expectNoHorizontalScroll(page);
+  await dialog.getByRole('checkbox', { name: /Ann Lee/ }).check();
+  await dialog.getByRole('checkbox', { name: /Ben Ode/ }).check();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await expect(participants.getByRole('group')).toHaveCount(3);
+  await expect(participants.getByRole('group', { name: 'Row 1' }).getByLabel('Name')).toHaveValue('Cy Dee');
+  await expect(participants.getByRole('group', { name: 'Row 2' }).getByLabel('Name')).toHaveValue('Ann Lee');
+  await expect(participants.getByRole('group', { name: 'Row 2' }).getByLabel('Rank')).toHaveValue('Bosun');
+  await expect(participants.getByRole('group', { name: 'Row 3' }).getByLabel('Name')).toHaveValue('Ben Ode');
+  await expect(participants.getByRole('group', { name: 'Row 3' }).getByLabel('Rank')).toHaveValue('AB');
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows.g1?.length).toBe(3);
+  const [draft] = await liveDrafts(page);
+  expect(Object.keys(draft.values.rows.g1[1]).sort()).toEqual(['g1.c1', 'g1.c2']); // no Signature
+});
+
+test('the permit: All Yes for a section, asking before it replaces answers, a gas warning that stays out of the file, and Now', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'permit.docx', 'TST-02 Demo Permit');
+  const one = section(page, 'Section 1 – Checks');
+  const two = section(page, 'Section 2 – Entry');
+  const yes = (region: ReturnType<typeof section>) => region.getByRole('button', { name: 'Yes', exact: true });
+
+  await one.getByRole('button', { name: 'All Yes' }).click();
+  await expect(yes(one)).toHaveCount(4);
+  for (const button of await yes(one).all()) await expect(button).toHaveAttribute('aria-pressed', 'true');
+  for (const button of await yes(two).all()) await expect(button).toHaveAttribute('aria-pressed', 'false'); // another section
+  await expectNoHorizontalScroll(page);
+
+  // An answer already given is asked about: Cancel keeps it, Replace changes it.
+  await one.getByRole('group', { name: 'Check 1.2' }).getByRole('button', { name: 'No', exact: true }).click();
+  await one.getByRole('button', { name: 'All Yes' }).click();
+  const ask = page.getByRole('dialog', { name: 'Replace answers already given?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(one.getByRole('group', { name: 'Check 1.2' }).getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await one.getByRole('button', { name: 'All Yes' }).click();
+  await page.getByRole('dialog', { name: 'Replace answers already given?' }).getByRole('button', { name: 'Replace' }).click();
+  await expect(one.getByRole('group', { name: 'Check 1.2' }).getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  // A reading past an alarm limit is warned about, as it is typed; the warning is only on the screen.
+  const gas = section(page, 'Gas readings');
+  await gas.getByRole('button', { name: 'Add row' }).click();
+  const row = gas.getByRole('group', { name: 'Row 1' });
+  await row.getByLabel('O2 [Vol.%]').fill('18.5');
+  await expect(row.getByRole('alert')).toHaveText('O2 18.5 — below 19.5');
+  await row.getByLabel('CO [ppm]').fill('31');
+  await expect(row.getByRole('alert').filter({ hasText: 'CO 31 — above 25' })).toBeVisible();
+  await row.getByLabel('H2S [ppm]').fill('4');
+  await expect(row.getByRole('alert')).toHaveCount(2);
+  await row.getByLabel('O2 [Vol.%]').fill('20,5');
+  await expect(row.getByRole('alert')).toHaveCount(1);
+  await expectNoHorizontalScroll(page);
+
+  // Now: the ship's clock, 14:00 at UTC+01:00.
+  await row.getByRole('button', { name: 'Now' }).click();
+  await expect(row.getByLabel('Time', { exact: true })).toHaveValue(/^14:0\d$/);
+  const personnel = section(page, 'Personnel');
+  await personnel.getByRole('button', { name: 'Add row' }).click();
+  await personnel.getByRole('group', { name: 'Row 1' }).getByRole('button', { name: 'Now' }).first().click();
+
+  await row.getByLabel('O2 [Vol.%]').fill('18.5');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  const back = readWordValues(readPackage(await downloaded(file)), await wordSchema('permit.docx'));
+  expect(back.fields).toMatchObject({ f1: 'Yes', f2: 'Yes', f3: 'Yes', f4: 'Yes' });
+  expect(back.fields.f5).toBeFalsy();
+  expect(back.rows.g1[0]).toMatchObject({ 'g1.c2': '18.5', 'g1.c3': '31', 'g1.c4': '4' });
+  expect(back.rows.g1[0]['g1.c1']).toMatch(/^14:0\d$/);
+  expect(JSON.stringify(back)).not.toMatch(/below|above/);
+});
+
+test('Now: a time field gets the ship\'s clock and is no longer an Auto value', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  const time = page.getByLabel('Time', { exact: true });
+  await time.fill('08:15');
+  await time.locator('xpath=ancestor::div[contains(@class,"fill-field")][1]').getByRole('button', { name: 'Now' }).click();
+  await expect(time).toHaveValue(/^14:0\d$/);
+  await expect(time).not.toHaveAccessibleDescription('Auto');
+});
+
+test('the weekly job log: Add job, a crew choice for Responsible, a photo from the camera, and the unfinished job carried to next week', async ({ page }) => {
+  await startShip(page);
+  await seedCrew(page);
+  await openFillOf(page, 'weekly.dotx', 'TST-03 Demo Weekly Jobs');
+  const jobs = section(page, 'Jobs');
+  await jobs.getByRole('button', { name: 'Add job' }).click();
+  await jobs.getByRole('button', { name: 'Add job' }).click();
+  const first = jobs.getByRole('group', { name: 'Row 1' });
+  const second = jobs.getByRole('group', { name: 'Row 2' });
+  // A new job has the ship's today and the not-finished status.
+  await expect(first.getByLabel('Date', { exact: true })).toHaveValue('2026-10-28');
+  await expect(first.getByRole('button', { name: 'Pending', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await first.getByLabel('Description').fill('Grease the mooring winch');
+  await first.getByLabel('Responsible', { exact: true }).selectOption({ label: 'Ann Lee' });
+  await second.getByLabel('Description').fill('Paint the rails');
+  await second.getByLabel('Responsible', { exact: true }).selectOption({ label: 'Someone else' });
+  await second.getByLabel('Responsible, someone else').fill('Yard worker');
+  await second.getByRole('button', { name: 'Completed', exact: true }).click();
+  await expectNoHorizontalScroll(page);
+
+  // A file that is no picture is refused in words, and keeps nothing.
+  const pictures = section(page, 'Pictures');
+  await pictures.getByLabel('Add photo').setInputFiles({ name: 'notes.png', mimeType: 'image/png', buffer: Buffer.from(new TextEncoder().encode('not a picture')) });
+  await expect(pictures.getByRole('alert')).toHaveText("That picture couldn't be read. Choose another photo.");
+  expect(await stored(page, 'formPhotos')).toEqual([]);
+
+  await expect(pictures.getByText('No photos yet.')).toBeVisible();
+  await pictures.getByLabel('Add photo').setInputFiles({ name: 'winch.png', mimeType: 'image/png', buffer: Buffer.from(pngOf(10)) });
+  await expect(pictures.getByRole('img', { name: 'Photo' })).toBeVisible();
+  await expect(pictures.getByRole('alert')).toHaveCount(0);
+  await pictures.getByRole('button', { name: 'Before', exact: true }).click();
+  await expect.poll(async () => (await stored(page, 'formPhotos')).length).toBe(1);
+  const [photo] = await stored(page, 'formPhotos');
+  expect(photo.width).toBe(10);
+  expect(photo.jpegBase64.startsWith('/9j/')).toBe(true); // a JPEG
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows.g2?.[0]).toEqual({ 'g2.c1': photo.id, 'g2.c2': 'Before' });
+  await expect.poll(async () => (await liveDrafts(page))[0]?.photoIds).toEqual([photo.id]);
+  await expectNoHorizontalScroll(page);
+
+  // The file has the photo, and the job still to do is the next week's first.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  const made = readPackage(await downloaded(file));
+  expect(made.order.filter((name) => /^word\/media\/.*\.jpe?g$/.test(name))).toHaveLength(1);
+  const back = readWordValues(made, await wordSchema('weekly.dotx'));
+  expect(back.rows.g1[0]).toMatchObject({ 'g1.c3': 'Grease the mooring winch', 'g1.c2': 'Ann Lee', 'g1.c4': 'Pending' });
+  expect(back.rows.g1[1]).toMatchObject({ 'g1.c2': 'Yard worker', 'g1.c4': 'Completed' });
+  await expect(page).toHaveURL(/#\/forms$/);
+  const [next] = await liveDrafts(page);
+  expect(next.period).toBe('2026-W45');
+  expect(next.values.rows.g1).toHaveLength(1);
+  expect(next.values.rows.g1[0]).toMatchObject({ 'g1.c3': 'Grease the mooring winch', 'g1.c4': 'Pending' });
+  expect(next.values.rows.g2).toBeUndefined();
+  expect(next.autoIds).toBeUndefined(); // its auto values are not fixed yet (R18)
+
+  // Its first change fixes the auto values for its own week, not for today (R19): week 45 starts on Monday 2 November.
+  await page.getByRole('list', { name: 'In progress' }).getByRole('link').click();
+  await expect(page.getByLabel('Year / Week No.', { exact: true })).toHaveValue(/45/);
+  await page.getByLabel('Vessel', { exact: true }).fill('MV OCEAN STAR II');
+  await expect.poll(async () => (await liveDrafts(page))[0]?.autoIds).toContain('f2');
+  const [fixed] = await liveDrafts(page);
+  expect(fixed.values.fields.f2).toMatch(/45/);
+  expect(fixed.values.fields.f3).toBe('02-NOV-2026 - 08-NOV-2026'); // the Monday to the Sunday of week 45
+  await expect(page.getByLabel('Year / Week No.', { exact: true })).toHaveAccessibleDescription('Auto');
+});
+
+test('a day grid opens on today\'s row and offers the other days', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'daygrid.xlsx', 'TST-12 Demo Day Grid');
+  const days = page.getByRole('group', { name: /^\d+$/ });
+  await expect(days).toHaveCount(1);
+  await expect(page.getByRole('group', { name: '28', exact: true })).toBeVisible();
+  await page.getByRole('group', { name: '28', exact: true }).getByLabel('Hold 1 PORT').fill('3');
+  await expectNoHorizontalScroll(page);
+  await page.getByRole('button', { name: 'Show all days' }).click();
+  await expect(days).toHaveCount(31);
+  await page.getByRole('button', { name: 'Show today only' }).click();
+  await expect(days).toHaveCount(1);
+  const [template] = await stored(page, 'formTemplates');
+  const group = template.schema.rowGroups[0];
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows[group.id]?.[27]?.[group.columns[0].id]).toBe('3');
+});
+
+test('start from last: a second inventory starts from the last file, and says what the last value was', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'inventory.xlsx', 'TST-11 Demo Inventory');
+  const item = (n: string) => page.getByRole('group', { name: `Item ${n}` });
+  await item('001').getByLabel('Qty').fill('5');
+  await item('001').getByLabel('Location').fill('Store A');
+  await item('002').getByLabel('Qty').fill('2');
+  await expect.poll(async () => (await liveDrafts(page)).length).toBe(1);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  await download;
+  await expect(page).toHaveURL(/#\/forms$/);
+  expect(await liveDrafts(page)).toEqual([]);
+
+  await library(page).getByRole('link', { name: /^TST-11 · / }).click();
+  await expect(page.getByRole('heading', { name: 'TST-11 Demo Inventory', exact: true })).toBeVisible();
+  // Shown as filled in before anything is changed, and no draft is stored for it yet.
+  await expect(item('001').getByLabel('Qty')).toHaveValue('5');
+  await expect(item('001').getByLabel('Location')).toHaveValue('Store A');
+  await expect(item('002').getByLabel('Qty')).toHaveValue('2');
+  await expect(item('003').getByLabel('Qty')).toHaveValue('');
+  await expect(page.getByText(/^Last: /)).toHaveCount(0);
+  expect(await liveDrafts(page)).toEqual([]);
+
+  await item('001').getByLabel('Qty').fill('8');
+  await expect(item('001').getByText('Last: 5')).toBeVisible();
+  await expect(item('001').getByText('Last: Store A')).toHaveCount(0); // not changed
+  await item('003').getByLabel('Qty').fill('1');
+  await expect(item('003').getByText(/^Last:/)).toHaveCount(0); // there was no last value
+  await item('002').getByLabel('Qty').fill('');
+  await expect(item('002').getByText('Last: 2')).toBeVisible();
+  const [template] = await stored(page, 'formTemplates');
+  const group = template.schema.rowGroups[0].id as string;
+  const qty = 'Demo inventory!g1.E';
+  await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows[group]?.[0]?.[qty]).toBe('8');
+  const [draft] = await liveDrafts(page);
+  expect(draft.values.rows[group][0]['Demo inventory!g1.D']).toBe('Store A'); // carried into the draft at its first change
+  await expectNoHorizontalScroll(page);
+});
+
+test('a condition list: All Satisfactory fills the empty ones, and Remarks come under a row that is not satisfactory', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'conditions.xlsx', 'TST-14 Demo Conditions');
+  const row = (n: string) => page.getByRole('group', { name: `Item ${n}` });
+  await row('003').getByLabel('Condition').fill('Defective');
+  await page.getByRole('button', { name: 'All Satisfactory' }).click();
+  const ask = page.getByRole('dialog', { name: 'Replace answers already given?' });
+  await expect(ask).toContainText('1 other answer already given');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(row('001').getByLabel('Condition')).toHaveValue('Satisfactory');
+  await expect(row('100').getByLabel('Condition')).toHaveValue('Satisfactory');
+  await expect(row('003').getByLabel('Condition')).toHaveValue('Defective');
+  // Remarks are under the rows that are not satisfactory only.
+  await expect(row('001').getByLabel('Remarks')).toHaveCount(0);
+  await expect(row('003').getByLabel('Remarks')).toBeVisible();
+  await row('003').getByLabel('Remarks').fill('Hatch cover seal torn');
+  await row('004').getByLabel('Condition').fill('Worn');
+  await expect(row('004').getByLabel('Remarks')).toBeVisible();
+  await row('004').getByLabel('Condition').fill('Satisfactory');
+  await expect(row('004').getByLabel('Remarks')).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+});
+
+test('a matrix is shown under its block, with one heading', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'matrix.xlsx', 'TST-13 Demo Matrix');
+  const block = page.getByRole('group', { name: 'Table 1' });
+  await expect(page.getByRole('heading', { name: 'Table 1' })).toHaveCount(1);
+  await expect(block.getByLabel('Equipment 1 · Kind')).toBeVisible();
+  await expect(block.locator('input, textarea')).toHaveCount(81);
+  await expect(block.getByLabel('Master')).toHaveCount(0); // the fields under it are not part of the block
+  await expect(page.getByLabel('Master', { exact: true })).toBeVisible();
+});
+
+test('a save that fails while the file is being made clears the "Making the file" line', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  await failWrites(page);
+  await page.getByRole('button', { name: 'Make file' }).click();
+  await expect(page.getByRole('alert')).toBeVisible(); // the save failed, and said so
+  await expect(page.locator('p.live').first()).toHaveText('');
+  await expect(page.getByRole('button', { name: 'Make file' })).not.toHaveAttribute('aria-disabled');
+  await allowWrites(page);
 });

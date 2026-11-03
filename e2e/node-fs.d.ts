@@ -11,3 +11,5 @@ declare module 'node:fs' {
 declare module 'node:os' {
   export function tmpdir(): string;
 }
+// Playwright's `setInputFiles` takes a Node `Buffer`: this is the one call the tests make to make one.
+declare const Buffer: { from(data: Uint8Array): Uint8Array };

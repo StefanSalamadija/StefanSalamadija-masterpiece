@@ -26,7 +26,8 @@ const conditions = schemaOf('conditions.xlsx', conditionListXlsx());
 
 const EMPTY: DraftValues = { fields: {}, rows: {} };
 /** What the items of a section are, as `f1` for a field and `[g1]` for a row group. */
-const itemsOf = (s: ReturnType<typeof fillSections>[number]) => s.items.map((i) => (i.kind === 'field' ? i.field.id : `[${i.group.id}]`));
+const itemsOf = (s: ReturnType<typeof fillSections>[number]) =>
+  s.items.map((i) => (i.kind === 'field' ? i.field.id : i.kind === 'group' ? `[${i.group.id}]` : `{${i.title}: ${i.fields.length}}`));
 
 describe('fillSections', () => {
   it('groups the fields and tables by section, in document order, with tables among the fields', () => {
@@ -63,6 +64,23 @@ describe('fillSections', () => {
       ...toolbox, rowGroups: [{ ...toolbox.rowGroups[0], columns: [{ ...toolbox.rowGroups[0].columns[2] }] }],
     };
     expect(fillSections(onlySignatures).flatMap(itemsOf)).toEqual(['f1', 'f2', 'f3', 'f4']);
+  });
+});
+
+describe('fillSections: matrix blocks (R14) and pictures', () => {
+  it('shows the fields of a matrix under one heading, where its first field is', () => {
+    const sections = fillSections(schemaOf('matrix.xlsx', matrixXlsx()));
+    expect(sections.map(itemsOf)).toEqual([['{Table 1: 81}', 'Demo matrix!B17', 'Demo matrix!B18']]);
+    const [block] = sections[0].items;
+    expect(block.kind === 'block' && block.fields[0].label).toBe('Equipment 1 · Kind'); // in the order of the sheet
+  });
+
+  it('keeps a table whose only columns are pictures, and a picture field of its own', () => {
+    const pictures = weekly.rowGroups.find((g) => g.id === 'g2')!;
+    const only: FormSchema = { ...weekly, rowGroups: [{ ...pictures, columns: pictures.columns.filter((c) => c.kind === 'picture') }] };
+    expect(fillSections(only).flatMap(itemsOf)).toContain('[g2]');
+    const photo: FieldDef = { ...weekly.fields[0], id: 'fp', kind: 'picture', label: 'Photo of the damage', loc: weekly.fields[0].loc };
+    expect(fillSections({ ...weekly, fields: [...weekly.fields, photo] }).flatMap(itemsOf)).toContain('fp');
   });
 });
 
@@ -413,5 +431,31 @@ describe('makeAndHandOver', () => {
     const broken = steps('shared', { make: () => { throw new TypeError('boom'); } });
     await expect(makeAndHandOver(toolbox, values, broken.steps)).rejects.toThrow('boom');
     expect(broken.shared).toEqual([]);
+  });
+});
+
+describe('fixedState with values from the last file (R18)', () => {
+  const auto = { values: { f3: '2026-10-28' }, missing: {} };
+  const start = (held: DraftValues): DraftValues => ({ fields: held.fields, rows: { g1: [{ c: '5' }] } });
+
+  it('puts them in with the auto values, in one state', () => {
+    const state = fixedState(undefined, auto, start);
+    expect(state.values).toEqual({ fields: { f3: '2026-10-28' }, rows: { g1: [{ c: '5' }] } });
+    expect(state.autoIds).toEqual(['f3']);
+  });
+
+  it('shows a fixed draft as it is stored, with none of them', () => {
+    const stored = { values: { fields: { f3: '2026-10-20' }, rows: {} }, autoIds: [] };
+    expect(fixedState(stored, auto, start)).toEqual({ values: stored.values, autoIds: [] });
+  });
+
+  it('works the auto values out for the date it is given (R19)', () => {
+    const seen: string[] = [];
+    const spy = (_s: FormSchema, _l: object, _c: FieldContext, date: string) => (seen.push(date), { values: {}, missing: {} });
+    const ctx = { clockChanges: [] as ClockChange[] } as FieldContext;
+    const setup = defaultSetup(toolbox);
+    expect(autoAt(spy, toolbox, setup, ctx, new Date('2026-10-28T10:00:00Z')).shipDate).toBe('2026-10-28');
+    autoAt(spy, toolbox, setup, ctx, new Date('2026-10-28T10:00:00Z'), '2026-11-02');
+    expect(seen).toEqual(['2026-10-28', '2026-11-02']);
   });
 });

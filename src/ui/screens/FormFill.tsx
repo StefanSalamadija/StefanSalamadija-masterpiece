@@ -1,5 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'preact/hooks';
-import type { ComponentChildren } from 'preact';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { describeError, reportError } from '../../app/errors';
 import { setFlash } from '../../app/flash';
@@ -7,19 +6,21 @@ import { navigate, useRoute } from '../../app/router';
 import { fromBase64 } from '../../backup/crypto';
 import { shareOrDownload } from '../../backup/share';
 import { loadFieldContext } from '../../db/fieldContext';
-import { closeDraft, discardDraft, findDraft, openDraft, photosFor, saveDraftValues } from '../../db/forms';
+import { addPhoto, closeDraft, discardDraft, findDraft, lastValuesFor, openDraft, photosFor, saveDraftValues } from '../../db/forms';
 import type { FieldContext } from '../../domain/fieldDictionary';
 import type { FormDraft, FormTemplate } from '../../domain/types';
 import { loadFormsEngine } from '../../forms/load';
 import type { FormsEngine } from '../../forms/load';
+import type { DraftValues } from '../../forms/types';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { FormField } from '../components/FormField';
-import { RowGroup } from '../components/RowGroup';
+import { FillQuestions } from '../components/FillQuestions';
 import {
-  addRow, autoAt, cellKey, DRAFT_DISCARDED, editField, fileMadeText, fileValues, fillHeading, fillProblems, fillSections, fixedState,
-  isAuto, isFixed, makeAndHandOver, removeRow, rolloverFor, setCell, SHARE_CANCELLED, shipDateAt, shownValue,
+  autoAt, DRAFT_DISCARDED, fileMadeText, fileValues, fillHeading, fillProblems, fillSections, fixedState,
+  isFixed, makeAndHandOver, rolloverFor, SHARE_CANCELLED, shipDateAt,
 } from '../formFill';
 import type { FillState } from '../formFill';
+import { autoDateFor, withLastValues } from '../formHelpers';
+import { downsizeImage, PHOTO_UNREADABLE } from '../photo';
 import { useDraftSaver } from '../useDraftSaver';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
@@ -29,30 +30,21 @@ import { useLive } from '../useLive';
  * the auto values in their fields. Opening it stores nothing; the first change fixes the auto values of that moment
  * and stores the draft, and every change after is saved (rulings R18, and `formFill.ts`). `Make file` writes the values
  * into the form, checks the file and hands it to the share sheet (or downloads it); then the draft is closed. A share
- * that is cancelled keeps the draft. Text read from the form is shown as text only.
+ * that is cancelled keeps the draft. The helpers (spec §7) are in `FillQuestions`; every one of them is a change like an edit,
+ * so the first helper action fixes the draft's auto values and its values from the last file (R18, R19). Text read from the
+ * form is shown as text only.
  */
 
 /** What the screen opens with: the ship's draft of the form, if there is one, and the ship's data for the auto values. */
 interface Opened {
   stored: FormDraft | undefined;
   ctx: FieldContext;
+  /** The values of the last file made from the form on this ship, which a new draft starts from. */
+  last: DraftValues | undefined;
   /** The form's `updatedAt` when opened. A form changed meanwhile (a revision imported in another tab) opens again. */
   basedOn: string;
 }
 
-/** A section of the form, with its heading as a region; what is under no heading comes first, without one. */
-function FillSectionBlock({ title, children }: { title: string; children: ComponentChildren }) {
-  const id = useId();
-  if (title === '') return <div class="fill-section">{children}</div>;
-  return (
-    <section class="fill-section" aria-labelledby={id}>
-      <h3 id={id}>{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 const sameData = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 function FillEditor({ template, opened, engine, shipId, liveVersion }: {
@@ -73,16 +65,34 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
   /** The draft as the screen holds it, from its first change on (or from opening, for a draft whose auto values are fixed). */
   const [local, setLocal] = useState<FillState | undefined>(() => (isFixed(opened.stored) ? fixedState(opened.stored, { values: {}, missing: {} }) : undefined));
   const latest = useRef(local);
+  /** The values of the last file that a new draft starts from (only the groups and blocks the setup lists, see `withLastValues`). */
+  const start = useMemo(() => {
+    const values = opened.last ? engine.startFromLast(schema, opened.last) : undefined;
+    return values ? (held: DraftValues) => withLastValues(held, schema, setup, values) : undefined;
+  }, [engine, schema, setup, opened.last]);
+  /** The date of the draft (R19): the ship's today when it is in the draft's period, else the period's first day. */
+  const dateAt = (instant: Date, period: string | undefined): string => {
+    const today = shipDateAt(clockChanges, instant);
+    const todayPeriod = engine.draftPeriod(setup, today);
+    return autoDateFor(period ?? todayPeriod, today, todayPeriod);
+  };
+  const storedPeriod = opened.stored?.period;
   // Until the first change the auto values are those of now, kept fresh as the app's clock moves on.
-  const fresh = useMemo(() => autoAt(engine.autoValues, schema, setup, ctx, nowUtc), [engine, schema, setup, ctx, nowUtc]);
+  const fresh = useMemo(
+    () => autoAt(engine.autoValues, schema, setup, ctx, nowUtc, dateAt(nowUtc, storedPeriod)),
+    [engine, schema, setup, ctx, nowUtc, storedPeriod],
+  );
   const [missing, setMissing] = useState(fresh.auto.missing);
-  const state = local ?? fixedState(opened.stored, fresh.auto);
+  const state = local ?? fixedState(opened.stored, fresh.auto, start);
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
   const [attempted, setAttempted] = useState(false);
   const [checkFocus, setCheckFocus] = useState(0);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [problem, setProblem] = useState<string>();
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoNotice, setPhotoNotice] = useState<{ key: string; text: string }>();
+  const photoWorking = useRef(false);
   const [discarding, setDiscarding] = useState(false);
   const discard = useDialogAction();
   const working = useRef(false);
@@ -112,13 +122,19 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
     if (checkFocus > 0) box.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [checkFocus]);
 
-  /** The state the next change starts from. The first change fixes the auto values of this moment (R18). */
+  /**
+   * The state the next change starts from. The first change fixes the auto values of this moment, and the values from the
+   * last file, in one step (R18). The auto date is the ship's today if it is in the draft's period, else the period's first
+   * day (R19).
+   */
   function base(): FillState {
     if (latest.current) return latest.current;
-    const at = autoAt(engine.autoValues, schema, setup, ctx, new Date());
-    period.current = draft.current?.period ?? engine.draftPeriod(setup, at.shipDate);
+    const now = new Date();
+    const periodNow = draft.current?.period ?? engine.draftPeriod(setup, shipDateAt(clockChanges, now));
+    const at = autoAt(engine.autoValues, schema, setup, ctx, now, dateAt(now, periodNow));
+    period.current = periodNow;
     setMissing(at.auto.missing);
-    return fixedState(draft.current, at.auto);
+    return fixedState(draft.current, at.auto, start);
   }
 
   function change(update: (current: FillState) => FillState): void {
@@ -128,8 +144,51 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
     saver.schedule(next);
   }
 
+  /**
+   * The id of the stored draft, made now if there is none yet: a first change (which fixes the auto values, R18), then the
+   * save. A photo and a made file need a draft to belong to. `undefined` when the save failed (it said so).
+   */
+  async function storedDraftId(): Promise<string | undefined> {
+    if (latest.current === undefined) change((current) => current);
+    await saver.flush();
+    return draft.current?.id;
+  }
+
+  /** Adds a photo to the draft: downsized, stored with the draft, and put in the picture field `place` sets. */
+  async function addPhotoFile(file: File, key: string, place: (photoId: string) => (current: FillState) => FillState): Promise<void> {
+    if (photoWorking.current || working.current) return;
+    photoWorking.current = true;
+    setPhotoBusy(true);
+    setPhotoNotice(undefined);
+    setStatus('Adding photo…');
+    try {
+      let small: Awaited<ReturnType<typeof downsizeImage>>;
+      try {
+        small = await downsizeImage(file);
+      } catch (err) {
+        setPhotoNotice({ key, text: err instanceof Error && err.message === PHOTO_UNREADABLE ? err.message : PHOTO_UNREADABLE });
+        setStatus('');
+        return;
+      }
+      const draftId = await storedDraftId();
+      if (draftId === undefined) {
+        setStatus('');
+        return; // the save failed, and said so
+      }
+      const photo = await addPhoto(db, shipId, draftId, small.jpeg, small.width, small.height);
+      change(place(photo.id));
+      setStatus('Photo added.');
+    } catch (err) {
+      setStatus('');
+      reportError(err);
+    } finally {
+      photoWorking.current = false;
+      setPhotoBusy(false);
+    }
+  }
+
   async function makeTheFile(): Promise<void> {
-    if (working.current) return;
+    if (working.current || photoWorking.current) return;
     if (Object.keys(fillProblems(schema, base().values)).length > 0) {
       setAttempted(true);
       setCheckFocus((n) => n + 1);
@@ -142,10 +201,12 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
     let leaving = false;
     try {
       // A file made with no change at all still needs its draft: it is stored now, with the auto values of this moment.
-      if (latest.current === undefined) change((current) => current);
-      await saver.flush();
+      await storedDraftId();
       const current = draft.current;
-      if (current === undefined || latest.current === undefined) return; // the save failed, and said so
+      if (current === undefined || latest.current === undefined) {
+        setStatus(''); // the save failed, and said so
+        return;
+      }
       const out = fileValues(schema, latest.current.values);
       const date = shipDateAt(clockChanges, new Date()); // the file's date: the ship's, now (R18)
       const photos = await photosFor(db, current.id);
@@ -235,37 +296,14 @@ function FillEditor({ template, opened, engine, shipId, liveVersion }: {
       {sections.length === 0 && <p class="empty">This form has nothing to fill in here.</p>}
       {/* Nothing can be changed while the file is being made: what the file holds is what the screen shows. */}
       <fieldset class="fill-questions" role="none" disabled={busy}>
-        {sections.map((section) => (
-          <FillSectionBlock key={section.title} title={section.title}>
-            {section.items.map((item) => {
-              if (item.kind === 'field') {
-                const { id } = item.field;
-                const value = shownValue(state.values, id);
-                return (
-                  <FormField
-                    key={id} field={item.field} value={value} auto={isAuto(state, id)} dataKey={id}
-                    note={value === null || value === '' ? (local ? missing : fresh.auto.missing)[id] : undefined} error={shown(id)}
-                    onChange={(next) => change((current) => editField(current, id, next))} onLeave={() => touch(id)}
-                  />
-                );
-              }
-              const { group } = item;
-              const values = (f: (v: FillState['values']) => FillState['values']) => (current: FillState): FillState => ({ ...current, values: f(current.values) });
-              return (
-                <RowGroup
-                  key={group.id} group={group} kind={template.kind} rows={state.values.rows[group.id] ?? []}
-                  showLabel={!sameName(group.label, section.title)}
-                  onCell={(i, column, next) => change(values((v) => setCell(v, group, i, column, next)))}
-                  onAdd={() => change(values((v) => addRow(v, group.id)))}
-                  onRemove={(i) => change(values((v) => removeRow(v, group.id, i)))}
-                  errorFor={(i, column) => shown(cellKey(group.id, i, column))}
-                  onLeave={(i, column) => touch(cellKey(group.id, i, column))}
-                  keyFor={(i, column) => cellKey(group.id, i, column)}
-                />
-              );
-            })}
-          </FillSectionBlock>
-        ))}
+        <FillQuestions
+          template={template} engine={engine} sections={sections} state={state} change={change}
+          noteFor={(id) => (local ? missing : fresh.auto.missing)[id]} shown={shown} touch={touch}
+          crew={ctx.crew} clockChanges={clockChanges} date={dateAt(nowUtc, draft.current?.period ?? period.current)}
+          shipToday={shipDateAt(clockChanges, nowUtc)} last={opened.last} revealAll={attempted && Object.keys(problems).length > 0}
+          photoBusy={photoBusy} photoNotice={photoNotice} notify={setStatus}
+          onPhoto={(file, key, place) => void addPhotoFile(file, key, place)}
+        />
       </fieldset>
 
       {/* Always on the page, with its text set after it is there, so that it is announced. */}
@@ -314,8 +352,8 @@ function FillLoader({ shipId, templateId }: { shipId: string; templateId: string
   useEffect(() => {
     if (!engine || !live) return;
     let gone = false;
-    Promise.all([findDraft(db, shipId, live), loadFieldContext(db, shipId, new Date())]).then(([stored, ctx]) => {
-      if (!gone) setOpened({ stored, ctx, basedOn: live.updatedAt });
+    Promise.all([findDraft(db, shipId, live), loadFieldContext(db, shipId, new Date()), lastValuesFor(db, shipId, live)]).then(([stored, ctx, last]) => {
+      if (!gone) setOpened({ stored, ctx, last: last?.values, basedOn: live.updatedAt });
     }, (err: unknown) => {
       if (!gone) reportError(err);
     });

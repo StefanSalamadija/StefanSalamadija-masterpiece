@@ -7,6 +7,7 @@ import type { ClockChange, FormDraft } from '../domain/types';
 // period, the jobs that roll over) is passed in.
 import type { WriteErrorCode } from '../forms/errors';
 import type { DraftValues, FieldDef, FieldLink, FormKind, FormSchema, FormSetup, FormValue, RowGroupDef } from '../forms/types';
+import { blockTitle } from './formHelpers';
 
 /*
  * What the fill screen (`FormFill.tsx`) shows and writes, worked out from a form's schema and a draft's values. Pure; the
@@ -44,9 +45,14 @@ export function fillHeading(t: { code: string; title: string }): string {
 
 /* ---- What is asked for, and in which order ---- */
 
-/** A field or column the person fills here: not a signature (left empty), not a picture (Task 16 adds photos). */
+/** A field or column the person fills here with an input: not a signature (left empty), not a picture (photos have their own control). */
 export function isAsked(field: FieldDef): boolean {
   return !field.leftEmpty && field.kind !== 'picture';
+}
+
+/** Whether a table has a picture column to put photos in. */
+export function hasPictures(group: RowGroupDef): boolean {
+  return group.columns.some((c) => c.kind === 'picture' && !c.leftEmpty);
 }
 
 /** The columns of a table that are asked for, in the table's order. */
@@ -54,7 +60,14 @@ export function visibleColumns(group: RowGroupDef): FieldDef[] {
   return group.columns.filter(isAsked);
 }
 
-export type FillItem = { kind: 'field'; field: FieldDef } | { kind: 'group'; group: RowGroupDef };
+/**
+ * What a section holds: a field, a table, or a matrix block (R14): the fields of an Excel matrix, shown together under
+ * one heading, in the order of the sheet.
+ */
+export type FillItem =
+  | { kind: 'field'; field: FieldDef }
+  | { kind: 'group'; group: RowGroupDef }
+  | { kind: 'block'; block: string; title: string; fields: FieldDef[] };
 
 /** One block of the fill screen: a section of the form (`''` for what is under no heading) and what it asks for. */
 export interface FillSection {
@@ -90,23 +103,35 @@ const partOf = (loc: string): string => loc.split(/[#!]/)[0];
 
 /**
  * The form's fields and tables grouped by section, in document order. A section comes where its first item is, and
- * keeps every item of that name. Signatures and pictures are left out, and so is a table with no column left to fill.
+ * keeps every item of that name. Signatures are left out, and so is a table with nothing left to fill (no column to ask
+ * for and no picture column). The fields of an Excel matrix are one `block` item, where its first field is (R14).
  */
 export function fillSections(schema: FormSchema): FillSection[] {
   const parts: string[] = [];
   for (const x of [...schema.fields, ...schema.rowGroups]) if (!parts.includes(partOf(x.loc))) parts.push(partOf(x.loc));
   const rank = (part: string): number => parts.indexOf(part);
   const items: { item: FillItem; key?: number[]; at: number }[] = [
-    ...schema.fields.filter(isAsked).map((field) => ({ item: { kind: 'field', field } as FillItem, loc: field.loc })),
-    ...schema.rowGroups.filter((g) => visibleColumns(g).length > 0).map((group) => ({ item: { kind: 'group', group } as FillItem, loc: group.loc })),
+    ...schema.fields.filter((f) => !f.leftEmpty).map((field) => ({ item: { kind: 'field', field } as FillItem, loc: field.loc })),
+    ...schema.rowGroups
+      .filter((g) => visibleColumns(g).length > 0 || hasPictures(g))
+      .map((group) => ({ item: { kind: 'group', group } as FillItem, loc: group.loc })),
   ].map(({ item, loc }, at) => ({ item, key: orderKey(loc, rank), at }));
   items.sort((a, b) => (a.key && b.key ? compareKeys(a.key, b.key) || a.at - b.at : a.at - b.at));
+  const withSheet = new Set(schema.fields.flatMap((f) => (f.block === undefined ? [] : [f.block.split('!')[0]]))).size > 1;
   const sections: FillSection[] = [];
   for (const { item } of items) {
-    const title = item.kind === 'field' ? item.field.section : item.group.section;
-    const found = sections.find((s) => s.title === title);
-    if (found) found.items.push(item);
-    else sections.push({ title, items: [item] });
+    const title = item.kind === 'field' ? item.field.section : item.kind === 'group' ? item.group.section : '';
+    let section = sections.find((s) => s.title === title);
+    if (!section) sections.push((section = { title, items: [] }));
+    const block = item.kind === 'field' ? item.field.block : undefined;
+    if (item.kind === 'field' && block !== undefined) {
+      // A matrix's fields come together under one heading, where its first field is (R14).
+      const found = section.items.find((i): i is Extract<FillItem, { kind: 'block' }> => i.kind === 'block' && i.block === block);
+      if (found) found.fields.push(item.field);
+      else section.items.push({ kind: 'block', block, title: blockTitle(block, withSheet), fields: [item.field] });
+    } else {
+      section.items.push(item);
+    }
   }
   return sections;
 }
@@ -163,13 +188,16 @@ export interface FillState {
   autoIds: string[];
 }
 
-/** The auto values for `instant`, and the ship's date then (the ship's clock changes decide the offset). */
+/**
+ * The auto values for `instant`, and the ship's date then (the ship's clock changes decide the offset). `date` is the
+ * date they are worked out for when it is not the ship's today: the first day of a draft's period (R19).
+ */
 export function autoAt(
   autoValues: (schema: FormSchema, links: Record<string, FieldLink>, ctx: FieldContext, date: string) => AutoFill,
-  schema: FormSchema, setup: FormSetup, ctx: FieldContext, instant: Date,
+  schema: FormSchema, setup: FormSetup, ctx: FieldContext, instant: Date, date?: string,
 ): { auto: AutoFill; shipDate: string } {
   const shipDate = shipDateAt(ctx.clockChanges, instant);
-  return { auto: autoValues(schema, setup.links, { ...ctx, nowUtc: instant }, shipDate), shipDate };
+  return { auto: autoValues(schema, setup.links, { ...ctx, nowUtc: instant }, date ?? shipDate), shipDate };
 }
 
 /** The ship's date (`YYYY-MM-DD`) at `instant`. */
@@ -199,11 +227,13 @@ export function isFixed(draft: Pick<FormDraft, 'autoIds'> | undefined): boolean 
 
 /**
  * What the screen shows for a draft: a fixed draft as it is stored; a draft not stored yet, or not fixed yet, with the
- * auto values `fresh` gives (worked out for now). This is also what the first change starts from.
+ * auto values `fresh` gives (worked out for now) and the values `start` gives (from the last file, R18). This is also what
+ * the first change starts from, so that what is shown is what is stored. What the draft holds is never overwritten.
  */
-export function fixedState(draft: Pick<FormDraft, 'values' | 'autoIds'> | undefined, fresh: AutoFill): FillState {
+export function fixedState(draft: Pick<FormDraft, 'values' | 'autoIds'> | undefined, fresh: AutoFill, start?: (existing: DraftValues) => DraftValues): FillState {
   if (draft !== undefined && draft.autoIds !== undefined) return { values: draftValuesOf(draft.values), autoIds: [...draft.autoIds] };
-  return withAutoValues(fresh, draft?.values);
+  const held = draftValuesOf(draft?.values);
+  return withAutoValues(fresh, start ? start(held) : held);
 }
 
 /** What a field shows (`null` when it has nothing). */
@@ -252,8 +282,9 @@ export function canAddRow(group: RowGroupDef, kind: FormKind, count: number): bo
   return count < group.capacity || (group.growable && kind !== 'xlsx');
 }
 
-export function addRow(values: DraftValues, groupId: string): DraftValues {
-  return { ...values, rows: { ...values.rows, [groupId]: [...(values.rows[groupId] ?? []), {}] } };
+/** Adds a row after the last one: an empty one, or `row` (a new job, say). */
+export function addRow(values: DraftValues, groupId: string, row: Record<string, FormValue> = {}): DraftValues {
+  return { ...values, rows: { ...values.rows, [groupId]: [...(values.rows[groupId] ?? []), row] } };
 }
 
 export function removeRow(values: DraftValues, groupId: string, index: number): DraftValues {
