@@ -79,7 +79,13 @@ test('welcome asks for a ship name, and links to the import screen', async ({ pa
 test('navigation links, the ship chips, and unknown routes falling back to Home', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   const main = page.getByRole('navigation', { name: 'Main' });
-  for (const name of ['Home', 'Ship', 'Profiles', 'Settings']) await expect(main.getByRole('link', { name })).toBeVisible();
+  await expect(main.getByRole('link')).toHaveText(['Home', 'Ship', 'Forms', 'Profiles', 'Settings']);
+  for (const name of ['Home', 'Ship', 'Forms', 'Profiles', 'Settings']) await expect(main.getByRole('link', { name })).toBeVisible();
+  await main.getByRole('link', { name: 'Forms' }).click();
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(main.getByRole('link', { name: 'Forms' })).toHaveAttribute('aria-current', 'page');
+  await expectNoHorizontalScroll(page);
+  await main.getByRole('link', { name: 'Home' }).click();
   await expect(page.getByRole('navigation', { name: 'Ship sections' })).toHaveCount(0);
 
   await main.getByRole('link', { name: 'Ship' }).click();

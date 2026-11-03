@@ -14,6 +14,8 @@ import { CrewImport } from '../ui/screens/CrewImport';
 import { CrewListPrint } from '../ui/screens/CrewListPrint';
 import { Expiring } from '../ui/screens/Expiring';
 import { FirstShip } from '../ui/screens/FirstShip';
+import { FormSetup } from '../ui/screens/FormSetup';
+import { Forms } from '../ui/screens/Forms';
 import { Home } from '../ui/screens/Home';
 import { ImportBackup } from '../ui/screens/ImportBackup';
 import { LockScreen } from '../ui/screens/LockScreen';
@@ -49,6 +51,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/expiring': Expiring,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
+  '/forms': Forms,
+  '/forms/:id/setup': FormSetup,
   '/profiles': Profiles,
   '/settings': Settings,
   '/settings/import': ImportBackup,

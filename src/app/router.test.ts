@@ -9,7 +9,7 @@ describe('matchRoute', () => {
   it('matches every fixed route', () => {
     const fixed = [
       '/ship/particulars', '/ship/crew', '/ship/crew/new', '/ship/crew/import', '/ship/crew/print', '/ship/certificates',
-      '/ship/certificates/new', '/ship/reliefs', '/ship/expiring', '/ship/voyage', '/ship/time', '/profiles', '/settings', '/settings/import',
+      '/ship/certificates/new', '/ship/reliefs', '/ship/expiring', '/ship/voyage', '/ship/time', '/forms', '/profiles', '/settings', '/settings/import',
     ];
     for (const path of fixed) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
   });
@@ -26,6 +26,12 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/crew/3f2a/documents/new')).toEqual({ path: '/ship/crew/:id/documents/new', params: { id: '3f2a' } });
     expect(matchRoute('#/ship/crew/3f2a/documents/d9')).toEqual({ path: '/ship/crew/:id/documents/:docId', params: { id: '3f2a', docId: 'd9' } });
     expect(matchRoute('#/ship/crew/a%20b/documents/c%2Fd').params).toEqual({ id: 'a b', docId: 'c/d' });
+  });
+
+  it('picks the form out of the form routes', () => {
+    expect(matchRoute('#/forms/t%201/setup')).toEqual({ path: '/forms/:id/setup', params: { id: 't 1' } });
+    expect(matchRoute('#/forms/abc/fill')).toEqual({ path: '/forms/:id/fill', params: { id: 'abc' } });
+    for (const hash of ['#/forms/abc', '#/forms/abc/other', '#/forms/abc/setup/x']) expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
   });
 
   it('knows the Expiring route', () => {

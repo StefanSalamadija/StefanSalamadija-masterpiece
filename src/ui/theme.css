@@ -282,7 +282,7 @@ textarea {
 
 .nav-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .nav-link {
@@ -1836,4 +1836,165 @@ textarea {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+/* ---- Forms ---- */
+
+/* The file input sits behind its label, which looks like a button; the input keeps the focus and shows it on the label. */
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.file-input:focus-visible + label {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.file-input[aria-disabled='true'] + label {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.forms-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.form-list,
+.setup-list,
+.setup-unsupported {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.form-list {
+  margin-top: 16px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.form-link,
+.form-missing {
+  display: flex;
+  align-items: center;
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: var(--target);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.form-link {
+  color: inherit;
+}
+
+.form-missing {
+  color: var(--muted);
+}
+
+.forms-drafts {
+  margin-top: 28px;
+}
+
+.forms-drafts h3,
+.setup-section h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.setup-form > h2 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.setup-identity {
+  margin: -16px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.setup-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 8px;
+  background: var(--surface);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.setup-notice p {
+  margin: 0;
+}
+
+.setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.setup-section .empty {
+  margin: 0;
+}
+
+.setup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.setup-group h4 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.setup-row {
+  min-width: 0;
+}
+
+.setup-row-name {
+  overflow-wrap: anywhere;
+}
+
+.setup-unsupported {
+  gap: 6px;
+  padding-left: 20px;
+  list-style: disc;
 }

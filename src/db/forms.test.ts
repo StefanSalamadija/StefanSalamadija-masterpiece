@@ -7,7 +7,7 @@ import { detectWord } from '../forms/word/detect';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
   addPhoto, closeDraft, discardDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
-  saveTemplate,
+  saveSetup, saveTemplate, SETUP_GONE, SETUP_STALE,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
 import { openDb } from './schema';
@@ -121,6 +121,44 @@ describe('saveTemplate and listTemplates', () => {
     await expect(saveTemplate(db, { fileName: 'a.docx', bytes: sampleBytes(10), kind: 'docx', schema: schema('X'), setup }))
       .rejects.toBeInstanceOf(StorageFullError);
     expect(await db.formTemplates.count()).toBe(0);
+  });
+});
+
+describe('saveSetup', () => {
+  const chosen: FormSetup = { ...setup, links: { f1: { source: 'none' } }, okWord: 'Good' };
+  const renamed: FormSchema = { ...schema('TST-01'), fields: [{ ...schema('TST-01').fields[0], label: 'Ship', leftEmpty: true }] };
+
+  it('saves the setup and the schema the review made, stamped as changed now', async () => {
+    const { db, template } = await withTemplate();
+    at('2026-10-28T09:00:00.000Z');
+    const saved = await saveSetup(db, template.id, template.updatedAt, chosen, renamed);
+    expect(saved).toEqual({ ...template, setup: chosen, schema: renamed, updatedAt: '2026-10-28T09:00:00.000Z' });
+    expect(await db.formTemplates.get(template.id)).toEqual(saved);
+  });
+
+  it('refuses, and writes nothing, when the form changed since the review was opened (a new revision came in)', async () => {
+    const { db, template } = await withTemplate();
+    at('2026-10-28T09:00:00.000Z');
+    const changed = await saveSetup(db, template.id, template.updatedAt, setup, schema('TST-01'));
+    at('2026-10-28T10:00:00.000Z');
+    await expect(saveSetup(db, template.id, template.updatedAt, chosen, renamed)).rejects.toThrow(SETUP_STALE);
+    expect(await db.formTemplates.get(template.id)).toEqual(changed);
+  });
+
+  it('refuses a form that is gone from the library', async () => {
+    const { db, template } = await withTemplate();
+    await softDelete(db, 'formTemplates', template.id);
+    const deleted = await db.formTemplates.get(template.id);
+    await expect(saveSetup(db, template.id, deleted!.updatedAt, chosen, renamed)).rejects.toThrow(SETUP_GONE);
+    await expect(saveSetup(db, 'missing', template.updatedAt, chosen, renamed)).rejects.toThrow(SETUP_GONE);
+    expect(await db.formTemplates.get(template.id)).toEqual(deleted);
+  });
+
+  it('reports a full disk as such', async () => {
+    const { db, template } = await withTemplate();
+    vi.spyOn(db.formTemplates, 'put').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
+    await expect(saveSetup(db, template.id, template.updatedAt, chosen, renamed)).rejects.toBeInstanceOf(StorageFullError);
+    expect(await db.formTemplates.get(template.id)).toEqual(template);
   });
 });
 

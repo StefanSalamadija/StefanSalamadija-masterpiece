@@ -47,6 +47,31 @@ export function saveTemplate(db: MasterpieceDB, input: TemplateInput): Promise<F
   }, { scope: 'personal' });
 }
 
+/** Said when the setup review saves a form that has left the library meanwhile. */
+export const SETUP_GONE = 'This form is no longer in the library.';
+/** Said when the setup review saves a form that changed meanwhile (a new revision imported in another tab). */
+export const SETUP_STALE = 'This form was changed since its setup was opened. Open its setup again to see the changes.';
+
+/**
+ * Saves the setup review of a form: its setup, and its schema with the names and left-empty marks the person gave.
+ * `basedOn` is the form's `updatedAt` when the review was opened. If the form changed since (a new revision came in, in
+ * another tab), nothing is saved and `SETUP_STALE` is thrown, so that a schema made from the old file never overwrites
+ * the new file's. A form that is gone is `SETUP_GONE`.
+ */
+export function saveSetup(db: MasterpieceDB, templateId: string, basedOn: string, setup: FormSetup, schema: FormSchema): Promise<FormTemplate> {
+  return guardWrite(() =>
+    // `settings` is in the scope because the stamp reads the device id from it.
+    db.transaction('rw', [db.formTemplates, db.settings], async () => {
+      const current = await db.formTemplates.get(templateId);
+      if (!current || current.deleted) throw new Error(SETUP_GONE);
+      if (current.updatedAt !== basedOn) throw new Error(SETUP_STALE);
+      const updated: FormTemplate = { ...current, setup, schema, ...(await stampNow(db)) };
+      await db.formTemplates.put(updated);
+      return updated;
+    }),
+  );
+}
+
 /** The forms in the library that are not deleted, in no particular order. */
 export function listTemplates(db: MasterpieceDB): Promise<FormTemplate[]> {
   return db.formTemplates.filter((t) => !t.deleted).toArray();
