@@ -68,6 +68,17 @@ describe('importMany', () => {
   });
 });
 
+describe('a file that cannot be read', () => {
+  it('is listed for that file only; the batch goes on', async () => {
+    const d = deps();
+    const broken: ImportFile = { name: 'gone.docx', bytes: async () => { throw new Error('NotReadableError'); } };
+    const summary = await importMany([file('A.docx'), broken, file('B.docx')], d, () => {});
+    expect(summary.imported).toBe(2);
+    expect(summary.failures).toEqual([{ name: 'gone.docx', message: "This file couldn't be read." }]);
+    expect(summary.stopped).toBeUndefined();
+  });
+});
+
 describe('the texts', () => {
   it('words the progress', () => expect(importProgress(3, 16)).toBe('Importing 3 of 16…'));
   it('words the summary: the count, then a line for each failure', () => {

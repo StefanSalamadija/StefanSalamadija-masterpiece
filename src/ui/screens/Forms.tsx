@@ -235,7 +235,7 @@ function FormsLibrary({ shipId }: { shipId: string }) {
             <p>{importSummaryLines(summary)[0]}</p>
             {summary.failures.length > 0 && (
               <ul class="field-error" role="alert" aria-label="Files not imported">
-                {importSummaryLines(summary).slice(1).map((line) => <li key={line}>{line}</li>)}
+                {importSummaryLines(summary).slice(1).map((line, i) => <li key={`${i}:${line}`}>{line}</li>)}
               </ul>
             )}
           </div>

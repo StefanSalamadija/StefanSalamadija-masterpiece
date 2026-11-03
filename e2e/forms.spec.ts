@@ -1009,3 +1009,14 @@ test('several forms are imported at once: a count, and a line for the file that 
   await expect(page).toHaveURL(/#\/forms$/);
   await expect(library(page).getByRole('link', { name: 'TST-01 · Toolbox Talk · Rev 00 / 01.01.2026' })).toBeVisible();
 });
+
+test('two files with the same code in one selection: the second asks to replace', async ({ page }) => {
+  await startShip(page);
+  await openForms(page);
+  await page.getByLabel('Import form').setInputFiles([paths['toolbox.docx'], paths['toolbox-rev01.docx']]);
+  await expect(page.getByRole('dialog')).toContainText('Replace Revision 00 / 01.01.2026 with Revision 01 / 01.06.2026?');
+  await page.getByRole('button', { name: 'Replace', exact: true }).click();
+  await expect(page.getByText('2 forms imported', { exact: true })).toBeVisible();
+  await expect(library(page).getByRole('listitem')).toHaveCount(1);
+  await expect(library(page).getByRole('link', { name: 'TST-01 · Toolbox Talk · Rev 01 / 01.06.2026' })).toBeVisible();
+});

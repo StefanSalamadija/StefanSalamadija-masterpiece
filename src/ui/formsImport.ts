@@ -41,6 +41,8 @@ export interface ImportSummary {
   stopped?: unknown;
 }
 
+export const UNREADABLE = "This file couldn't be read.";
+
 /**
  * Imports the files one after another, each as a single import is, but never opening a setup. A file the engine refuses
  * is listed with its message and the rest go on; Cancel on a replacement skips that file only. `onProgress(n, total)` is
@@ -51,7 +53,13 @@ export async function importMany(files: ImportFile[], deps: ImportDeps, onProgre
   for (const [i, file] of files.entries()) {
     onProgress(i + 1, files.length);
     try {
-      const bytes = await file.bytes();
+      let bytes: Uint8Array;
+      try {
+        bytes = await file.bytes();
+      } catch {
+        summary.failures.push({ name: file.name, message: UNREADABLE });
+        continue;
+      }
       let read: { kind: FormKind; schema: FormSchema };
       try {
         read = deps.read(file.name, bytes);
