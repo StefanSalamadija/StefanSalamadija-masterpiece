@@ -1,3 +1,6 @@
+// Type-only: the forms engine stays out of the main bundle (it is loaded on demand by the Forms screens).
+import type { DraftValues, FormKind, FormSchema, FormSetup } from '../forms/types';
+
 export type Scope = 'ship' | 'personal';
 export interface BaseRecord { id: string; createdAt: string; updatedAt: string; updatedBy: string; deleted: boolean; scope: Scope }
 export interface Particulars { name: string; imo: string; callSign: string; mmsi: string; flag: string; portOfRegistry: string;
@@ -43,10 +46,59 @@ export interface Voyage extends BaseRecord { shipId: string; active: boolean; vo
 export interface Certificate extends BaseRecord { shipId: string; key: string; name: string; number: string; issuedBy: string;
   issueDate: string; expiryDate?: string; nextSurveyDue?: string; remarks: string }
 export interface ClockChange extends BaseRecord { shipId: string; effectiveAt: string; toOffsetMinutes: number; note?: string }
-export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange;
-export type TableName = 'ships' | 'crew' | 'voyages' | 'certificates' | 'clockChanges' | 'crewDocuments';
+/**
+ * A form in the library: the file as it was imported (`fileBase64`; a macro file without its macros, R21), what detection
+ * found in it, and how it is set up. It
+ * belongs to the person, not to a ship (`scope: 'personal'`, no `shipId`): it goes into a full backup, and into a handover
+ * only when the library is included. `code`, `title` and `revision` are the form's identity (`schema.identity`), kept on
+ * the record so that the library can be listed and matched by code without reading the schema.
+ */
+export interface FormTemplate extends BaseRecord { code: string; title: string; revision: string; kind: FormKind; fileName: string;
+  /** The template file's bytes as standard base64. */
+  fileBase64: string; schema: FormSchema; setup: FormSetup }
+/**
+ * A form being filled for a ship. There is one live draft per template and ship; it is closed (soft-deleted) when its file
+ * is made, or discarded. `code` is the template's, so that a draft handed over to a device with its own copy of the form
+ * can still be matched. `period` is the day, week or month it is for (see `draftPeriod`). `photoIds` are its photos'.
+ */
+export interface FormDraft extends BaseRecord {
+  shipId: string; templateId: string; code: string; period: string; values: DraftValues; photoIds: string[];
+  /**
+   * The ids of the fields whose value is still the auto value worked out when the draft was made (R18): fixed then, never
+   * worked out again, and marked `Auto` on the fill screen. Editing a field takes its id out. Missing on a draft whose
+   * auto values were never fixed (an older record, or the next week's draft that a made file started): the fill screen
+   * works them out and fixes them at that draft's first change.
+   */
+  autoIds?: string[];
+  /**
+   * The revision of the form the draft was made with (R25). Its values are kept by that revision's field ids, so a draft
+   * is taken by code into another copy of the form only when that copy has the same revision. Missing on an older record.
+   */
+  revision?: string;
+}
+/**
+ * The values of the last file made from a form on a ship, for "start from last". One live record per ship and key. `code`
+ * is the key (see `lastValuesKey`): the form's code, or `template:<templateId>` for a form that has none. `revision` is
+ * the revision of the form they were made with (R25): they are used only for a form of that revision. Missing on an
+ * older record.
+ */
+export interface FormLastValues extends BaseRecord { shipId: string; code: string; values: DraftValues; revision?: string }
+/** A photo taken for a draft, as JPEG in standard base64. A deleted photo keeps no image: its `jpegBase64` is `''`. */
+export interface FormPhoto extends BaseRecord { shipId: string; draftId: string; jpegBase64: string; width: number; height: number }
+export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange
+  | FormTemplate | FormDraft | FormLastValues | FormPhoto;
+export type TableName = 'ships' | 'crew' | 'voyages' | 'certificates' | 'clockChanges' | 'crewDocuments'
+  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos';
 /** Every syncable table. A table added later goes last: it is the order of the snapshot, and an old backup file may lack it. */
-export const TABLE_NAMES: readonly TableName[] = ['ships', 'crew', 'voyages', 'certificates', 'clockChanges', 'crewDocuments'];
+export const TABLE_NAMES: readonly TableName[] = [
+  'ships', 'crew', 'voyages', 'certificates', 'clockChanges', 'crewDocuments', 'formTemplates', 'formDrafts', 'formLastValues', 'formPhotos',
+];
+/** A table whose records belong to a ship by their `shipId`: every syncable table but the ships and the forms library. */
+export type ShipTableName = Exclude<TableName, 'ships' | 'formTemplates'>;
+/** The tables of `ShipTableName`, in `TABLE_NAMES` order. Each is indexed by `shipId`. */
+export const SHIP_TABLES: readonly ShipTableName[] = TABLE_NAMES.filter(
+  (name): name is ShipTableName => name !== 'ships' && name !== 'formTemplates',
+);
 export type Tables = Record<TableName, SyncRecord[]>;
 export interface PinHash { salt: string; hash: string; iterations: number }
 export interface LockoutState { failures: number; lockedUntil?: string }

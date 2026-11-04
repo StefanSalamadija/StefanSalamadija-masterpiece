@@ -26,7 +26,10 @@ function cert(id: string, updatedAt: string, patch: Partial<Certificate> = {}): 
   };
 }
 
-const EMPTY: Tables = { ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] };
+const EMPTY: Tables = {
+  ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+};
 const T = (crew: SyncRecord[]): Tables => ({ ...EMPTY, crew });
 
 describe('computeMerge', () => {
@@ -378,5 +381,37 @@ describe('resolveMerge', () => {
     const empty = computeMerge(EMPTY, EMPTY, L);
     expect(empty).toEqual({ items: [], summary: { added: 0, updated: 0, deleted: 0, conflicts: 0 } });
     expect(resolveMerge(empty, { conflicts: {}, applyDeletions: true }, NOW, 'd')).toEqual([]);
+  });
+});
+
+describe('the forms tables', () => {
+  const base = { createdAt: '2026-01-01T00:00:00.000Z', updatedBy: 'dev-A', deleted: false, scope: 'ship' as const };
+  const draft = (updatedAt: string, vessel: string, extra: object = {}): SyncRecord => ({
+    id: 'd1', ...base, updatedAt: iso(updatedAt), shipId: 'ship-1', templateId: 't1', code: 'TST-01', period: '2026-10-28',
+    values: { fields: { f1: vessel }, rows: {} }, photoIds: [], ...extra,
+  }) as SyncRecord;
+  const template = (updatedAt: string, revision: string): SyncRecord => ({
+    id: 't1', ...base, scope: 'personal', updatedAt: iso(updatedAt), code: 'TST-01', title: 'Toolbox Talk', revision, kind: 'docx',
+    fileName: 't.docx', fileBase64: 'AAEC', schema: {}, setup: {},
+  }) as unknown as SyncRecord;
+  const photo = (updatedAt: string, extra: object = {}): SyncRecord => ({
+    id: 'p1', ...base, updatedAt: iso(updatedAt), shipId: 'ship-1', draftId: 'd1', jpegBase64: '/9j/', width: 1, height: 1, ...extra,
+  }) as SyncRecord;
+
+  it('are merged like every other table: a conflict per table and id, and a photo tombstone as a deletion', () => {
+    const local: Tables = { ...EMPTY, formTemplates: [template('2026-10-21', '00')], formDrafts: [draft('2026-10-21', 'A')], formPhotos: [photo('2026-10-19')] };
+    const incoming: Tables = {
+      ...EMPTY, formTemplates: [template('2026-10-22', '01')], formDrafts: [draft('2026-10-22', 'B')],
+      formPhotos: [photo('2026-10-22', { deleted: true, jpegBase64: '' })],
+    };
+    const plan = computeMerge(local, incoming, L);
+    expect(plan.items.map((i) => [conflictKey(i), i.kind])).toEqual([
+      ['formTemplates:t1', 'conflict'], ['formDrafts:d1', 'conflict'], ['formPhotos:p1', 'delete'],
+    ]);
+    const writes = resolveMerge(plan, { conflicts: { 'formTemplates:t1': 'incoming', 'formDrafts:d1': 'local' }, applyDeletions: true }, '2026-10-25T00:00:00.000Z', 'dev-B');
+    expect(writes.map((w) => [w.table, (w.record as unknown as { revision?: string }).revision ?? null, w.record.deleted])).toEqual([
+      ['formTemplates', '01', false], ['formDrafts', null, false], ['formPhotos', null, true],
+    ]);
+    expect(writes[1].record).toMatchObject({ values: { fields: { f1: 'A' } }, updatedBy: 'dev-B' });
   });
 });

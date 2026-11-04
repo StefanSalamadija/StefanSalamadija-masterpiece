@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { takeFlash } from '../../app/flash';
+import { listTemplates } from '../../db/forms';
 import { listForShip } from '../../db/records';
 import { collectAlerts } from '../../domain/alerts';
 import { maxMonthsOnboardOf } from '../../domain/contracts';
-import type { Certificate, CrewDocument, CrewMember } from '../../domain/types';
+import type { Certificate, CrewDocument, CrewMember, FormDraft } from '../../domain/types';
+import { loadFormsEngine } from '../../forms/load';
 import { BandBadge } from '../components/BandBadge';
-import { alertBadgeKind, backupReminder, clockChangeText, PERSISTENCE_DENIED_NOTICE } from '../homeView';
+import { alertBadgeKind, backupReminder, clockChangeText, formsInProgress, PERSISTENCE_DENIED_NOTICE } from '../homeView';
 import { useLive } from '../useLive';
 
 /**
@@ -56,7 +58,44 @@ function Alerts({ shipId, maxMonthsOnboard }: { shipId: string; maxMonthsOnboard
   );
 }
 
-/** The first screen: a backup reminder when one is due, the alerts of the ship, and the next clock change. */
+/**
+ * The forms the ship has started and not finished, each linking to its fill screen. Nothing is shown while there are
+ * none. The period is worded by the forms engine, which is loaded only when there is a draft to word.
+ */
+function FormsInProgress({ shipId }: { shipId: string }) {
+  const { db, shipToday } = useAppState();
+  const data = useLive(async () => {
+    const [templates, drafts] = await Promise.all([listTemplates(db), listForShip<FormDraft>(db, 'formDrafts', shipId)]);
+    return { templates, drafts };
+  }, [db, shipId]);
+  const hasDrafts = data !== undefined && data.drafts.some((d) => !d.deleted);
+  // `null` when the engine could not be loaded: the periods are then shown as kept.
+  const [periodLabel, setPeriodLabel] = useState<((period: string) => string) | null>();
+  useEffect(() => {
+    if (hasDrafts) loadFormsEngine().then((engine) => setPeriodLabel(() => engine.periodLabel), () => setPeriodLabel(null));
+  }, [hasDrafts]);
+  const rows = useMemo(
+    () => (data && hasDrafts && periodLabel !== undefined
+      ? formsInProgress(data.drafts, data.templates, shipToday, periodLabel ?? ((period) => period))
+      : []),
+    [data, hasDrafts, periodLabel, shipToday],
+  );
+  if (rows.length === 0) return null;
+  return (
+    <section class="alerts" aria-label="Forms in progress">
+      <h2>Forms in progress</h2>
+      <ul class="alert-list" role="list">
+        {rows.map((row) => (
+          <li key={row.key} class="card alert-row">
+            {row.href ? <a class="alert-link" href={row.href}><span class="alert-title">{row.text}</span></a> : <span class="alert-title">{row.text}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The first screen: a backup reminder when one is due, the alerts of the ship, its forms in progress and the next clock change. */
 export function Home() {
   const { settings, activeShip, nowUtc, persistence, clockChanges } = useAppState();
   // Taken once, when this screen opens. The status stays on the page and only its text changes, so that it is announced.
@@ -82,6 +121,7 @@ export function Home() {
         </div>
       )}
       {activeShip && <Alerts key={activeShip.id} shipId={activeShip.id} maxMonthsOnboard={maxMonthsOnboardOf(activeShip)} />}
+      {activeShip && <FormsInProgress key={activeShip.id} shipId={activeShip.id} />}
       {clockChange && <p class="clock-change">{clockChange}</p>}
       <p>
         <a href="#/ship/particulars">Ship's data</a>

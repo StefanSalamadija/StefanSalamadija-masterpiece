@@ -1,20 +1,24 @@
 import { rejoinDraft } from '../domain/crew';
 import { carryOverDocuments } from '../domain/crewDocs';
 import { TABLE_NAMES } from '../domain/types';
-import type { BaseRecord, CrewDocument, CrewMember, SyncRecord, TableName, Tables } from '../domain/types';
+import type { BaseRecord, CrewDocument, CrewMember, Scope, ShipTableName, SyncRecord, TableName, Tables } from '../domain/types';
 import type { MasterpieceDB } from './schema';
 import { syncTable, syncTables } from './schema';
 import { getSettings } from './settings';
 import { guardWrite } from './storage';
 
-/** Writes a new record: fresh id, created and updated now by this device, on the ship's side of the ship/personal split. */
+/**
+ * Writes a new record: fresh id, created and updated now by this device, on the ship's side of the ship/personal split
+ * unless `opts.scope` says otherwise (a form template is personal).
+ */
 export async function createRecord<T extends SyncRecord>(
-  db: MasterpieceDB, table: TableName, fields: Omit<T, keyof BaseRecord>,
+  db: MasterpieceDB, table: TableName, fields: Omit<T, keyof BaseRecord>, opts: { scope?: Scope } = {},
 ): Promise<T> {
   const { deviceId } = await getSettings(db);
   const now = new Date().toISOString();
+  const scope: Scope = opts.scope ?? 'ship';
   const record = {
-    ...fields, id: crypto.randomUUID(), createdAt: now, updatedAt: now, updatedBy: deviceId, deleted: false, scope: 'ship',
+    ...fields, id: crypto.randomUUID(), createdAt: now, updatedAt: now, updatedBy: deviceId, deleted: false, scope,
   } as unknown as T;
   await guardWrite(() => syncTable(db, table).put(record));
   return record;
@@ -66,16 +70,24 @@ export async function updateRecord<T extends SyncRecord>(
 }
 
 /**
- * Marks a record deleted. It stays in the table as a tombstone, so the deletion reaches other devices. Deleting a
- * tombstone again changes nothing, so it keeps its original deletion time.
+ * The tombstone of a live record: marked deleted, stamped with `stamp`. A photo's tombstone keeps no image (`jpegBase64`
+ * is emptied): the deletion has to reach other devices, the picture does not.
+ */
+export function tombstoneOf<T extends SyncRecord>(table: TableName, record: T, stamp: Pick<BaseRecord, 'updatedAt' | 'updatedBy'>): T {
+  return { ...record, deleted: true, ...(table === 'formPhotos' ? { jpegBase64: '' } : {}), ...stamp };
+}
+
+/**
+ * Marks a record deleted. It stays in the table as a tombstone (see `tombstoneOf`), so the deletion reaches other
+ * devices. Deleting a tombstone again changes nothing, so it keeps its original deletion time.
  */
 export async function softDelete(db: MasterpieceDB, table: TableName, id: string): Promise<void> {
-  await rewrite(db, table, id, (current, stamp) => (current.deleted ? undefined : { ...current, deleted: true, ...stamp }));
+  await rewrite(db, table, id, (current, stamp) => (current.deleted ? undefined : tombstoneOf(table, current, stamp)));
 }
 
 /** The ship's records in `table` that are not deleted. */
 export async function listForShip<T extends SyncRecord = SyncRecord>(
-  db: MasterpieceDB, table: Exclude<TableName, 'ships'>, shipId: string,
+  db: MasterpieceDB, table: ShipTableName, shipId: string,
 ): Promise<T[]> {
   const rows = await syncTable(db, table).where('shipId').equals(shipId).filter((r) => !r.deleted).toArray();
   return rows as T[];

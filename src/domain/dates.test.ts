@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, addMonths, formatDisplayDate, formatUtcMinute, isValidIsoDate, isValidLocalDateTime } from './dates';
+import { addDays, addMonths, formatDisplayDate, formatUtcMinute, isoWeek, isValidIsoDate, isValidLocalDateTime } from './dates';
 
 describe('isValidIsoDate', () => {
   it('accepts real calendar dates', () => {
@@ -111,5 +111,43 @@ describe('formatDisplayDate', () => {
     expect(formatDisplayDate('05.01.1985')).toBe('05.01.1985');
     expect(formatDisplayDate('2026-02-30')).toBe('2026-02-30');
     expect(formatDisplayDate('soon')).toBe('soon');
+  });
+});
+
+describe('isoWeek', () => {
+  it('gives the ISO week, year and Monday to Sunday of a date', () => {
+    expect(isoWeek('2026-10-28')).toEqual({ year: 2026, week: 44, monday: '2026-10-26', sunday: '2026-11-01' });
+  });
+
+  it('is the same for every day of one week, Monday and Sunday included', () => {
+    for (const d of ['2026-10-26', '2026-10-27', '2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01']) {
+      expect(isoWeek(d)).toEqual({ year: 2026, week: 44, monday: '2026-10-26', sunday: '2026-11-01' });
+    }
+    expect(isoWeek('2026-11-02').week).toBe(45);
+  });
+
+  it('puts early January in the last week of the year before when that week has the previous Thursday', () => {
+    expect(isoWeek('2027-01-01')).toEqual({ year: 2026, week: 53, monday: '2026-12-28', sunday: '2027-01-03' });
+    expect(isoWeek('2021-01-03')).toEqual({ year: 2020, week: 53, monday: '2020-12-28', sunday: '2021-01-03' });
+  });
+
+  it('puts late December in week 1 of the next year when that week has its Thursday', () => {
+    expect(isoWeek('2024-12-30')).toEqual({ year: 2025, week: 1, monday: '2024-12-30', sunday: '2025-01-05' });
+    expect(isoWeek('2025-12-29')).toEqual({ year: 2026, week: 1, monday: '2025-12-29', sunday: '2026-01-04' });
+  });
+
+  it('numbers the first and the last weeks of an ordinary year', () => {
+    expect(isoWeek('2026-01-01')).toEqual({ year: 2026, week: 1, monday: '2025-12-29', sunday: '2026-01-04' });
+    expect(isoWeek('2026-12-31')).toEqual({ year: 2026, week: 53, monday: '2026-12-28', sunday: '2027-01-03' });
+    expect(isoWeek('2025-12-28')).toEqual({ year: 2025, week: 52, monday: '2025-12-22', sunday: '2025-12-28' });
+  });
+
+  it('handles a leap day', () => {
+    expect(isoWeek('2028-02-29')).toEqual({ year: 2028, week: 9, monday: '2028-02-28', sunday: '2028-03-05' });
+  });
+
+  it('throws on a date that does not exist', () => {
+    expect(() => isoWeek('2026-02-30')).toThrow(RangeError);
+    expect(() => isoWeek('soon')).toThrow(RangeError);
   });
 });

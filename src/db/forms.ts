@@ -1,0 +1,387 @@
+// The forms engine is only ever imported for its types here: `src/db` is in the main bundle, the engine is loaded on demand.
+import { fromBase64, toBase64 } from '../backup/crypto';
+import { alignLeftEmpty } from '../domain/formSetup';
+import type { BaseRecord, FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
+import type { DraftValues, FormKind, FormSchema, FormSetup } from '../forms/types';
+import { createRecord, tombstoneOf, updateRecord } from './records';
+import type { MasterpieceDB } from './schema';
+import { getSettings } from './settings';
+import { guardWrite } from './storage';
+
+/*
+ * The forms' data: the library of templates (personal, not tied to a ship), and for each ship its drafts, the values of
+ * the last file made from each form, and the photos of the open drafts. Binary data is kept as standard base64 text
+ * (`fileBase64`, `jpegBase64`), so that it goes through JSON backups as it is.
+ *
+ * Every write goes through `guardWrite` (a full disk is a `StorageFullError`), and every write of more than one record
+ * is one transaction: if one record cannot be written, none is.
+ */
+
+const EMPTY_VALUES: DraftValues = { fields: {}, rows: {} };
+
+/** What `saveTemplate` stores: the file as it was imported, what detection found in it, and the setup chosen for it. */
+export interface TemplateInput { fileName: string; bytes: Uint8Array; kind: FormKind; schema: FormSchema; setup: FormSetup }
+
+/** Newest first: the one changed last, then the one created last, then by id, so the order never depends on the table's. */
+function newestFirst<T extends BaseRecord>(a: T, b: T): number {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+}
+
+function newest<T extends BaseRecord>(records: T[]): T | undefined {
+  return [...records].sort(newestFirst)[0];
+}
+
+/** The stamp of a change made now on this device. */
+async function stampNow(db: MasterpieceDB): Promise<Pick<BaseRecord, 'updatedAt' | 'updatedBy'>> {
+  const { deviceId } = await getSettings(db);
+  return { updatedAt: new Date().toISOString(), updatedBy: deviceId };
+}
+
+/** Adds a form to the library. Its code, title and revision are the schema's identity. */
+export function saveTemplate(db: MasterpieceDB, input: TemplateInput): Promise<FormTemplate> {
+  const { code, title, revision } = input.schema.identity;
+  return createRecord<FormTemplate>(db, 'formTemplates', {
+    code, title, revision, kind: input.kind, fileName: input.fileName, fileBase64: toBase64(input.bytes), schema: input.schema,
+    setup: input.setup,
+  }, { scope: 'personal' });
+}
+
+/** Said when the setup review saves a form that has left the library meanwhile. */
+export const SETUP_GONE = 'This form is no longer in the library.';
+/** Said when the setup review saves a form that changed meanwhile (a new revision imported in another tab). */
+export const SETUP_STALE = 'This form was changed since its setup was opened. Open its setup again to see the changes.';
+
+/**
+ * Saves the setup review of a form: its setup, and its schema with the names the person gave. The schema's left-empty
+ * marks are made to follow the setup, and helpers on left-empty fields are dropped (`alignLeftEmpty`).
+ * `basedOn` is the form's `updatedAt` when the review was opened. If the form changed since (a new revision came in, in
+ * another tab), nothing is saved and `SETUP_STALE` is thrown, so that a schema made from the old file never overwrites
+ * the new file's. A form that is gone is `SETUP_GONE`.
+ */
+export function saveSetup(db: MasterpieceDB, templateId: string, basedOn: string, setup: FormSetup, schema: FormSchema): Promise<FormTemplate> {
+  return guardWrite(() =>
+    // `settings` is in the scope because the stamp reads the device id from it.
+    db.transaction('rw', [db.formTemplates, db.settings], async () => {
+      const current = await db.formTemplates.get(templateId);
+      if (!current || current.deleted) throw new Error(SETUP_GONE);
+      if (current.updatedAt !== basedOn) throw new Error(SETUP_STALE);
+      const updated: FormTemplate = { ...current, ...alignLeftEmpty(schema, setup), ...(await stampNow(db)) };
+      await db.formTemplates.put(updated);
+      return updated;
+    }),
+  );
+}
+
+/** The forms in the library that are not deleted, in no particular order. */
+export function listTemplates(db: MasterpieceDB): Promise<FormTemplate[]> {
+  return db.formTemplates.filter((t) => !t.deleted).toArray();
+}
+
+/**
+ * The ship's live drafts of `template`. A draft belongs to the template by its `templateId`. A draft handed over from a
+ * device with its own copy of the form names a template that is not here; it then belongs to the template here with the
+ * same code (as the Forms screen lists it), but only when it was made with the same revision (R25): another revision's
+ * field ids can name other boxes. A form without a code is never matched by code: an empty code says nothing.
+ */
+async function liveDraftsOf(db: MasterpieceDB, shipId: string, template: FormTemplate): Promise<FormDraft[]> {
+  const drafts = await db.formDrafts.where('shipId').equals(shipId).filter((d) => !d.deleted).toArray();
+  const byCode = template.code === '' ? [] : drafts.filter((d) => d.templateId !== template.id && d.code === template.code && d.revision === template.revision);
+  const known = new Set((await db.formTemplates.bulkGet(byCode.map((d) => d.templateId))).flatMap((t) => (t && !t.deleted ? [t.id] : [])));
+  return drafts.filter((d) => d.templateId === template.id || (byCode.includes(d) && !known.has(d.templateId)));
+}
+
+/** The ship's live draft of `template` (the newest, if a merge of two devices left two), or none. Only reads. */
+export async function findDraft(db: MasterpieceDB, shipId: string, template: FormTemplate): Promise<FormDraft | undefined> {
+  return db.transaction('r', [db.formDrafts, db.formTemplates], async () => newest(await liveDraftsOf(db, shipId, template)));
+}
+
+/** What a new draft starts with: its values, and the ids of those that are untouched auto values (R18). */
+export interface DraftStart { values: DraftValues; autoIds: string[] }
+
+/**
+ * The ship's draft of `template`: the live one there is (the newest, if a merge of two devices left two), or a new one
+ * for `period`, holding `start` (empty, with no auto values fixed, when it is not given). There is one live draft per
+ * template and ship; looking and creating are one transaction, so two calls at once still make only one. A draft that
+ * is there already is given back as it is: `start` is only for a new one.
+ */
+export function openDraft(db: MasterpieceDB, shipId: string, template: FormTemplate, period: string, start?: DraftStart): Promise<FormDraft> {
+  return guardWrite(() =>
+    // `settings` is in the scope because `createRecord` reads the device id from it.
+    db.transaction('rw', [db.formDrafts, db.formTemplates, db.settings], async () => {
+      const found = newest(await liveDraftsOf(db, shipId, template));
+      if (found) return found;
+      return createRecord<FormDraft>(db, 'formDrafts', {
+        shipId, templateId: template.id, code: template.code, revision: template.revision, period, values: start?.values ?? EMPTY_VALUES,
+        photoIds: [], ...(start ? { autoIds: start.autoIds } : {}),
+      });
+    }),
+  );
+}
+
+/**
+ * Saves the values of a live draft, stamped as changed now, and with `autoIds` the ids that still hold an untouched
+ * auto value (left as they are when not given). A closed or discarded draft is refused.
+ */
+export async function saveDraftValues(db: MasterpieceDB, draftId: string, values: DraftValues, autoIds?: string[]): Promise<FormDraft> {
+  return updateRecord<FormDraft>(db, 'formDrafts', draftId, autoIds === undefined ? { values } : { values, autoIds });
+}
+
+/** The draft, which must exist, be live and be the ship's when `shipId` is given. Throws otherwise. */
+async function liveDraft(db: MasterpieceDB, draftId: string, shipId?: string): Promise<FormDraft> {
+  const draft = await db.formDrafts.get(draftId);
+  if (!draft) throw new Error(`There is no form draft with id ${draftId}.`);
+  if (draft.deleted) throw new Error(`The form draft is closed: ${draftId}`);
+  if (shipId !== undefined && draft.shipId !== shipId) throw new Error(`The form draft ${draftId} is not the ship's.`);
+  return draft;
+}
+
+/**
+ * Stores a photo (JPEG, already downsized) for a live draft of the ship and adds it to the draft's `photoIds`, in one
+ * transaction. A draft that is closed, missing or another ship's is refused, and nothing is written.
+ */
+export function addPhoto(
+  db: MasterpieceDB, shipId: string, draftId: string, jpeg: Uint8Array, width: number, height: number,
+): Promise<FormPhoto> {
+  const jpegBase64 = toBase64(jpeg);
+  return guardWrite(() =>
+    db.transaction('rw', [db.formDrafts, db.formPhotos, db.settings], async () => {
+      const draft = await liveDraft(db, draftId, shipId);
+      const photo = await createRecord<FormPhoto>(db, 'formPhotos', { shipId, draftId, jpegBase64, width, height });
+      await db.formDrafts.put({ ...draft, photoIds: [...draft.photoIds, photo.id], ...(await stampNow(db)) });
+      return photo;
+    }),
+  );
+}
+
+/**
+ * Removes a photo that is no longer used (taken out of the form, or replaced): the photo becomes a tombstone that keeps no
+ * image, so it stops counting toward storage and backups, and its id leaves the draft's `photoIds`. A photo that is gone
+ * already is left as it is.
+ */
+export function removePhoto(db: MasterpieceDB, photoId: string): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.formDrafts, db.formPhotos, db.settings], async () => {
+      const photo = await db.formPhotos.get(photoId);
+      if (!photo || photo.deleted) return;
+      const stamp = await stampNow(db);
+      await db.formPhotos.put(tombstoneOf('formPhotos', photo, stamp));
+      const draft = await db.formDrafts.get(photo.draftId);
+      if (draft && !draft.deleted) await db.formDrafts.put({ ...draft, photoIds: draft.photoIds.filter((id) => id !== photoId), ...stamp });
+    }),
+  );
+}
+
+/** The draft's live photos, by id, as JPEG bytes. */
+export async function photosFor(db: MasterpieceDB, draftId: string): Promise<Record<string, Uint8Array>> {
+  const photos = await db.formPhotos.where('draftId').equals(draftId).filter((p) => !p.deleted).toArray();
+  return Object.fromEntries(photos.map((p) => [p.id, fromBase64(p.jpegBase64)]));
+}
+
+/**
+ * What a form's last values are kept under (`FormLastValues.code`): the form's code, so that they still match on a device
+ * with its own copy of the form, or `template:<templateId>` for a form without a code, so that two such forms never mix.
+ */
+export function lastValuesKey(code: string, templateId: string): string {
+  return code === '' ? `template:${templateId}` : code;
+}
+
+/** The ship's live last-values records kept under `key` (see `lastValuesKey`). */
+function liveLastValues(db: MasterpieceDB, shipId: string, key: string): Promise<FormLastValues[]> {
+  return db.formLastValues.where('shipId').equals(shipId).filter((r) => !r.deleted && r.code === key).toArray();
+}
+
+/**
+ * The values of the last file made from `template` on the ship: the newest live record under its key (see
+ * `lastValuesKey`; a merge of two devices can leave two), or undefined. They are ignored (undefined) when they were made
+ * with another revision of the form, or with none recorded (R25): their field ids can name other boxes.
+ */
+export async function lastValuesFor(
+  db: MasterpieceDB, shipId: string, template: Pick<FormTemplate, 'id' | 'code' | 'revision'>,
+): Promise<FormLastValues | undefined> {
+  const last = newest(await liveLastValues(db, shipId, lastValuesKey(template.code, template.id)));
+  return last?.revision === template.revision ? last : undefined;
+}
+
+/** Tombstones the draft (unless it already is one) and its live photos, whose image is not kept. Inside a transaction. */
+async function deleteDraftAndPhotos(db: MasterpieceDB, draft: FormDraft, stamp: Pick<BaseRecord, 'updatedAt' | 'updatedBy'>): Promise<void> {
+  if (!draft.deleted) await db.formDrafts.put(tombstoneOf('formDrafts', draft, stamp));
+  const photos = await db.formPhotos.where('draftId').equals(draft.id).filter((p) => !p.deleted).toArray();
+  await db.formPhotos.bulkPut(photos.map((p) => tombstoneOf('formPhotos', p, stamp)));
+}
+
+/**
+ * Closes a draft once its file is made, in one transaction: if any write fails, nothing is written.
+ * - The ship's last values of the form, under its `lastValuesKey`, become `values`. The newest live record is updated
+ *   (and one a merge left beside it is deleted), else one is created.
+ * - The draft is soft-deleted, and so are its photos, whose tombstones keep no image.
+ * - With `rollover`, the next draft of the same form and ship is started, for `rollover.period` with `rollover.values`
+ *   (the jobs that are not finished, say), and no photos.
+ * A draft that is closed already, or missing, is refused.
+ */
+export async function closeDraft(
+  db: MasterpieceDB, draftId: string, values: DraftValues, rollover?: { period: string; values: DraftValues },
+): Promise<void> {
+  await guardWrite(() =>
+    db.transaction('rw', [db.formDrafts, db.formPhotos, db.formLastValues, db.settings], async () => {
+      const draft = await liveDraft(db, draftId);
+      const stamp = await stampNow(db);
+      const key = lastValuesKey(draft.code, draft.templateId);
+      const [current, ...others] = (await liveLastValues(db, draft.shipId, key)).sort(newestFirst);
+      // Kept with the revision the draft was made with (R25), or with none when the draft has none recorded.
+      const revision = draft.revision === undefined ? {} : { revision: draft.revision };
+      if (current) {
+        const { revision: _made, ...kept } = current;
+        await db.formLastValues.put({ ...kept, values, ...revision, ...stamp });
+      } else {
+        await createRecord<FormLastValues>(db, 'formLastValues', { shipId: draft.shipId, code: key, values, ...revision });
+      }
+      await db.formLastValues.bulkPut(others.map((r) => tombstoneOf('formLastValues', r, stamp)));
+      await deleteDraftAndPhotos(db, draft, stamp);
+      if (rollover) {
+        await createRecord<FormDraft>(db, 'formDrafts', {
+          shipId: draft.shipId, templateId: draft.templateId, code: draft.code, period: rollover.period, values: rollover.values,
+          photoIds: [], ...(draft.revision === undefined ? {} : { revision: draft.revision }),
+        });
+      }
+    }),
+  );
+}
+
+/**
+ * Throws a draft away: the draft and its photos are soft-deleted, in one transaction, and no last values are kept. A
+ * draft discarded already keeps its deletion time. A missing draft is refused.
+ */
+export async function discardDraft(db: MasterpieceDB, draftId: string): Promise<void> {
+  await guardWrite(() =>
+    db.transaction('rw', [db.formDrafts, db.formPhotos, db.settings], async () => {
+      const draft = await db.formDrafts.get(draftId);
+      if (!draft) throw new Error(`There is no form draft with id ${draftId}.`);
+      await deleteDraftAndPhotos(db, draft, await stampNow(db));
+    }),
+  );
+}
+
+/**
+ * Removes a form from the library (R26), in one transaction (all or nothing), soft-deleting:
+ * - the template, whose tombstone keeps no file (`fileBase64` is emptied, as a photo's keeps no image), so that it stops
+ *   counting toward storage and backups;
+ * - its live drafts, of every ship: those that name it, and those handed over from a copy of the same code and revision
+ *   that it takes as its own (`liveDraftsOf`), unless another live copy with that code and revision takes them too;
+ * - the photos of those drafts, whose tombstones keep no image;
+ * - its last values, of every ship, under its key (`lastValuesKey`), unless another live copy of the form has that key.
+ * A form that is missing is refused, and so is one already removed (`SETUP_GONE`); nothing is written then.
+ */
+export function removeTemplate(db: MasterpieceDB, templateId: string): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.formTemplates, db.formDrafts, db.formPhotos, db.formLastValues, db.settings], async () => {
+      const template = await db.formTemplates.get(templateId);
+      if (!template) throw new Error(`There is no form template with id ${templateId}.`);
+      if (template.deleted) throw new Error(SETUP_GONE);
+      const others = (await db.formTemplates.toArray()).filter((t) => !t.deleted && t.id !== templateId);
+      const live = new Set(others.map((t) => t.id));
+      const twin = template.code !== '' && others.some((t) => t.code === template.code && t.revision === template.revision);
+      const stamp = await stampNow(db);
+
+      const byCode = (d: FormDraft) => !twin && template.code !== '' && d.code === template.code && d.revision === template.revision && !live.has(d.templateId);
+      const drafts = await db.formDrafts.filter((d) => !d.deleted && (d.templateId === templateId || byCode(d))).toArray();
+      for (const draft of drafts) await deleteDraftAndPhotos(db, draft, stamp);
+
+      const key = lastValuesKey(template.code, templateId);
+      const shared = others.some((t) => lastValuesKey(t.code, t.id) === key);
+      const lasts = shared ? [] : await db.formLastValues.where('code').equals(key).filter((r) => !r.deleted).toArray();
+      await db.formLastValues.bulkPut(lasts.map((r) => tombstoneOf('formLastValues', r, stamp)));
+
+      await db.formTemplates.put({ ...tombstoneOf('formTemplates', template, stamp), fileBase64: '' });
+    }),
+  );
+}
+
+/** What `replaceTemplate` did. */
+export interface RevisionResult {
+  /** The template as it is now: the same id, with the new revision's file, identity, schema and the carried-over setup. */
+  template: FormTemplate;
+  /** The new fields nothing was linked to, by label, for the setup screen's `New fields to check: <labels>`. */
+  unmatched: string[];
+  /** The old fields nothing was linked to, by label: what the form no longer asks for. */
+  removed: string[];
+  /** How many values in the open drafts (every ship's) could not be carried over. */
+  droppedFromDrafts: number;
+  /** How many of the last values (every ship's) could not be carried over. */
+  droppedFromLastValues: number;
+}
+
+/** Whether two records hold the same data (the same JSON). */
+function sameData(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Replaces a form in the library by its new revision (spec §4 step 5), keeping its id: the file, its name and kind, the
+ * code, title and revision, and the schema become the new file's. The old fields are linked to the new ones
+ * (`mapRevision`), and through that link, in one transaction (all or nothing):
+ * - the setup is carried over (`migrateSetup`), and the stored schema's left-empty marks follow it (`alignLeftEmpty`);
+ * - every live draft of the template, of every ship, moves to the new ids (`migrateValues`), and takes the new code and
+ *   revision (R25);
+ * - so do the last values kept under the form's key (`lastValuesKey`), of every ship, under the new key if it changed.
+ * What cannot be carried over is counted. A picture field that is gone loses its value (the photo's id), but the photo
+ * stays with its draft until the draft is closed, as every photo does. A draft or last-values record that nothing
+ * changed is not written.
+ *
+ * `oldId` names the template to replace: after a handover two live templates can share a code, and the caller chooses.
+ * Templates are never merged here. Refused, with nothing written: a missing or deleted template; a new file whose code
+ * is not the old one's (a form without a code can take one); a `kind` that is not the schema's.
+ */
+export async function replaceTemplate(db: MasterpieceDB, oldId: string, input: Omit<TemplateInput, 'setup'>): Promise<RevisionResult> {
+  // The forms engine is loaded on demand, outside the main bundle; and a transaction must not wait for anything but the
+  // database. So the module is loaded, and the file encoded, before the transaction starts.
+  const { mapRevision, migrateSetup, migrateValues } = await import('../forms/revision');
+  const fileBase64 = toBase64(input.bytes);
+  const { code, title, revision } = input.schema.identity;
+  return guardWrite(() =>
+    db.transaction('rw', [db.formTemplates, db.formDrafts, db.formLastValues, db.settings], async () => {
+      const old = await db.formTemplates.get(oldId);
+      if (!old) throw new Error(`There is no form template with id ${oldId}.`);
+      if (old.deleted) throw new Error(`The form template is deleted: ${oldId}`);
+      // A new revision is the same form: the caller found it by its code. A different code is another form.
+      if (input.kind !== input.schema.kind) throw new Error(`The file is a ${input.kind}, but its schema says ${input.schema.kind}.`);
+      if (old.code !== '' && code !== old.code) throw new Error(`Form ${code || '(no code)'} is not a revision of form ${old.code}.`);
+      const { map, unmatched, removed } = mapRevision(old.schema, input.schema);
+      const schemas = { from: old.schema, to: input.schema };
+      const stamp = await stampNow(db);
+
+      let droppedFromDrafts = 0;
+      const drafts = await db.formDrafts.where('templateId').equals(oldId).filter((d) => !d.deleted).toArray();
+      const movedDrafts = drafts.flatMap((draft) => {
+        const { values, dropped } = migrateValues(draft.values, map, schemas);
+        droppedFromDrafts += dropped.length;
+        // The untouched auto values keep their mark under their new ids; one whose field is gone loses it.
+        const autoIds = draft.autoIds?.flatMap((id) => (map[id] !== undefined && map[id] in values.fields ? [map[id]] : []));
+        // The draft's values are now by the new revision's ids, so it is now of that revision (R25).
+        const next = autoIds === undefined ? { ...draft, code, revision, values } : { ...draft, code, revision, values, autoIds };
+        return sameData([draft.values, draft.code, draft.autoIds, draft.revision], [values, code, autoIds, revision]) ? [] : [{ ...next, ...stamp }];
+      });
+      await db.formDrafts.bulkPut(movedDrafts);
+
+      let droppedFromLastValues = 0;
+      const key = lastValuesKey(code, oldId);
+      const lasts = await db.formLastValues.where('code').equals(lastValuesKey(old.code, oldId)).filter((r) => !r.deleted).toArray();
+      const movedLasts = lasts.flatMap((last) => {
+        const { values, dropped } = migrateValues(last.values, map, schemas);
+        droppedFromLastValues += dropped.length;
+        return sameData([last.values, last.code, last.revision], [values, key, revision]) ? [] : [{ ...last, code: key, revision, values, ...stamp }];
+      });
+      await db.formLastValues.bulkPut(movedLasts);
+
+      // The new file's schema comes with detection's left-empty marks; the carried-over setup holds the person's choices,
+      // which every file-making path must follow even if the setup is never saved again.
+      const template: FormTemplate = {
+        ...old, code, title, revision, kind: input.kind, fileName: input.fileName, fileBase64,
+        ...alignLeftEmpty(input.schema, migrateSetup(old.setup, map, input.schema)), ...stamp,
+      };
+      await db.formTemplates.put(template);
+      return { template, unmatched, removed, droppedFromDrafts, droppedFromLastValues };
+    }),
+  );
+}

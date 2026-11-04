@@ -15,8 +15,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { PasswordDialog } from '../components/PasswordDialog';
 import {
-  cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, oldestRemovedNote, parseReminderDays, REMINDER_ERROR,
-  restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
+  cleanDeviceName, DEVICE_NAME_REQUIRED, EXPORT_CANCELLED, INCLUDE_LIBRARY_HINT, INCLUDE_LIBRARY_LABEL, oldestRemovedNote,
+  parseReminderDays, REMINDER_ERROR, restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from '../settingsView';
 import { THEME_LABELS, THEMES } from '../theme';
 import { useDialogAction } from '../useDialogAction';
@@ -36,15 +36,19 @@ function BackupSection() {
   const [chosenShipId, setChosenShipId] = useState<string>();
   const [dialog, setDialog] = useState<ExportDialog>();
   const [status, setStatus] = useState('');
+  // Ticked each time the handover dialog opens: the relief needs the forms to fill the ship's drafts in.
+  const [includeLibrary, setIncludeLibrary] = useState(true);
   const fullButton = useRef<HTMLButtonElement>(null);
   const handoverButton = useRef<HTMLButtonElement>(null);
   const shipSelectId = useId();
+  const libraryHintId = useId();
 
   // The ship that is chosen, else the active one; a chosen ship that has gone from the list gives way to the first.
   const handoverShip = ships?.find((ship) => ship.id === (chosenShipId ?? activeShip?.id)) ?? ships?.[0];
 
   const open = (which: ExportDialog): void => {
     setStatus('');
+    setIncludeLibrary(true);
     setDialog(which);
   };
   const done = (outcome: ExportOutcome, exported: string): void => {
@@ -89,8 +93,21 @@ function BackupSection() {
           title="Export handover file" showWarning={!settings.firstExportDone} offerRemember={false}
           intro={<p>Only {handoverShip.particulars.name} goes into this file, with a password of its own. Give the password to the person taking over.</p>}
           focusFallback={handoverButton} onCancel={() => setDialog(undefined)}
+          options={
+            <>
+              <label class="check">
+                <input
+                  type="checkbox" checked={includeLibrary} aria-describedby={libraryHintId}
+                  onChange={(event) => setIncludeLibrary(event.currentTarget.checked)}
+                />
+                <span>{INCLUDE_LIBRARY_LABEL}</span>
+              </label>
+              <p id={libraryHintId} class="helper-text">{INCLUDE_LIBRARY_HINT}</p>
+            </>
+          }
           onSubmit={async (password) => {
-            done(await exportAndShare(db, { kind: 'handover', password, shipId: handoverShip.id, remember: false }), 'Handover file exported.');
+            const request = { kind: 'handover' as const, password, shipId: handoverShip.id, remember: false, includeLibrary };
+            done(await exportAndShare(db, request), 'Handover file exported.');
           }}
         />
       )}

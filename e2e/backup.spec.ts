@@ -332,7 +332,7 @@ test('snapshot restore', async ({ browser }) => {
     await snapshotRow(b, 'Before import').getByRole('button', { name: 'Restore' }).click();
     const dialog = b.getByRole('dialog');
     await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
-    await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-25 09:\d\d UTC \(Before import\)/)).toBeVisible();
+    await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages, clock changes and forms of the snapshot from 2026-10-25 09:\d\d UTC \(Before import\)/)).toBeVisible();
     await expect(dialog.getByText('is removed to make room')).toHaveCount(0); // there is room: two snapshots at most here
     await dialog.getByRole('button', { name: 'Restore' }).click();
     await expect(dialog).toHaveCount(0);
@@ -424,6 +424,12 @@ test('a handover file has a password of its own and holds one ship only', async 
     await expect(dialog.getByLabel('Repeat password')).toHaveValue('');
     await expect(dialog.getByLabel('Remember until the app is closed')).toHaveCount(0);
     await expect(dialog.getByText('Only MV OCEAN STAR goes into this file')).toBeVisible();
+    // The forms library goes with the ship unless it is unticked; it is ticked again each time the dialog opens.
+    await expect(dialog.getByRole('checkbox', { name: 'Include forms library' })).toBeChecked();
+    await dialog.getByRole('checkbox', { name: 'Include forms library' }).uncheck();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await a.getByRole('button', { name: 'Export handover file' }).click();
+    await expect(dialog.getByRole('checkbox', { name: 'Include forms library' })).toBeChecked();
     await dialog.getByLabel('Backup password').fill('relief-pass-1');
     await dialog.getByLabel('Repeat password').fill('relief-pass-1');
     const download = a.waitForEvent('download');
@@ -436,6 +442,8 @@ test('a handover file has a password of its own and holds one ship only', async 
     await a.getByRole('button', { name: 'Export full backup' }).click();
     await expect(dialog.getByLabel('Backup password')).toHaveValue('pw-12345678');
     await expect(dialog.getByLabel('Repeat password')).toHaveValue('pw-12345678');
+    // A full backup holds everything: there is no library to leave out.
+    await expect(dialog.getByRole('checkbox', { name: 'Include forms library' })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Cancel' }).click();
 
     // The remembered password does not open the handover file; its own password does, and only MV OCEAN STAR comes with it.
@@ -631,7 +639,7 @@ test('restore says when it will push the oldest snapshot out', async ({ page }) 
   // Four are kept, so there is room for the one the restore takes.
   const dialog = page.getByRole('dialog');
   await snapshotRow(page, 'Seed 14').getByRole('button', { name: 'Restore' }).click();
-  await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from 2026-10-14 08:15 UTC \(Seed 14\)/)).toBeVisible();
+  await expect(dialog.getByText(/ships, crew, crew documents, certificates, voyages, clock changes and forms of the snapshot from 2026-10-14 08:15 UTC \(Seed 14\)/)).toBeVisible();
   await expect(dialog.getByText('Your current data is saved as a snapshot first, so the restore can be undone.')).toBeVisible();
   await expect(dialog.getByText('is removed to make room')).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Cancel' }).click();
@@ -752,9 +760,9 @@ test('import with no ship: no header, a way back, and a file that is not a backu
   });
   const reads = () => page.evaluate(() => (window as unknown as { reads: number }).reads);
   const huge = testInfo.outputPath('video.mp4');
-  await fs.writeFile(huge, new Uint8Array(65 * 1024 * 1024));
+  await fs.writeFile(huge, new Uint8Array(129 * 1024 * 1024));
   await page.getByLabel('Backup file').setInputFiles(huge);
-  await expect(page.getByRole('alert')).toHaveText('This file is too large to be a Masterpiece backup (over 64 MB).');
+  await expect(page.getByRole('alert')).toHaveText('This file is too large to be a Masterpiece backup (over 128 MB).');
   await expect(page.getByText('video.mp4')).toBeVisible();
   expect(await reads()).toBe(0);
 

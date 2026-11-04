@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addPhoto, closeDraft, openDraft, saveTemplate } from '../db/forms';
 import { allTables, createRecord, softDelete, updateRecord } from '../db/records';
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
@@ -11,8 +12,9 @@ import { TABLE_NAMES } from '../domain/types';
 import type {
   Certificate, ClockChange, CrewDocument, CrewDraft, CrewImportMapping, CrewListColumn, CrewMember, ShipProfile, SyncRecord, TableName, Tables, Voyage,
 } from '../domain/types';
-import { BackupError, DamagedFileError, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
+import { BackupError, BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, NotABackupError, StaleReviewError, WrongPasswordError, openBackup, readHeader, sealBackup } from './envelope';
 import type { BackupHeader } from './envelope';
+import type { FormSchema, FormSetup } from '../forms/types';
 import { applyImport, collectHandover, exportBackup, prepareImport, recordFullBackup } from './service';
 
 // The real `takeSnapshot`, as a mock that calls it, so that a test can change the data at the moment the snapshot is taken.
@@ -49,7 +51,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const emptyTables = (): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [] });
+const emptyTables = (): Tables => ({
+  ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+});
 
 /** Device A as the tests use it: two ships, and on the first one crew (one of them deleted), a voyage, a certificate and a personal-scope record. */
 async function deviceA() {
@@ -91,6 +96,7 @@ describe('collectHandover', () => {
 
   it('keeps one ship, its ship-scope records and its tombstones, and nothing else', () => {
     const t: Tables = {
+      ...emptyTables(),
       ships: [rec('s1', {}), rec('s2', {}), rec('s3', {}, 'personal')],
       crew: [rec('c1', { shipId: 's1' }), rec('c2', { shipId: 's2' }), rec('c3', { shipId: 's1' }, 'personal'), rec('c4', { shipId: 's1' }, 'ship', true)],
       voyages: [rec('v1', { shipId: 's1' }), rec('v2', { shipId: 's2' })],
@@ -101,7 +107,7 @@ describe('collectHandover', () => {
         rec('d4', { shipId: 's1', crewId: 'c4' }, 'ship', true),
       ],
     };
-    const h = collectHandover(t, 's1');
+    const h = collectHandover(t, 's1', { includeLibrary: false });
     expect(h.ships.map((r) => r.id)).toEqual(['s1']);
     expect(h.crew.map((r) => r.id)).toEqual(['c1', 'c4']);
     expect(h.voyages.map((r) => r.id)).toEqual(['v1']);
@@ -113,12 +119,12 @@ describe('collectHandover', () => {
   it('does not match a record of another table on its id, and leaves the input alone', () => {
     const t: Tables = { ...emptyTables(), ships: [rec('s1', {})], crew: [rec('s1', { shipId: 's2' })] };
     const before = structuredClone(t);
-    expect(collectHandover(t, 's1').crew).toEqual([]);
+    expect(collectHandover(t, 's1', { includeLibrary: true }).crew).toEqual([]);
     expect(t).toEqual(before);
   });
 
   it('is empty for an unknown ship', () => {
-    expect(collectHandover({ ...emptyTables(), ships: [rec('s1', {})] }, 'nope')).toEqual(emptyTables());
+    expect(collectHandover({ ...emptyTables(), ships: [rec('s1', {})] }, 'nope', { includeLibrary: false })).toEqual(emptyTables());
   });
 });
 
@@ -186,6 +192,155 @@ describe('crew documents in a backup', () => {
     await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
     expect((await allTables(b)).crewDocuments).toEqual([]);
     expect((await allTables(b)).ships).toHaveLength(2);
+  });
+});
+
+/** Invented forms only. A template whose file has every byte value, so that a lost or changed byte shows. */
+const formSchema = (code: string): FormSchema => ({
+  kind: 'docx', identity: { code, title: 'Toolbox Talk', revision: '00 / 01.01.2026' },
+  fields: [{ id: 'f1', kind: 'text', label: 'Vessel', section: '', loc: 'word/document.xml#0/1', confidence: 'high' }],
+  rowGroups: [], unsupported: [],
+});
+const formSetup: FormSetup = {
+  links: { f1: { source: 'vessel.name' } }, leftEmpty: [],
+  helpers: { pickCrew: [], allOk: [], todayRow: [], startFromLast: [], jobLog: [], thresholds: [], now: [] },
+  okWord: 'Satisfactory', notFinished: 'Pending',
+};
+const fileBytes = (length: number): Uint8Array => Uint8Array.from({ length }, (_, i) => (i * 131 + 17) % 256);
+
+/**
+ * Device A with forms: two templates in the library (a third deleted), and on each ship a draft with a photo and last
+ * values from a closed draft, whose photo is now a tombstone.
+ */
+async function deviceAWithForms() {
+  const a = await deviceA();
+  const template = await saveTemplate(a.db, { fileName: 'toolbox.docx', bytes: fileBytes(100_000), kind: 'docx', schema: formSchema('TST-01'), setup: formSetup });
+  const inventory = await saveTemplate(a.db, { fileName: 'inv.xlsx', bytes: fileBytes(5_000), kind: 'xlsx', schema: formSchema('TST-02'), setup: formSetup });
+  const removed = await saveTemplate(a.db, { fileName: 'old.docx', bytes: fileBytes(10), kind: 'docx', schema: formSchema('TST-00'), setup: formSetup });
+  await softDelete(a.db, 'formTemplates', removed.id);
+  const closed = await openDraft(a.db, a.ship.id, template, '2026-10-24');
+  const closedPhoto = await addPhoto(a.db, a.ship.id, closed.id, fileBytes(300), 3, 1);
+  await closeDraft(a.db, closed.id, { fields: { f1: 'M/V Ocean Star' }, rows: {} });
+  const draft = await openDraft(a.db, a.ship.id, template, '2026-10-25');
+  const photo = await addPhoto(a.db, a.ship.id, draft.id, fileBytes(2_000), 40, 30);
+  const theirDraft = await openDraft(a.db, a.other.id, inventory, '2026-10-25');
+  const theirPhoto = await addPhoto(a.db, a.other.id, theirDraft.id, fileBytes(700), 7, 1);
+  await closeDraft(a.db, theirDraft.id, { fields: { f1: 'Šibenik Express' }, rows: {} }, { period: '2026-10-26', values: { fields: {}, rows: {} } });
+  return { ...a, template, inventory, removed, closed, closedPhoto, draft, photo, theirDraft, theirPhoto };
+}
+
+const ids = (records: SyncRecord[]): string[] => records.map((r) => r.id).sort();
+const FORM_TABLES = ['formTemplates', 'formDrafts', 'formLastValues', 'formPhotos'] as const;
+
+describe('forms in a backup', () => {
+  it('go into a full backup with their tombstones, and come out on the other device exactly, every byte of the files', async () => {
+    const a = await deviceAWithForms();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    const local = await allTables(a.db);
+    for (const table of FORM_TABLES) expect(payload.tables[table], table).toEqual(local[table]);
+    expect(ids(payload.tables.formTemplates)).toEqual(ids([a.template, a.inventory, a.removed]));
+
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    const imported = await allTables(b);
+    for (const table of FORM_TABLES) expect(imported[table], table).toEqual(local[table]);
+    expect(await b.formTemplates.get(a.template.id)).toMatchObject({ fileBase64: a.template.fileBase64, scope: 'personal', setup: formSetup });
+    expect(await b.formDrafts.get(a.draft.id)).toEqual(await a.db.formDrafts.get(a.draft.id));
+    expect(await b.formPhotos.get(a.closedPhoto.id)).toMatchObject({ deleted: true, jpegBase64: '' });
+    const again = await prepareImport(b, text, PW);
+    expect(again.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 0 });
+  });
+
+  it("go into a handover with the ship's drafts, last values and photos, tombstones included, and the live library", async () => {
+    const a = await deviceAWithForms();
+    const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, includeLibrary: true, ...FAST });
+    const { tables } = (await openBackup(text, PW)).payload;
+    expect(ids(tables.formTemplates)).toEqual(ids([a.template, a.inventory]));
+    expect(tables.formTemplates.every((t) => t.scope === 'personal' && !t.deleted)).toBe(true);
+    expect(ids(tables.formDrafts)).toEqual(ids([a.closed, a.draft]));
+    expect(tables.formLastValues.map((r) => (r as { shipId: string }).shipId)).toEqual([a.ship.id]);
+    expect(ids(tables.formPhotos)).toEqual(ids([a.closedPhoto, a.photo]));
+  });
+
+  it('leave the library out of a handover when it is not wanted, and by default', async () => {
+    const a = await deviceAWithForms();
+    for (const opts of [{ includeLibrary: false }, {}]) {
+      const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...opts, ...FAST });
+      const { tables } = (await openBackup(text, PW)).payload;
+      expect(tables.formTemplates).toEqual([]);
+      expect(ids(tables.formDrafts)).toEqual(ids([a.closed, a.draft]));
+    }
+  });
+
+  it("never put another ship's drafts, last values or photos into a handover", async () => {
+    const a = await deviceAWithForms();
+    for (const [shipId, otherId] of [[a.ship.id, a.other.id], [a.other.id, a.ship.id]]) {
+      const { text } = await exportBackup(a.db, 'handover', PW, { shipId, includeLibrary: true, ...FAST });
+      const { tables } = (await openBackup(text, PW)).payload;
+      for (const table of ['formDrafts', 'formLastValues', 'formPhotos'] as const) {
+        expect(tables[table].length, table).toBeGreaterThan(0);
+        expect(tables[table].every((r) => (r as { shipId: string }).shipId === shipId), table).toBe(true);
+        expect(tables[table].some((r) => (r as { shipId: string }).shipId === otherId), table).toBe(false);
+      }
+    }
+  });
+
+  it('bring the library and the ship\'s open draft to the relief, who can carry on with it', async () => {
+    const a = await deviceAWithForms();
+    const { text } = await exportBackup(a.db, 'handover', 'relief-pass', { shipId: a.ship.id, includeLibrary: true, ...FAST });
+    const relief = freshDb();
+    await applyImport(relief, await prepareImport(relief, text, 'relief-pass'), { conflicts: {}, applyDeletions: true });
+    const template = await relief.formTemplates.get(a.template.id);
+    expect(template?.fileBase64).toBe(a.template.fileBase64);
+    expect((await openDraft(relief, a.ship.id, template!, '2026-10-26')).id).toBe(a.draft.id);
+  });
+
+  it('are left out of nothing by an old file: a backup made before forms existed imports with none', async () => {
+    const a = await deviceA();
+    const { formTemplates: _t, formDrafts: _d, formLastValues: _l, formPhotos: _p, ...secondVersion } = await allTables(a.db);
+    const header: BackupHeader = { format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-old', deviceName: 'Old phone', exportedAt: '2026-10-20T00:00:00.000Z' };
+    const old = await sealBackup(header, { tables: secondVersion } as never, PW, FAST);
+    const b = freshDb();
+    const prepared = await prepareImport(b, old, PW);
+    expect(prepared.plan.items.every((i) => !(FORM_TABLES as readonly string[]).includes(i.table))).toBe(true);
+    await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
+    const imported = await allTables(b);
+    for (const table of FORM_TABLES) expect(imported[table], table).toEqual([]);
+    expect(imported.ships).toHaveLength(2);
+  });
+});
+
+describe('collectHandover and the forms library', () => {
+  const stamp = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'x' };
+  const rec = (id: string, extra: object, scope: 'ship' | 'personal' = 'ship', deleted = false): SyncRecord =>
+    ({ id, ...stamp, deleted, scope, ...extra }) as unknown as SyncRecord;
+  const t: Tables = {
+    ...emptyTables(),
+    ships: [rec('s1', {}), rec('s2', {})],
+    formTemplates: [rec('t1', {}, 'personal'), rec('t2', {}, 'personal', true), rec('t3', {}, 'personal')],
+    formDrafts: [rec('d1', { shipId: 's1' }), rec('d2', { shipId: 's2' }), rec('d3', { shipId: 's1' }, 'ship', true), rec('d4', { shipId: 's1' }, 'personal')],
+    formLastValues: [rec('l1', { shipId: 's1' }), rec('l2', { shipId: 's2' })],
+    formPhotos: [rec('p1', { shipId: 's1', draftId: 'd1' }), rec('p2', { shipId: 's2', draftId: 'd2' }), rec('p3', { shipId: 's1', draftId: 'd3' }, 'ship', true)],
+  };
+
+  it('adds the live templates when the library is included, never a deleted one', () => {
+    expect(collectHandover(t, 's1', { includeLibrary: true }).formTemplates.map((r) => r.id)).toEqual(['t1', 't3']);
+  });
+
+  it('adds no template when the library is left out', () => {
+    expect(collectHandover(t, 's1', { includeLibrary: false }).formTemplates).toEqual([]);
+  });
+
+  it("keeps the ship's ship-scope drafts, last values and photos with their tombstones, and nothing of another ship", () => {
+    const h = collectHandover(t, 's1', { includeLibrary: true });
+    expect(h.formDrafts.map((r) => r.id)).toEqual(['d1', 'd3']);
+    expect(h.formLastValues.map((r) => r.id)).toEqual(['l1']);
+    expect(h.formPhotos.map((r) => r.id)).toEqual(['p1', 'p3']);
+  });
+
+  it('adds no template to the handover of a ship that is not there', () => {
+    expect(collectHandover(t, 'nope', { includeLibrary: true })).toEqual(emptyTables());
   });
 });
 
@@ -306,6 +461,32 @@ describe('exportBackup', () => {
     expect(payload.tables.clockChanges).toHaveLength(1);
   });
 
+  describe('a file too large to import again', () => {
+    it('is refused, by its size in bytes, so that no backup is made that could not be restored', async () => {
+      const a = await deviceA();
+      await updateSettings(a.db, { deviceName: 'Bridge laptop Š' }); // the header is UTF-8: Š takes two bytes
+      for (const kind of ['full', 'handover'] as const) {
+        const { text } = await exportBackup(a.db, kind, PW, { shipId: a.ship.id, ...FAST });
+        const bytes = new TextEncoder().encode(text).length;
+        expect(bytes).toBeGreaterThan(text.length);
+        await expect(exportBackup(a.db, kind, PW, { shipId: a.ship.id, maxBytes: bytes, ...FAST })).resolves.toMatchObject({ text: expect.any(String) });
+        const refused = exportBackup(a.db, kind, PW, { shipId: a.ship.id, maxBytes: bytes - 1, ...FAST });
+        await expect(refused).rejects.toBeInstanceOf(BackupTooLargeError);
+        await expect(refused).rejects.toThrow(
+          'This backup would be over 128 MB, more than a backup can hold. Make or discard drafts that have photos, or remove forms you no longer use, then try again.',
+        );
+      }
+    });
+
+    it('is measured against the import limit unless told otherwise, and writes no settings when refused', async () => {
+      expect(MAX_BACKUP_FILE_BYTES).toBe(128 * 1024 * 1024);
+      const a = await deviceA();
+      const before = await getSettings(a.db);
+      await expect(exportBackup(a.db, 'full', PW, { shipId: a.ship.id, maxBytes: 100, ...FAST })).rejects.toBeInstanceOf(BackupError);
+      expect(await getSettings(a.db)).toEqual(before);
+    });
+  });
+
   it('rejects a ship that is not there, and exports nothing', async () => {
     const a = await deviceA();
     await expect(exportBackup(a.db, 'full', PW, { shipId: 'nope', ...FAST })).rejects.toThrow(new Error('Ship not found: nope'));
@@ -391,7 +572,9 @@ describe('prepareImport and applyImport between two devices', () => {
     expect((await getSettings(b)).lastSync[(await getSettings(a.db)).deviceId]).toBe(p.header.exportedAt);
     const snapshots = await listSnapshots(b);
     expect(snapshots[0].reason).toBe('before-import');
-    expect(snapshots[0].counts).toEqual({ ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0 });
+    expect(snapshots[0].counts).toEqual({
+      ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0,
+    });
   });
 
   it("carries a ship's crew import mapping, with the columns it ignores, through a backup", async () => {
@@ -928,6 +1111,15 @@ describe('prepareImport rejects what it cannot trust', () => {
     certificates: { ...base, id: 'cert-1', shipId: 'ship-1', key: 'loadLine' },
     clockChanges: { ...base, id: 'clk-1', shipId: 'ship-1', effectiveAt: '2026-01-01T00:00:00.000Z', toOffsetMinutes: 0 },
     crewDocuments: { ...base, id: 'doc-1', shipId: 'ship-1', crewId: 'crew-1', type: 'medical', number: 'M-1' },
+    formTemplates: {
+      ...base, scope: 'personal', id: 'tpl-1', code: 'TST-01', title: 'Toolbox Talk', revision: '00', kind: 'docx', fileName: 't.docx',
+      fileBase64: 'AAECAw==', schema: { kind: 'docx', fields: [], rowGroups: [] }, setup: { links: {}, leftEmpty: [] },
+    },
+    formDrafts: {
+      ...base, id: 'drf-1', shipId: 'ship-1', templateId: 'tpl-1', code: 'TST-01', period: '2026-10-28', values: { fields: {}, rows: {} }, photoIds: [],
+    },
+    formLastValues: { ...base, id: 'lst-1', shipId: 'ship-1', code: 'TST-01', values: { fields: {}, rows: {} } },
+    formPhotos: { ...base, id: 'pho-1', shipId: 'ship-1', draftId: 'drf-1', jpegBase64: '/9j/', width: 1, height: 1 },
   };
 
   /** A correctly sealed file in which one record of `table` carries `patch`; a key set to undefined is left out of the file. */
@@ -941,7 +1133,7 @@ describe('prepareImport rejects what it cannot trust', () => {
   it('accepts a file whose records are all well formed, personal ones included', async () => {
     const b = freshDb();
     const p = await prepareImport(b, await fileWith('crew', { scope: 'personal' }), PW);
-    expect(p.plan.summary.added).toBe(7);
+    expect(p.plan.summary.added).toBe(TABLE_NAMES.length + 1);
   });
 
   it.each([
@@ -969,10 +1161,49 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a ship has null particulars', 'ships', { particulars: null }],
     ['a ship has particulars that are an array', 'ships', { particulars: [] }],
     ['a ship has a bad scope', 'ships', { scope: 'fleet' }],
+    ['a form template is on the ship side', 'formTemplates', { scope: 'ship' }],
+    ['a form template has no file', 'formTemplates', { fileBase64: undefined }],
+    ['a form template has a file that is not text', 'formTemplates', { fileBase64: [0, 1] }],
+    ['a form template has a file that is not base64', 'formTemplates', { fileBase64: 'not base64!' }],
+    ['a form template has no schema', 'formTemplates', { schema: undefined }],
+    ['a form template has a schema that is not an object', 'formTemplates', { schema: 'docx' }],
+    ['a form template has no setup', 'formTemplates', { setup: undefined }],
+    ['a form template has a setup that is an array', 'formTemplates', { setup: [] }],
+    ['a form template has no code', 'formTemplates', { code: undefined }],
+    ['a form draft has no shipId', 'formDrafts', { shipId: undefined }],
+    ['a form draft has no templateId', 'formDrafts', { templateId: undefined }],
+    ['a form draft has no values', 'formDrafts', { values: undefined }],
+    ['a form draft has photo ids that are not a list', 'formDrafts', { photoIds: 'pho-1' }],
+    ['a form draft has auto ids that are not a list of ids', 'formDrafts', { autoIds: ['f1', 3] }],
+    ['a form draft has no code', 'formDrafts', { code: 7 }],
+    ['a form draft has a revision that is not text', 'formDrafts', { revision: 1 }],
+    ['last values have a revision that is not text', 'formLastValues', { revision: null }],
+    ['last values have no shipId', 'formLastValues', { shipId: undefined }],
+    ['last values have no values', 'formLastValues', { values: null }],
+    ['last values have no code', 'formLastValues', { code: undefined }],
+    ['a photo has no shipId', 'formPhotos', { shipId: undefined }],
+    ['a photo has no draftId', 'formPhotos', { draftId: undefined }],
+    ['a photo has an image that is not text', 'formPhotos', { jpegBase64: 12 }],
+    ['a photo has an image that is not base64', 'formPhotos', { jpegBase64: '%%%' }],
   ] as [string, TableName, object][])('throws DamagedFileError when %s', async (_label, table, patch) => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith(table, patch), PW)).rejects.toThrow(DamagedFileError);
     expect(await allTables(b)).toEqual(emptyTables());
+  });
+
+  it('does not ask for a shipId on a form template, and takes a photo tombstone without its image', async () => {
+    const b = freshDb();
+    await expect(prepareImport(b, await fileWith('formTemplates', { shipId: undefined }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('formPhotos', { deleted: true, jpegBase64: '' }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('formDrafts', { autoIds: ['f1', 'f3'] }), PW)).resolves.toBeDefined(); // R18
+  });
+
+  it('takes the revision of a draft or of last values as optional text (R25)', async () => {
+    const b = freshDb();
+    for (const table of ['formDrafts', 'formLastValues'] as const) {
+      await expect(prepareImport(b, await fileWith(table, { revision: '01 / 01.06.2026' }), PW), table).resolves.toBeDefined();
+      await expect(prepareImport(b, await fileWith(table, { revision: undefined }), PW), table).resolves.toBeDefined();
+    }
   });
 
   it('does not ask for a shipId on a ship', async () => {

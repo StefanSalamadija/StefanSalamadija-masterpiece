@@ -30,6 +30,18 @@ The exact address is shown in the repository's **Settings**, then **Pages**, aft
 If both devices changed the same thing, you choose which version to keep. Importing the same file twice changes nothing the second time.
 Masterpiece saves a snapshot of your data before every import, so you can go back from **Settings**, then **Restore snapshot**.
 
+## SMS forms
+
+Masterpiece fills in your company's own SMS forms (permits, checklists, logs, drills) from Word and Excel files.
+
+1. **Import once.** On the laptop or the phone, open **Forms**, tap **Import form** and pick the company's `.docx`, `.dotx` or `.xlsx` file. You can pick several files at once; they are imported one after another and a summary lists any that could not be read. Forms imported several at a time are saved with the suggested setup; edit it later with **Set up** in the library. A single form opens its setup for review. Review the setup (which fields are filled for you, which you fill, which stay empty) and save it.
+2. **Fill on the phone.** Open the form from **Forms** and answer the questions. A draft is kept as you go, and forms you have started are listed on **Home**.
+3. **Make the file, print from the laptop.** Tap **Make file** to get the filled form as a `.docx` or `.xlsx`, then open it in Word or Excel on the laptop and print it from there. The made file is the company's own form with your answers in it.
+4. **Signatures by hand.** Signature fields are left empty. Print the form and sign it on paper.
+5. **Old formats.** A `.doc` or `.xls` cannot be imported. Open it in Word or Excel and save it as `.docx` or `.xlsx` first. Files with macros (`.docm`, `.xlsm`) are refused.
+
+The forms library, your drafts and their photos stay on your devices. Nothing is sent anywhere, and the forms are included in your backups and in a handover file unless you untick **Include forms library**.
+
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.

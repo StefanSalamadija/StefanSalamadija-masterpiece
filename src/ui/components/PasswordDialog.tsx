@@ -20,6 +20,8 @@ export interface PasswordDialogProps {
   initialPassword?: string;
   /** Offers `Remember until the app is closed`, ticked. A handover file's password is never remembered, so it does not offer it. */
   offerRemember: boolean;
+  /** More choices for the file, below the password fields (a handover's `Include forms library`). */
+  options?: ComponentChildren;
   /** Does the export with the password and whether to remember it, and closes the dialog. A failure is shown in the dialog, which stays open. */
   onSubmit: (password: string, remember: boolean) => Promise<void>;
   onCancel: () => void;
@@ -34,7 +36,7 @@ const problem = (field: string, message: string | undefined): FieldError | undef
  * characters, and the repeat the same. It is only ever kept in memory (see `rememberPassword`), never stored.
  */
 export function PasswordDialog({
-  title, intro, showWarning, initialPassword = '', offerRemember, onSubmit, onCancel, focusFallback,
+  title, intro, showWarning, initialPassword = '', offerRemember, options, onSubmit, onCancel, focusFallback,
 }: PasswordDialogProps) {
   const [password, setPassword] = useState(initialPassword);
   const [repeat, setRepeat] = useState(initialPassword);
@@ -84,6 +86,7 @@ export function PasswordDialog({
               <span>Remember until the app is closed</span>
             </label>
           )}
+          {options}
           {/* Always on the page, with its text set after it is there, so that it is announced. */}
           <p class="live" role="status">{busy ? 'Making the file… this takes a moment.' : ''}</p>
         </>

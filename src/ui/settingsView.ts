@@ -7,6 +7,9 @@ export const DEVICE_NAME_REQUIRED = 'Enter a device name.';
 export const DEVICE_NAME_MAX = 40;
 export const PASSWORD_MISMATCH = "The passwords don't match.";
 export const EXPORT_CANCELLED = 'Export cancelled — no backup was made.';
+/** The handover choice: the forms library goes with the ship unless it is unticked. */
+export const INCLUDE_LIBRARY_LABEL = 'Include forms library';
+export const INCLUDE_LIBRARY_HINT = 'The forms you imported, so that your relief can fill them in too.';
 
 const MIN_REMINDER_DAYS = 1;
 const MAX_REMINDER_DAYS = 365;
@@ -53,6 +56,10 @@ const COUNT_WORDS: readonly (readonly [TableName, string, string])[] = [
   ['voyages', 'voyage', 'voyages'],
   ['certificates', 'certificate', 'certificates'],
   ['clockChanges', 'clock change', 'clock changes'],
+  // The last values of the forms are not counted: they are a by-product of the files made, not something kept by hand.
+  ['formTemplates', 'form', 'forms'],
+  ['formDrafts', 'form draft', 'form drafts'],
+  ['formPhotos', 'photo', 'photos'],
 ];
 
 /** "1 ship · 12 crew · 30 certificates": what a snapshot holds, leaving out what it does not. Deleted records are counted too. */
@@ -63,7 +70,7 @@ export function snapshotCountsText(counts: Record<TableName, number>): string {
 
 /** What a restore does, said in the dialog that asks for it: what it puts back, from which snapshot, in place of what. */
 export function restoreExplanation(snapshot: Pick<Snapshot, 'createdAt' | 'reason' | 'note'>): string {
-  return `This puts back the ships, crew, crew documents, certificates, voyages and clock changes of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`;
+  return `This puts back the ships, crew, crew documents, certificates, voyages, clock changes and forms of the snapshot from ${snapshotDate(snapshot.createdAt)} (${snapshotReason(snapshot)}), in place of what is on this device now.`;
 }
 
 /**

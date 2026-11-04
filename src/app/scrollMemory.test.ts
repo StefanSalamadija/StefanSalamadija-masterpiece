@@ -8,7 +8,9 @@ describe('scroll memory', () => {
     memory.remember('/ship/certificates', 300);
     memory.remember('/ship/reliefs', 700);
     memory.remember('/ship/expiring', 450);
+    memory.remember('/forms', 900);
     expect(memory.positionFor('/ship/expiring')).toBe(450);
+    expect(memory.positionFor('/forms')).toBe(900);
     expect(memory.positionFor('/ship/crew')).toBe(1200);
     expect(memory.positionFor('/ship/certificates')).toBe(300);
     expect(memory.positionFor('/ship/reliefs')).toBe(700);
@@ -25,7 +27,7 @@ describe('scroll memory', () => {
   });
   it('sends every other route to the top', () => {
     const memory = createScrollMemory();
-    for (const path of ['/', '/ship/crew/new', '/ship/crew/:id', '/ship/particulars', '/profiles', '/settings']) {
+    for (const path of ['/', '/ship/crew/new', '/ship/crew/:id', '/ship/particulars', '/profiles', '/settings', '/forms/:id/setup', '/forms/:id/fill']) {
       memory.remember(path, 500);
       expect(memory.positionFor(path)).toBe(0);
     }

@@ -282,7 +282,7 @@ textarea {
 
 .nav-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .nav-link {
@@ -1836,4 +1836,369 @@ textarea {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+/* ---- Forms ---- */
+
+/* The file input sits behind its label, which looks like a button; the input keeps the focus and shows it on the label. */
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.file-input:focus-visible + label {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.file-input[aria-disabled='true'] + label,
+.file-input:disabled + label {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.forms-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.forms-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.forms-summary p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.forms-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.form-list,
+.setup-list,
+.setup-unsupported {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.form-list {
+  margin-top: 16px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.form-link,
+.form-missing {
+  display: flex;
+  align-items: center;
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: var(--target);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.form-link {
+  color: inherit;
+}
+
+.form-missing {
+  color: var(--muted);
+}
+
+.forms-drafts {
+  margin-top: 28px;
+}
+
+.forms-drafts h3,
+.setup-section h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.setup-form > h2 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.setup-identity {
+  margin: -16px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.setup-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: 8px;
+  background: var(--surface);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.setup-notice p {
+  margin: 0;
+}
+
+.setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.setup-section .empty {
+  margin: 0;
+}
+
+.setup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--line);
+}
+
+.setup-group h4 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.setup-row {
+  min-width: 0;
+}
+
+.setup-row-name {
+  overflow-wrap: anywhere;
+}
+
+.setup-confirm {
+  margin-top: 6px;
+}
+
+.setup-unsupported {
+  gap: 6px;
+  padding-left: 20px;
+  list-style: disc;
+}
+
+/* ---- Fill a form ---- */
+
+.fill-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.fill-form > h2 {
+  margin: 0;
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.fill-period {
+  margin: -12px 0 0;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.fill-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fill-section,
+.fill-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fill-section h3 {
+  margin: 8px 0 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.fill-group h4 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.fill-group:focus {
+  outline: none;
+}
+
+.fill-group .empty {
+  margin: 0;
+}
+
+/* A fieldset is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
+.fill-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.fill-row legend {
+  padding: 0 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fill-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fill-field,
+.fill-field label,
+.field-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.auto-mark {
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.segmented .btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+/* ---- Helpers on the fill screen ---- */
+
+/* An input with a button beside it (Now): the input takes the room that is left. */
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.input-row > :is(input, textarea) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fill-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.photo-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+.crew-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crew-pick .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+}
+
+/* The hidden file input of Add photo stays inside its row of buttons, so that it never widens the page. */
+.fill-row-actions {
+  position: relative;
+}
+
+.fill-row-actions .file-input {
+  top: 0;
+  left: 0;
 }

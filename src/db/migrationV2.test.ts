@@ -68,6 +68,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// `openDb` opens the current version, so these upgrades go on past version 2; `migrationV3.test.ts` covers the rest.
 describe('upgrading a version-1 database to version 2', () => {
   it('saves a before-update snapshot of everything that was there, with no crew documents yet', async () => {
     const name = await version1WithData();
@@ -76,7 +77,10 @@ describe('upgrading a version-1 database to version 2', () => {
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toMatchObject({ reason: 'before-update', createdAt: '2026-10-25T09:00:00.000Z' });
     expect(snapshots[0].counts.ships).toBe(1);
-    expect(snapshots[0].counts).toEqual({ ships: 1, crew: 1, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0 });
+    expect(snapshots[0].counts).toEqual({
+      ships: 1, crew: 1, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0,
+      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0,
+    });
     const stored = (await v2.snapshots.get(snapshots[0].id)) as Snapshot;
     expect(Object.keys(stored.data)).toEqual([...TABLE_NAMES]);
     expect(stored.data.ships.map((s) => s.id)).toEqual(['ship-1']);
@@ -87,7 +91,7 @@ describe('upgrading a version-1 database to version 2', () => {
     const name = await version1WithData();
     const v2 = openDb(name);
     expect((await allTables(v2)).ships.map((s) => s.id)).toEqual(['ship-1']);
-    expect(v2.backendDB().version).toBe(20); // installed: version 2 of the app, as IndexedDB counts it
+    expect(v2.backendDB().version).toBe(30); // installed: the current version of the app, as IndexedDB counts it
     expect(await v2.crew.get('crew-1')).toMatchObject({ surname: 'Petrović' });
     expect((await getSettings(v2)).deviceId).toBe('dev-1');
     v2.close();
@@ -122,21 +126,21 @@ describe('upgrading a version-1 database to version 2', () => {
     v2.close();
   });
 
-  it('opens a fresh database at version 2 without a snapshot', async () => {
+  it('opens a fresh database at the current version without a snapshot', async () => {
     const v2 = openDb('fresh-' + crypto.randomUUID());
     expect(await listSnapshots(v2)).toEqual([]);
     expect(v2 instanceof MasterpieceDB).toBe(true);
     await v2.open();
-    expect(v2.backendDB().version).toBe(20);
+    expect(v2.backendDB().version).toBe(30);
     v2.close();
   });
 
-  it('installs version 2 once the upgrade has run, and not before', async () => {
+  it('installs the new version once the upgrade has run, and not before', async () => {
     const name = await version1WithData();
     expect(await installedVersion(name)).toBe(10);
     const v2 = openDb(name);
     await v2.open();
-    expect(await installedVersion(name)).toBe(20);
+    expect(await installedVersion(name)).toBe(30);
     v2.close();
   });
 });
@@ -178,7 +182,7 @@ describe('an upgrade that fails', () => {
 
     const v2 = openDb(name);
     await v2.open();
-    expect(v2.backendDB().version).toBe(20);
+    expect(v2.backendDB().version).toBe(30);
     const snapshots = await listSnapshots(v2);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].counts).toMatchObject({ ships: 1, crew: 1 });

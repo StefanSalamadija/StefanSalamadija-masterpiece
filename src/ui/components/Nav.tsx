@@ -19,6 +19,11 @@ const MAIN_LINKS: NavLink[] = [
     icon: (<><path d="M3 16l2 5h14l2-5-9-3z" /><path d="M12 3v10" /><path d="M7 8h10" /></>),
   },
   {
+    // A page with its corner folded over, and two lines of text.
+    label: 'Forms', href: '#/forms', isActive: (path) => path.startsWith('/forms'),
+    icon: (<><path d="M5 3h9l5 5v13H5z" /><path d="M14 3v5h5" /><path d="M8.5 13h7M8.5 17h7" /></>),
+  },
+  {
     label: 'Profiles', href: '#/profiles', isActive: (path) => path.startsWith('/profiles'),
     icon: <path d="M4 7h16M4 12h16M4 17h10" />,
   },
@@ -45,7 +50,7 @@ const SHIP_LINKS = [
   { label: "Ship's time", href: '#/ship/time' },
 ];
 
-/** The bottom bar: Home, Ship, Profiles and Settings. */
+/** The bottom bar: Home, Ship, Forms, Profiles and Settings. */
 export function Nav() {
   const { path } = useRoute();
   return (

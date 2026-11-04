@@ -1,0 +1,779 @@
+import * as XLSX from 'xlsx';
+import { describe, expect, it } from 'vitest';
+import { isOpenCell } from './cells';
+import { assemble, DOCX_MIME, importForm, makeFile, verifyOutput, XLSX_MIME } from './engine';
+import type { MakeFileInput } from './engine';
+import { FormWriteError, IntegrityError, NotAFormError, OldFormatError } from './errors';
+import { readExcelValues } from './excel/read';
+import { canonicalExcelValue } from './excel/values';
+import { formFileName } from './fileName';
+import { formatDate, parseDate, usableDateHint } from './format';
+import { MACROS_REMOVED } from './macros';
+import { bytesOf, partText, readPackage, writePackage } from './package';
+import type { FormKind, Package } from './package';
+import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
+import { asExcelTemplate, MACRO_TYPE, withMacros } from './testing/macroFixtures';
+import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, timesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
+import { CONTENT_TYPE } from './testing/zip';
+import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
+import { readWordValues } from './word/read';
+import { extraRowsOf } from './word/write';
+import { parseXml, serializeXml } from './xml';
+
+const INTEGRITY_MESSAGE = 'The file couldn\'t be made correctly, so it wasn\'t shared. Nothing was lost — your draft is still here.';
+const DATE = '2026-10-28';
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const W14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
+const PHOTO = 'photo-1';
+
+/** A tiny JPEG: start of image, a baseline frame header (4 x 3) and end of image. The writer never decodes it. */
+const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 3, 0, 4, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
+
+type Fixture = { name: string; fileName: string; make: () => Uint8Array };
+const FIXTURES: Fixture[] = [
+  { name: 'toolbox', fileName: 'toolbox.docx', make: () => toolboxTalkDocx() },
+  { name: 'toolbox rev 01', fileName: 'toolbox-rev01.docx', make: () => toolboxTalkDocx({ revision: '01 / 01.06.2026', renameSubjectTo: 'Topic', extraFieldLabel: 'Location' }) },
+  { name: 'permit', fileName: 'permit.docx', make: permitDocx },
+  { name: 'weekly jobs (template)', fileName: 'weekly.dotx', make: weeklyJobsDotx },
+  { name: 'content controls', fileName: 'controls.docx', make: contentControlsDocx },
+  { name: 'odd layouts', fileName: 'odd.docx', make: oddLayoutsDocx },
+  { name: 'short dates', fileName: 'short-dates.docx', make: shortDatesDocx },
+  { name: 'times', fileName: 'times.docx', make: timesDocx },
+  { name: 'field rows', fileName: 'field-rows.docx', make: fieldRowsDocx },
+  { name: 'uneven rows', fileName: 'uneven-rows.docx', make: unevenRowsDocx },
+  { name: 'far labels', fileName: 'far-labels.docx', make: farLabelsDocx },
+  { name: 'merged rows', fileName: 'merged-rows.docx', make: mergedRowsDocx },
+  { name: 'inventory', fileName: 'inventory.xlsx', make: () => inventoryXlsx(120) },
+  { name: 'day grid', fileName: 'daygrid.xlsx', make: () => dayGridXlsx() },
+  { name: 'day grid (loose header)', fileName: 'daygrid-loose.xlsx', make: () => dayGridXlsx({ looseHeader: true }) },
+  { name: 'matrix', fileName: 'matrix.xlsx', make: () => matrixXlsx() },
+  { name: 'matrix (sub-titles)', fileName: 'matrix-sub.xlsx', make: () => matrixXlsx({ subTitles: true }) },
+  { name: 'condition list', fileName: 'conditions.xlsx', make: conditionListXlsx },
+];
+
+const isWord = (kind: FormKind): boolean => kind !== 'xlsx';
+
+/** A value of the field's kind for row (or field number) `i`, as the fill screen would hold it (R2). */
+function sample(f: FieldDef, i: number): FormValue {
+  switch (f.kind) {
+    case 'date': return `2026-10-${String((i % 28) + 1).padStart(2, '0')}`;
+    case 'time': return `${String(i % 24).padStart(2, '0')}:15`;
+    case 'number': return `${i},5`;
+    case 'checkbox': return i % 2 === 0;
+    case 'choice': return f.options![i % f.options!.length]!;
+    case 'picture': return PHOTO;
+    default: return `Text ${i} & <Š ć đ> "q"\r\nline two`;
+  }
+}
+
+/**
+ * Every field filled, left-empty ones included (they must not be written). Every group filled, with its row 1 left
+ * blank; a group that can grow gets two rows more than it holds.
+ */
+function everything(s: FormSchema): DraftValues {
+  const out: DraftValues = { fields: {}, rows: {} };
+  s.fields.forEach((f, i) => { out.fields[f.id] = sample(f, i); });
+  for (const g of s.rowGroups) {
+    const count = g.capacity + (g.growable && isWord(s.kind) ? 2 : 0);
+    out.rows[g.id] = Array.from({ length: count }, (_, i) => Object.fromEntries(g.columns.map((c) => [c.id, i === 1 ? null : sample(c, i)])));
+  }
+  return out;
+}
+
+/**
+ * What a value reads back as, worked out here from the writers' contracts: Excel through `canonicalExcelValue`; Word
+ * text with `\n` line ends, ISO dates as given (or, in a format that cannot be read back to a date, such as `dd.MM`, as
+ * the text written), booleans and options as given. Pictures are checked by presence apart.
+ */
+function expected(kind: FormKind, f: FieldDef, value: FormValue | undefined): FormValue {
+  if (f.leftEmpty || value === undefined || value === null || value === '') return null;
+  if (!isWord(kind)) return canonicalExcelValue(f, value);
+  if (f.kind === 'date' && typeof value === 'string') {
+    const shown = formatDate(value, usableDateHint(f.formatHint));
+    return parseDate(shown, usableDateHint(f.formatHint)) === value ? value : shown;
+  }
+  return typeof value === 'boolean' ? value : value.replace(/\r\n/g, '\n');
+}
+
+function expectRead(kind: FormKind, f: FieldDef, value: FormValue | undefined, back: FormValue | undefined, where: string): void {
+  if (f.kind === 'picture' && !f.leftEmpty && value) expect(back, where).toMatch(/^word\/media\/mp-\d+\.jpeg$/);
+  else expect(back, where).toEqual(expected(kind, f, value));
+}
+
+function inputOf(fixture: Fixture, values?: (s: FormSchema) => DraftValues): MakeFileInput {
+  const bytes = fixture.make();
+  const { kind, schema } = importForm(fixture.fileName, bytes);
+  return { kind, fileName: fixture.fileName, bytes, schema, values: values ? values(schema) : everything(schema), photos: { [PHOTO]: JPEG }, date: DATE };
+}
+
+const fixture = (name: string): Fixture => FIXTURES.find((f) => f.name === name)!;
+
+/** What `makeFile` would verify, before verifying it: the template, the output read back, and the parts written. */
+function assembled(input: MakeFileInput): { original: Package; output: Package; changed: Set<string> } {
+  const made = assemble(input);
+  return { original: made.original, output: readPackage(made.bytes), changed: made.changed };
+}
+
+function expectIntegrityError(run: () => unknown): IntegrityError {
+  let caught: unknown;
+  try {
+    run();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toBeInstanceOf(IntegrityError);
+  expect((caught as Error).message).toBe(INTEGRITY_MESSAGE);
+  return caught as IntegrityError;
+}
+
+describe('formFileName', () => {
+  it('names a .dotx template\'s output as .docx: <code> <title> <date>', () => {
+    expect(formFileName({ code: 'TST-01', title: 'Toolbox Talk', revision: '' }, '2026-10-28', 'dotx')).toBe('TST-01 Toolbox Talk 2026-10-28.docx');
+    expect(formFileName({ code: 'TST-01', title: 'Toolbox Talk', revision: '00' }, '2026-10-28', 'docx')).toBe('TST-01 Toolbox Talk 2026-10-28.docx');
+    expect(formFileName({ code: 'TST-11', title: 'Demo Inventory', revision: '' }, '2026-10-28', 'xlsx')).toBe('TST-11 Demo Inventory 2026-10-28.xlsx');
+  });
+
+  it('leaves the code out when there is none', () => {
+    expect(formFileName({ code: '', title: 'Toolbox Talk', revision: '' }, DATE, 'docx')).toBe('Toolbox Talk 2026-10-28.docx');
+  });
+
+  it('turns the characters a file name cannot hold, and control characters, into -', () => {
+    expect(formFileName({ code: 'TST-01', title: 'Hot/Cold: work*? "x" <y> |z\\', revision: '' }, DATE, 'docx'))
+      .toBe('TST-01 Hot-Cold- work-- -x- -y- -z- 2026-10-28.docx');
+    // A tab or a line break is whitespace, and becomes a space like any other run of it.
+    expect(formFileName({ code: 'TST/01', title: 'A\tB\u0007C\u007fD\u0085E', revision: '' }, DATE, 'docx')).toBe('TST-01 A B-C-D-E 2026-10-28.docx');
+  });
+
+  it('turns bidi and other invisible format characters into - too, so a name cannot be shown back to front', () => {
+    expect(formFileName({ code: '', title: 'Plan\u202Excod.exe\u200B', revision: '' }, DATE, 'docx')).toBe('Plan-xcod.exe- 2026-10-28.docx');
+  });
+
+  it('collapses runs of whitespace and trims', () => {
+    expect(formFileName({ code: ' TST-01 ', title: '  Toolbox    Talk\n', revision: '' }, DATE, 'docx')).toBe('TST-01 Toolbox Talk 2026-10-28.docx');
+  });
+
+  it('cuts a 200-character title so the name is 120 characters before the extension, keeping the code and the date', () => {
+    const name = formFileName({ code: 'TST-01', title: 'x'.repeat(200), revision: '' }, DATE, 'docx');
+    expect(name.endsWith('.docx')).toBe(true);
+    const base = name.slice(0, -'.docx'.length);
+    expect(base).toHaveLength(120);
+    expect(base).toBe(`TST-01 ${'x'.repeat(120 - 7 - 11)} 2026-10-28`);
+  });
+
+  it('does not leave a space at the cut, and never splits a character in two', () => {
+    expect(formFileName({ code: 'TST-01', title: `${'a'.repeat(101)} ${'b'.repeat(50)}`, revision: '' }, DATE, 'docx'))
+      .toBe(`TST-01 ${'a'.repeat(101)} 2026-10-28.docx`);
+    const ship = '\u{1F6A2}';
+    expect(formFileName({ code: '', title: 'x'.repeat(108) + ship.repeat(5), revision: '' }, DATE, 'xlsx')).toBe(`${'x'.repeat(108)}${ship} 2026-10-28.xlsx`);
+  });
+
+  it('gives just the date when there is neither code nor title', () => {
+    expect(formFileName({ code: '', title: ' / ', revision: '' }, DATE, 'docx')).toBe('- 2026-10-28.docx');
+    expect(formFileName({ code: '', title: '', revision: '' }, DATE, 'docx')).toBe('2026-10-28.docx');
+  });
+});
+
+describe('importForm', () => {
+  it.each(FIXTURES)('$name: sniffs the kind and detects the fields', (f) => {
+    const { kind, schema } = importForm(f.fileName, f.make());
+    expect(kind).toBe(f.fileName.split('.').pop());
+    expect(schema.kind).toBe(kind);
+    expect(schema.fields.length + schema.rowGroups.length).toBeGreaterThan(0);
+  });
+
+  it('refuses what is not a form with the file errors\' own messages', () => {
+    expect(() => importForm('notes.txt', bytesOf('just some text'))).toThrow(NotAFormError);
+    expect(() => importForm('old.doc', Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0, 0, 0, 0]))).toThrow(OldFormatError);
+  });
+});
+
+describe('makeFile on every fixture (R1)', () => {
+  it.each(FIXTURES)('$name: every value reads back from the output as written, and the output imports', (f) => {
+    const input = inputOf(f);
+    const { kind, schema, values } = input;
+    const made = makeFile(input);
+
+    const ext = kind === 'xlsx' ? 'xlsx' : 'docx';
+    expect(made.fileName).toBe(`${schema.identity.code} ${schema.identity.title} ${DATE}.${ext}`);
+    expect(made.mime).toBe(kind === 'xlsx' ? XLSX_MIME : DOCX_MIME);
+
+    const out = readPackage(made.bytes);
+    const back = isWord(kind) ? readWordValues(out, schema, extraRowsOf(schema, values)) : readExcelValues(out, schema);
+    for (const field of schema.fields) expectRead(kind, field, values.fields[field.id], back.fields[field.id], field.id);
+    for (const group of schema.rowGroups) {
+      const rows = values.rows[group.id]!;
+      expect(back.rows[group.id]!.length, group.id).toBe(Math.max(rows.length, group.capacity));
+      rows.forEach((row, i) => {
+        for (const column of group.columns) {
+          // A closed cell (R22) is neither written nor read.
+          if (!isOpenCell(group, i, column.id)) expect(back.rows[group.id]![i]![column.id], `${column.id} row ${i}`).toBeUndefined();
+          else expectRead(kind, column, row[column.id], back.rows[group.id]![i]![column.id], `${column.id} row ${i}`);
+        }
+      });
+    }
+
+    const again = importForm(made.fileName, made.bytes);
+    expect(again.kind).toBe(ext);
+  });
+
+  it('turns a .dotx into a .docx: its main part becomes a document\'s', () => {
+    const made = makeFile(inputOf(fixture('weekly jobs (template)'), () => ({ fields: {}, rows: {} })));
+    expect(made.fileName).toBe('TST-03 Demo Weekly Jobs 2026-10-28.docx');
+    expect(partText(readPackage(made.bytes), '[Content_Types].xml')).toContain('wordprocessingml.document.main+xml');
+    expect(importForm(made.fileName, made.bytes).kind).toBe('docx');
+  });
+
+  it('names the file after the template\'s own name when the form has neither code nor title', () => {
+    const input = inputOf(fixture('toolbox'));
+    const made = makeFile({ ...input, fileName: 'My form.docx', schema: { ...input.schema, identity: { code: '', title: '', revision: '' } } });
+    expect(made.fileName).toBe('My form 2026-10-28.docx');
+  });
+
+  it('lets a FormWriteError through as it is, naming the field, so the person can see which value has no place', () => {
+    const input = inputOf(fixture('permit'), (s) => ({ fields: { [s.fields[0]!.id]: 'Maybe' }, rows: {} }));
+    let caught: unknown;
+    try {
+      makeFile(input);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(FormWriteError);
+    expect(caught).not.toBeInstanceOf(IntegrityError);
+    expect((caught as Error).message).toContain('f1');
+    expect((caught as Error).message).toContain('Check 1.1');
+    expect(caught).toMatchObject({ code: 'notAnOption', fieldId: 'f1' }); // for the screen, which never parses the message
+  });
+
+  it('refuses a file whose date would read back as another (a 2-digit year before 2000 reads as 20xx, a known limit)', () => {
+    const input = inputOf(fixture('toolbox'), (s) => ({ fields: { [s.fields.find((f) => f.kind === 'date')!.id]: '1999-12-31' }, rows: {} }));
+    const schema: FormSchema = { ...input.schema, fields: input.schema.fields.map((f) => (f.kind === 'date' ? { ...f, formatHint: 'dd.MM.yy' } : f)) };
+    const error = expectIntegrityError(() => makeFile({ ...input, schema }));
+    expect(error.reason).toContain('f3');
+    // The same date with a 4-digit year is fine.
+    expect(() => makeFile({ ...input, schema: { ...schema, fields: schema.fields.map((f) => (f.kind === 'date' ? { ...f, formatHint: 'dd.MM.yyyy' } : f)) } })).not.toThrow();
+  });
+});
+
+describe('verifyOutput', () => {
+  it('passes what makeFile assembles, for Word and Excel', () => {
+    for (const name of ['toolbox', 'weekly jobs (template)', 'inventory']) {
+      const input = inputOf(fixture(name));
+      const { original, output, changed } = assembled(input);
+      expect(() => verifyOutput(original, output, changed, input.schema, input.values), name).not.toThrow();
+    }
+  });
+
+  it('refuses an output whose unchanged part was corrupted (the seam: the assembled output, changed before verifying)', () => {
+    for (const [name, part] of [['toolbox', 'word/styles.xml'], ['inventory', 'xl/styles.xml'], ['toolbox', 'word/media/image1.png']] as const) {
+      const input = inputOf(fixture(name));
+      const { original, output, changed } = assembled(input);
+      expect(changed.has(part)).toBe(false);
+      const bytes = Uint8Array.from(output.entries.get(part)!);
+      bytes[bytes.length - 2] ^= 1;
+      output.entries.set(part, bytes);
+      const error = expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, input.values));
+      expect(error.reason).toContain(part);
+    }
+  });
+
+  it('refuses an output that lost a part, or has a part nobody wrote', () => {
+    const input = inputOf(fixture('toolbox'));
+    const lost = assembled(input);
+    lost.output.entries.delete('word/header1.xml');
+    expect(expectIntegrityError(() => verifyOutput(lost.original, lost.output, lost.changed, input.schema, input.values)).reason).toContain('word/header1.xml');
+
+    const added = assembled(input);
+    added.output.entries.set('word/extra.xml', bytesOf('<a/>'));
+    expect(expectIntegrityError(() => verifyOutput(added.original, added.output, added.changed, input.schema, input.values)).reason).toContain('word/extra.xml');
+
+    const missing = assembled(input);
+    missing.changed.add('word/promised.xml');
+    expect(expectIntegrityError(() => verifyOutput(missing.original, missing.output, missing.changed, input.schema, input.values)).reason).toContain('word/promised.xml');
+  });
+
+  it('refuses a changed XML part that does not parse, but does not parse a changed photo', () => {
+    const input = inputOf(fixture('weekly jobs (template)'));
+    const broken = assembled(input);
+    const rels = 'word/_rels/document.xml.rels';
+    expect(broken.changed.has(rels)).toBe(true);
+    broken.output.entries.set(rels, bytesOf(partText(broken.output, rels)!.slice(0, -10)));
+    expect(expectIntegrityError(() => verifyOutput(broken.original, broken.output, broken.changed, input.schema, input.values)).reason).toContain(rels);
+
+    const types = assembled(input);
+    expect(types.changed.has('[Content_Types].xml')).toBe(true);
+    types.output.entries.set('[Content_Types].xml', bytesOf('<Types><Default'));
+    expect(expectIntegrityError(() => verifyOutput(types.original, types.output, types.changed, input.schema, input.values)).reason).toContain('[Content_Types].xml');
+
+    const photo = assembled(input);
+    const media = [...photo.changed].filter((part) => part.endsWith('.jpeg'));
+    expect(media.length).toBeGreaterThan(0);
+    expect(() => verifyOutput(photo.original, photo.output, photo.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it('refuses an output in which a filled value reads back differently', () => {
+    const input = inputOf(fixture('toolbox'));
+    const { original, output, changed } = assembled(input);
+    const f1 = input.schema.fields[0]!.id;
+    const other: DraftValues = { ...input.values, fields: { ...input.values.fields, [f1]: 'Another vessel' } };
+    expect(expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, other)).reason).toContain(f1);
+
+    const group = input.schema.rowGroups[0]!;
+    const rows = input.values.rows[group.id]!.map((row, i) => (i === 13 ? { ...row, [group.columns[0]!.id]: 'Someone else' } : row));
+    const otherRow: DraftValues = { ...input.values, rows: { ...input.values.rows, [group.id]: rows } };
+    expect(expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, otherRow)).reason).toContain(group.columns[0]!.id);
+  });
+
+  it('refuses a value in a row that the output does not have', () => {
+    const input = inputOf(fixture('inventory'), (s) => ({ fields: {}, rows: { [s.rowGroups[0]!.id]: [] } }));
+    const { original, output, changed } = assembled(input);
+    const group = input.schema.rowGroups[0]!;
+    const rows = Array.from({ length: group.capacity + 1 }, (_, i) => (i === group.capacity ? { [group.columns[0]!.id]: 'Extra' } : {}));
+    expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, { fields: {}, rows: { [group.id]: rows } }));
+    // Blank rows past the end are no value at all.
+    const blank = rows.map(() => ({ [group.columns[0]!.id]: null }));
+    expect(() => verifyOutput(original, output, changed, input.schema, { fields: {}, rows: { [group.id]: blank } })).not.toThrow();
+  });
+
+  it('accepts left-empty fields and blank values as the template has them, prefilled controls included', () => {
+    const input = inputOf(fixture('content controls'), (s) => ({ fields: Object.fromEntries(s.fields.map((f) => [f.id, null])), rows: {} }));
+    const { original, output, changed } = assembled(input);
+    // The template's controls already hold text and a date, which a blank draft leaves as they are.
+    expect(readWordValues(output, input.schema).fields.f1).toBe('Sample name');
+    expect(() => verifyOutput(original, output, changed, input.schema, input.values)).not.toThrow();
+
+    const toolbox = inputOf(fixture('toolbox'));
+    const signature = toolbox.schema.rowGroups[0]!.columns.find((c) => c.leftEmpty)!;
+    expect(toolbox.values.rows[toolbox.schema.rowGroups[0]!.id]![0]![signature.id]).toBeTruthy();
+    const made = assembled(toolbox);
+    expect(() => verifyOutput(made.original, made.output, made.changed, toolbox.schema, toolbox.values)).not.toThrow();
+  });
+
+  it('checks pictures by presence: a filled one must show the new photo, even where the template already shows a picture', () => {
+    // The weekly form with its picture controls showing their stock image as a picture, not as a placeholder.
+    const base = fixture('weekly jobs (template)');
+    const prefilled: Fixture = {
+      ...base,
+      make: () => {
+        const pkg = readPackage(base.make());
+        const doc = partText(pkg, 'word/document.xml')!;
+        const edited = doc.replace(/<w:showingPlcHdr\/>(<w:picture\/>)/g, '$1');
+        expect(edited).not.toBe(doc);
+        pkg.entries.set('word/document.xml', bytesOf(edited));
+        return writePackage(pkg, new Map());
+      },
+    };
+    const pictures = (s: FormSchema) => s.rowGroups.find((g) => g.label === 'Pictures')!;
+
+    // No photo in the draft: the stock pictures stay, and that is right.
+    const none = inputOf(prefilled, () => ({ fields: {}, rows: {} }));
+    const unfilled = assembled(none);
+    const group = pictures(none.schema);
+    expect(readWordValues(unfilled.output, none.schema).rows[group.id]![0]![group.columns[0]!.id]).toMatch(/^word\/media\//);
+    expect(() => verifyOutput(unfilled.original, unfilled.output, unfilled.changed, none.schema, none.values)).not.toThrow();
+
+    // A photo in the draft that the output does not show is refused, although the control reads as filled.
+    const photo: DraftValues = { fields: {}, rows: { [group.id]: [{ [group.columns[0]!.id]: PHOTO }] } };
+    expectIntegrityError(() => verifyOutput(unfilled.original, unfilled.output, unfilled.changed, none.schema, photo));
+
+    // Written, it passes.
+    const filled = assembled({ ...none, values: photo });
+    expect(() => verifyOutput(filled.original, filled.output, filled.changed, none.schema, photo)).not.toThrow();
+  });
+
+  it('has the exact integrity message and its own name', () => {
+    const error = new IntegrityError('test');
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('IntegrityError');
+    expect(error.message).toBe(INTEGRITY_MESSAGE);
+    expect(error.reason).toBe('test');
+  });
+});
+
+
+/** Changes the output's `word/document.xml` through the DOM, as a damaged write might have left it. */
+function corrupt(made: { output: Package }, change: (doc: Document) => void): void {
+  const doc = parseXml(partText(made.output, 'word/document.xml')!);
+  change(doc);
+  made.output.entries.set('word/document.xml', bytesOf(serializeXml(doc)));
+}
+
+/** The content controls with this alias (their own, not a nested control's), in document order. */
+function controls(doc: Document, alias: string): Element[] {
+  const own = (sdt: Element) => Array.from(sdt.childNodes).find((n) => n.nodeType === 1 && (n as Element).localName === 'sdtPr') as Element | undefined;
+  return Array.from(doc.getElementsByTagNameNS(W, 'sdt')).filter((sdt) => Array.from(own(sdt)?.childNodes ?? [])
+    .some((n) => n.nodeType === 1 && (n as Element).localName === 'alias' && (n as Element).getAttributeNS(W, 'val') === alias));
+}
+
+/** The first content control with this alias. */
+function control(doc: Document, alias: string): Element {
+  const found = controls(doc, alias)[0];
+  if (!found) throw new Error(`no control ${alias}`);
+  return found;
+}
+const only = (el: Element, ns: string, name: string): Element => el.getElementsByTagNameNS(ns, name)[0]!;
+
+/** Puts `text` as the only text a control shows. */
+function show(sdt: Element, text: string): void {
+  const ts = Array.from(sdt.getElementsByTagNameNS(W, 't'));
+  if (ts.length === 0 && text !== '') {
+    // A cleared control may hold an empty run: give it a text element.
+    const doc = sdt.ownerDocument;
+    const content = only(sdt, W, 'sdtContent');
+    let r = content.getElementsByTagNameNS(W, 'r')[0];
+    if (!r) {
+      r = doc.createElementNS(W, 'w:r');
+      (content.getElementsByTagNameNS(W, 'p')[0] ?? content).appendChild(r);
+    }
+    ts.push(r.appendChild(doc.createElementNS(W, 'w:t')) as Element);
+  }
+  ts.forEach((t, i) => {
+    while (t.firstChild) t.removeChild(t.firstChild);
+    if (i === 0 && text !== '') t.appendChild(t.ownerDocument.createTextNode(text));
+  });
+}
+
+describe('verifyOutput: a content control must show what it holds', () => {
+  const byLabel = (s: FormSchema, label: string): string => s.fields.find((f) => f.label === label)!.id;
+  const controlsInput = (fill: (s: FormSchema) => DraftValues['fields']) => inputOf(fixture('content controls'), (s) => ({ fields: fill(s), rows: {} }));
+  const written = (s: FormSchema): DraftValues['fields'] => ({
+    [byLabel(s, 'Name')]: 'New name', [byLabel(s, 'Date')]: '2026-10-28', [byLabel(s, 'Option')]: 'Second',
+    [byLabel(s, 'Entry')]: 'Typed', [byLabel(s, 'Confirmed')]: true, [byLabel(s, 'Notes')]: 'Some notes',
+  });
+
+  it('passes the controls as the writer leaves them', () => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    expect(partText(made.output, 'word/document.xml')).toContain('28/Oct/2026');
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it.each<[string, string, (doc: Document) => void]>([
+    ['a date control showing another date than it stores', 'Date', (doc) => show(control(doc, 'Date'), '13/Jan/1999')],
+    ['a date control storing another date than it shows', 'Date', (doc) => only(control(doc, 'Date'), W, 'date').setAttributeNS(W, 'w:fullDate', '1999-01-13T00:00:00Z')],
+    ['a ticked checkbox showing an empty box', 'Confirmed', (doc) => show(control(doc, 'Confirmed'), '☐')],
+    ['a checkbox glyph in another font than its state names', 'Confirmed', (doc) => only(control(doc, 'Confirmed'), W, 'rFonts').setAttributeNS(W, 'w:ascii', 'Arial')],
+    ['a drop-down whose stored item is not the one it shows', 'Option', (doc) => only(control(doc, 'Option'), W, 'dropDownList').setAttributeNS(W, 'w:lastValue', '3')],
+    ['a control bound to custom XML, which Word shows instead of its text', 'Name', (doc) => {
+      const binding = doc.createElementNS(W, 'w:dataBinding');
+      binding.setAttributeNS(W, 'w:xpath', '/root/name');
+      binding.setAttributeNS(W, 'w:storeItemID', '{00000000-0000-0000-0000-000000000001}');
+      only(control(doc, 'Name'), W, 'sdtPr').appendChild(binding);
+    }],
+  ])('refuses %s', (_name, label, change) => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    corrupt(made, change);
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain(`(${label})`);
+  });
+
+  it('refuses a prefilled control that a blank draft left, but the output shows wiped', () => {
+    // Another field is written, so the part is one the writer changed and only the values can tell.
+    const input = controlsInput((s) => ({ [byLabel(s, 'Name')]: null, [byLabel(s, 'Notes')]: 'Some notes' }));
+    const made = assembled(input);
+    expect(made.changed.has('word/document.xml')).toBe(true);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    corrupt(made, (doc) => show(control(doc, 'Name'), ''));
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('(Name)');
+  });
+
+  it('refuses a written checkbox whose stored state was flipped, glyph included', () => {
+    const input = controlsInput(written);
+    const made = assembled(input);
+    corrupt(made, (doc) => {
+      const box = control(doc, 'Confirmed');
+      only(box, W14, 'checked').setAttributeNS(W14, 'w14:val', '0');
+      show(box, '☐');
+    });
+    expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values));
+  });
+});
+
+describe('verifyOutput: more', () => {
+  it('checks a legacy date whose format has no year by the text written, and refuses another day', () => {
+    const values = (s: FormSchema): DraftValues => ({ fields: { [s.fields[0]!.id]: '2026-10-28', [s.fields[2]!.id]: '2026-10-26', [s.fields[3]!.id]: '2026-11-01' }, rows: {} });
+    const input = inputOf(fixture('short dates'), values);
+    const made = makeFile(input);
+    const back = readWordValues(readPackage(made.bytes), input.schema).fields;
+    expect([back.f1, back.f2, back.f3, back.f4]).toEqual(['28.10', null, '26.10', '01.11']);
+
+    const { original, output, changed } = assembled(input);
+    expect(() => verifyOutput(original, output, changed, input.schema, input.values)).not.toThrow();
+    const other = { ...input.values, fields: { ...input.values.fields, f1: '2026-10-29' } };
+    expect(expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, other)).reason).toContain('f1');
+    // A format with no year shows the same text for that day of any year: the file shows what was asked for.
+    expect(() => verifyOutput(original, output, changed, input.schema, { ...input.values, fields: { ...input.values.fields, f1: '2025-10-28' } })).not.toThrow();
+  });
+
+  it('writes a time into Word\'s time field as HH:mm, and only the date into a date and time field; a calculated field is no field', () => {
+    const input = inputOf(fixture('times'), (s) => ({ fields: { [s.fields[0]!.id]: '14:30', [s.fields[1]!.id]: DATE }, rows: {} }));
+    expect(input.schema.fields.map((f) => [f.id, f.kind, f.label, f.formatHint])).toEqual([
+      ['f1', 'time', 'Time', 'HH:mm'],
+      ['f2', 'date', 'Checked on', 'dd/MM/yyyy'],
+    ]);
+    const made = makeFile(input);
+    const out = readPackage(made.bytes);
+    const document = partText(out, 'word/document.xml')!;
+    expect(document).toContain('<w:t>14:30</w:t>');
+    expect(document).toContain('<w:t>28/10/2026</w:t>');
+    expect(document).not.toContain('28-OCT-2026');
+    expect(readWordValues(out, input.schema).fields).toEqual({ f1: '14:30', f2: DATE });
+    // The calculated fields are left as they are in the file, and a calculated column is no column of its group.
+    expect(document.match(/w:val="calculated"/g)).toHaveLength(4);
+    const [readings] = input.schema.rowGroups;
+    expect(readings!.columns.map((c) => [c.kind, c.label])).toEqual([['number', 'Before'], ['number', 'After']]);
+    expect([readings!.capacity, readings!.growable]).toEqual([3, true]);
+  });
+
+  it('refuses a part the writer added that has no content type', () => {
+    const input = inputOf(fixture('weekly jobs (template)'));
+    const made = assembled(input);
+    made.output.entries.set('word/media/extra.bin', Uint8Array.from([1, 2, 3]));
+    made.changed.add('word/media/extra.bin');
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('word/media/extra.bin');
+  });
+
+  it('refuses an Excel output in which a filled value reads back differently', () => {
+    const input = inputOf(fixture('inventory'));
+    const made = assembled(input);
+    const field = input.schema.fields.find((f) => !f.leftEmpty && f.kind === 'text')!;
+    const other: DraftValues = { ...input.values, fields: { ...input.values.fields, [field.id]: 'Another vessel' } };
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, other)).reason).toContain(field.id);
+    const group = input.schema.rowGroups[0]!;
+    const rows = input.values.rows[group.id]!.map((row, i) => (i === 50 ? { ...row, [group.columns[0]!.id]: 'Something else' } : row));
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, { ...input.values, rows: { [group.id]: rows } })).reason)
+      .toContain(group.columns[0]!.id);
+  });
+
+  it('lets a cloned row read blank where the draft is blank', () => {
+    const input = inputOf(fixture('toolbox'));
+    const group = input.schema.rowGroups[0]!;
+    // Row 13 is a clone (the table holds 12). Blank in the draft, it reads null.
+    const rows = input.values.rows[group.id]!.map((row, i) => (i === 12 ? Object.fromEntries(group.columns.map((c) => [c.id, null])) : row));
+    const blanked = assembled({ ...input, values: { ...input.values, rows: { [group.id]: rows } } });
+    expect(readWordValues(blanked.output, input.schema, { [group.id]: 2 }).rows[group.id]![12]![group.columns[0]!.id]).toBeNull();
+    expect(() => verifyOutput(blanked.original, blanked.output, blanked.changed, input.schema, { ...input.values, rows: { [group.id]: rows } })).not.toThrow();
+  });
+});
+
+/** A fixture's bytes with its `word/document.xml` changed by a text edit (which must change something). */
+function editedDocument(bytes: Uint8Array, change: (xml: string) => string): Uint8Array {
+  const pkg = readPackage(bytes);
+  const before = partText(pkg, 'word/document.xml')!;
+  const after = change(before);
+  expect(after).not.toBe(before);
+  pkg.entries.set('word/document.xml', bytesOf(after));
+  return writePackage(pkg, new Map());
+}
+
+describe('verifyOutput passes correct files (fix round 2)', () => {
+  const dateWith = (format: string, iso: string): MakeFileInput => {
+    const f: Fixture = { name: format, fileName: 'controls.docx', make: () => editedDocument(contentControlsDocx(), (x) => x.replace('w:val="dd/MMM/yyyy"', `w:val="${format}"`)) };
+    return inputOf(f, (s) => ({ fields: { [s.fields.find((x) => x.label === 'Date')!.id]: iso }, rows: {} }));
+  };
+
+  it.each([
+    ['MMMM yyyy', '2026-10-28', 'October 2026'],
+    ['d MMMM', '2026-10-28', '28 October'],
+    ['dd.MM.yy', '1999-01-13', '13.01.99'],
+  ])('a date control in %s with %s, which shows only part of the date or a 2-digit year', (format, iso, shown) => {
+    const input = dateWith(format, iso);
+    const made = assembled(input);
+    expect(partText(made.output, 'word/document.xml')).toContain(`>${shown}<`);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    expect(() => makeFile(input)).not.toThrow();
+    // What it shows must still be that date.
+    corrupt(made, (doc) => show(control(doc, 'Date'), 'Garbage'));
+    expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values));
+  });
+
+  const jobsGroup = (s: FormSchema) => s.rowGroups.find((g) => g.label === 'Jobs')!;
+  const jobs = (s: FormSchema, count: number): DraftValues => {
+    const g = jobsGroup(s);
+    return { fields: {}, rows: { [g.id]: Array.from({ length: count }, (_, i) => Object.fromEntries(g.columns.map((c) => [c.id, c.label === 'Responsible' ? `Person ${i}` : null]))) } };
+  };
+  const noPrompt = (selectLast: boolean): Fixture => ({
+    name: 'no prompt', fileName: 'weekly.dotx',
+    make: () => editedDocument(weeklyJobsDotx(), (x) => {
+      let out = x.split('<w:listEntry w:val="_ choose"/><w:listEntry w:val="Pending"/>').join('<w:listEntry w:val="Pending"/>');
+      // The template's last job shows Completed: a clone of it, cleared, shows the list's default, Pending.
+      if (selectLast) out = out.replace(/(<w:name w:val="Dropdown3"\/>[\s\S]*?<w:ddList>)/, '$1<w:result w:val="1"/>');
+      return out;
+    }),
+  });
+
+  it.each([false, true])('blank Status in cloned jobs, from a drop-down with no prompt entry (last template job chosen: %s)', (selectLast) => {
+    const input = inputOf(noPrompt(selectLast), (s) => jobs(s, 5));
+    const made = assembled(input);
+    const g = jobsGroup(input.schema);
+    const status = g.columns.find((c) => c.label === 'Status')!;
+    const back = readWordValues(made.output, input.schema, extraRowsOf(input.schema, input.values)).rows[g.id]!.map((r) => r[status.id]);
+    expect(back).toEqual(selectLast ? ['Pending', 'Pending', 'Completed', 'Pending', 'Pending'] : ['Pending', 'Pending', 'Pending', 'Pending', 'Pending']);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it('refuses a blank choice in a cloned job that still shows the choice of the row it was cloned from (M1)', () => {
+    const input = inputOf(noPrompt(true), (s) => jobs(s, 5));
+    const made = assembled(input);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    // The fourth job is a clone of the template's last, which shows Completed; the writer cleared it to Pending.
+    corrupt(made, (doc) => {
+      const lists = Array.from(doc.getElementsByTagNameNS(W, 'ddList')).filter((list) => list.getElementsByTagNameNS(W, 'listEntry')[1]?.getAttributeNS(W, 'val') === 'Completed');
+      const clone = lists[3]!;
+      for (const old of Array.from(clone.getElementsByTagNameNS(W, 'result'))) clone.removeChild(old);
+      const result = doc.createElementNS(W, 'w:result');
+      result.setAttributeNS(W, 'w:val', '1');
+      clone.insertBefore(result, clone.firstChild);
+    });
+    const g = jobsGroup(input.schema);
+    const status = g.columns.find((c) => c.label === 'Status')!;
+    expect(readWordValues(made.output, input.schema, extraRowsOf(input.schema, input.values)).rows[g.id]!.map((r) => r[status.id])).toEqual(['Pending', 'Pending', 'Completed', 'Completed', 'Pending']);
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('(Status) in row 4');
+  });
+
+  it('a blank picture in a cloned row of a template whose pictures show a stock image', () => {
+    const stock: Fixture = { name: 'stock', fileName: 'weekly.dotx', make: () => editedDocument(weeklyJobsDotx(), (x) => x.replace(/<w:showingPlcHdr\/>(<w:picture\/>)/g, '$1')) };
+    const input = inputOf(stock, (s) => {
+      const g = s.rowGroups.find((x) => x.label === 'Pictures')!;
+      return { fields: {}, rows: { [g.id]: [0, 1].map((i) => Object.fromEntries(g.columns.map((c) => [c.id, i === 0 && c.kind === 'picture' ? PHOTO : null]))) } };
+    });
+    const made = assembled(input);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+  });
+
+  it('keeps text columns strict in a clone: a clone showing the text of the row it was cloned from is refused', () => {
+    // The template's last job names someone already; a clone, cleared, must not.
+    const prefilled: Fixture = {
+      name: 'prefilled', fileName: 'weekly.dotx',
+      make: () => editedDocument(weeklyJobsDotx(), (x) => {
+        const at = x.split('<w:alias w:val="Responsible"/>').slice(0, 3).join('<w:alias w:val="Responsible"/>').length;
+        const tail = x.slice(at).replace('<w:showingPlcHdr/>', '').replace('Click or tap here to enter text.', 'Old text');
+        return x.slice(0, at) + tail;
+      }),
+    };
+    const input = inputOf(prefilled, (s) => jobs(s, 4));
+    const g = jobsGroup(input.schema);
+    const responsible = g.columns.find((c) => c.label === 'Responsible')!;
+    const blank: DraftValues = { fields: {}, rows: { [g.id]: input.values.rows[g.id]!.map((r, i) => (i === 3 ? { ...r, [responsible.id]: null } : r)) } };
+    const cleared = assembled({ ...input, values: blank });
+    expect(readWordValues(cleared.output, input.schema, { [g.id]: 1 }).rows[g.id]!.map((r) => r[responsible.id])).toEqual(['Person 0', 'Person 1', 'Person 2', null]);
+    expect(() => verifyOutput(cleared.original, cleared.output, cleared.changed, input.schema, blank)).not.toThrow();
+    corrupt(cleared, (doc) => show(controls(doc, 'Responsible')[3]!, 'Old text'));
+    expect(expectIntegrityError(() => verifyOutput(cleared.original, cleared.output, cleared.changed, input.schema, blank)).reason).toContain('(Responsible) in row 4');
+  });
+
+  it('a blank checkbox column in a cloned row reads unticked, and passes; a ticked one is refused', () => {
+    const c = new Controls();
+    const w = [6000, 3638];
+    const item = () => row(w, [{ content: p(c.formText()) }, { content: p(c.formCheckbox()) }]);
+    const bytes = wordPackage({
+      kind: 'docx',
+      header: headerBlock(c, { title: 'Demo Checks', code: 'TST-90', revision: '00' }),
+      body: heading('Checks') + table(w, [headerRow(w, ['Item', 'Done']), c.repeatingSection({ alias: 'Checks', tag: 'checks', items: [item()] })]) + p(),
+    });
+    const input = inputOf({ name: 'checks', fileName: 'checks.docx', make: () => bytes }, (s) => {
+      const g = s.rowGroups[0]!;
+      expect(g.columns.map((x) => x.kind)).toEqual(['text', 'checkbox']);
+      return { fields: {}, rows: { [g.id]: [0, 1, 2].map((i) => ({ [g.columns[0]!.id]: `Item ${i}`, [g.columns[1]!.id]: i === 0 ? true : null })) } };
+    });
+    const made = assembled(input);
+    const g = input.schema.rowGroups[0]!;
+    expect(readWordValues(made.output, input.schema, { [g.id]: 2 }).rows[g.id]!.map((r) => r[g.columns[1]!.id])).toEqual([true, false, false]);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    // A clone left ticked (as if copied, not cleared) is not blank.
+    const ticked = assembled({ ...input, values: { fields: {}, rows: { [g.id]: [0, 1, 2].map((i) => ({ [g.columns[0]!.id]: `Item ${i}`, [g.columns[1]!.id]: i !== 1 })) } } });
+    expectIntegrityError(() => verifyOutput(ticked.original, ticked.output, ticked.changed, input.schema, input.values));
+  });
+});
+
+describe('Excel templates and macro files (R21)', () => {
+  type Case = { name: string; fileName: string; plainName: string; plain: () => Uint8Array; make: () => Uint8Array; kind: FormKind; mainType: string; outType: string; macros: boolean };
+  const XLTX = MACRO_TYPE.xltx;
+  const CASES: Case[] = [
+    {
+      name: '.xlsm', fileName: 'inventory.xlsm', plainName: 'inventory.xlsx', plain: () => inventoryXlsx(12),
+      make: () => withMacros(inventoryXlsx(12), 'xlsm', { printerSettings: true, ribbon: true }), kind: 'xlsx', mainType: CONTENT_TYPE.workbook, outType: CONTENT_TYPE.workbook, macros: true,
+    },
+    {
+      name: '.xltm', fileName: 'matrix.xltm', plainName: 'matrix.xltx', plain: () => asExcelTemplate(matrixXlsx()),
+      make: () => withMacros(asExcelTemplate(matrixXlsx()), 'xltm'), kind: 'xlsx', mainType: XLTX, outType: CONTENT_TYPE.workbook, macros: true,
+    },
+    {
+      name: '.xltx', fileName: 'daygrid.xltx', plainName: 'daygrid.xlsx', plain: () => dayGridXlsx(),
+      make: () => asExcelTemplate(dayGridXlsx()), kind: 'xlsx', mainType: XLTX, outType: CONTENT_TYPE.workbook, macros: false,
+    },
+    {
+      name: '.docm', fileName: 'toolbox.docm', plainName: 'toolbox.docx', plain: () => toolboxTalkDocx(),
+      make: () => withMacros(toolboxTalkDocx(), 'docm', { signature: true, keyMap: true, ribbon: true }), kind: 'docx', mainType: CONTENT_TYPE.docx, outType: CONTENT_TYPE.docx, macros: true,
+    },
+    {
+      name: '.dotm', fileName: 'weekly.dotm', plainName: 'weekly.dotx', plain: weeklyJobsDotx,
+      make: () => withMacros(weeklyJobsDotx(), 'dotm'), kind: 'dotx', mainType: CONTENT_TYPE.dotx, outType: CONTENT_TYPE.docx, macros: true,
+    },
+  ];
+  const MACRO_PART = /vbaProject|vbaData|customizations\.xml|customUI14/i;
+
+  it.each(CASES)('$name: imports, the macros noted under what cannot be filled, and detects as its plain form', (c) => {
+    const { kind, schema } = importForm(c.fileName, c.make());
+    expect(kind).toBe(c.kind);
+    expect(schema.kind).toBe(c.kind);
+    const plain = importForm(c.plainName, c.plain()).schema;
+    if (c.macros) {
+      expect(schema.unsupported[0]).toBe(MACROS_REMOVED);
+      expect({ ...schema, unsupported: schema.unsupported.slice(1) }).toEqual({ ...plain, kind: c.kind });
+    } else {
+      expect(schema.unsupported).not.toContain(MACROS_REMOVED);
+      expect(schema).toEqual(plain);
+    }
+  });
+
+  it.each(CASES)('$name: the stored package has no macros, the plain content type, and every other part to the byte', (c) => {
+    const bytes = c.make();
+    const stored = importForm(c.fileName, bytes).bytes;
+    if (!c.macros) {
+      expect(stored).toBe(bytes); // nothing to take out: stored as it came
+      return;
+    }
+    const pkg = readPackage(stored);
+    const before = readPackage(bytes);
+    expect(pkg.order.filter((name) => MACRO_PART.test(name))).toEqual([]);
+    for (const name of pkg.order.filter((n) => n.endsWith('.rels'))) expect(partText(pkg, name), name).not.toMatch(MACRO_PART);
+    const types = partText(pkg, '[Content_Types].xml')!;
+    expect(types).not.toMatch(/macroEnabled|vbaProject|vbaData|keyMap/i);
+    expect(types).toContain(`ContentType="${c.mainType}"`);
+    for (const name of pkg.order) {
+      if (name === '[Content_Types].xml' || name.endsWith('.rels')) continue;
+      expect(pkg.entries.get(name), name).toEqual(before.entries.get(name));
+    }
+    // Every part that stays is there; only the macros and what belongs to them are gone.
+    expect(before.order.filter((name) => !pkg.entries.has(name)).every((name) => MACRO_PART.test(name) || name.startsWith('customUI/') || name.startsWith('word/_rels/vbaProject'))).toBe(true);
+  });
+
+  it.each(CASES)('$name: makes an .xlsx or .docx from the stored package that passes its check', (c) => {
+    const imported = importForm(c.fileName, c.make());
+    const input: MakeFileInput = { kind: imported.kind, fileName: c.fileName, bytes: imported.bytes, schema: imported.schema, values: everything(imported.schema), photos: { [PHOTO]: JPEG }, date: DATE };
+    const made = makeFile(input);
+    const ext = isWord(c.kind) ? 'docx' : 'xlsx';
+    expect(made.fileName.endsWith(`.${ext}`)).toBe(true);
+    expect(made.mime).toBe(isWord(c.kind) ? DOCX_MIME : XLSX_MIME);
+    const out = readPackage(made.bytes);
+    const types = partText(out, '[Content_Types].xml')!;
+    expect(types).toContain(`ContentType="${c.outType}"`);
+    expect(types).not.toMatch(/template\.main|macroEnabled/i);
+    const { original, changed } = assemble(input);
+    expect(() => verifyOutput(original, out, changed, input.schema, input.values)).not.toThrow();
+    if (!isWord(c.kind)) {
+      const book = XLSX.read(made.bytes, { type: 'array' });
+      expect(book.SheetNames.length).toBeGreaterThan(0);
+    }
+    const again = importForm(made.fileName, made.bytes);
+    expect(again.kind).toBe(ext);
+    expect(again.schema.unsupported).not.toContain(MACROS_REMOVED);
+  });
+
+  it('makes an .xlsx from an .xltx when nothing is filled in: only the content types change', () => {
+    const imported = importForm('daygrid.xltx', asExcelTemplate(dayGridXlsx()));
+    const { changed } = assemble({ kind: imported.kind, fileName: 'daygrid.xltx', bytes: imported.bytes, schema: imported.schema, values: { fields: {}, rows: {} }, photos: {}, date: DATE });
+    expect(changed.has('[Content_Types].xml')).toBe(true);
+  });
+});

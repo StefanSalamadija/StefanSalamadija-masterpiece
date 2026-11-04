@@ -76,3 +76,21 @@ export function addDays(date: string, n: number): string {
   t.setUTCFullYear(y, m - 1, d + n);
   return format(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
 }
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * The ISO 8601 week a date is in: weeks run Monday to Sunday, and week 1 of a year is the one that holds its first
+ * Thursday. `year` is the year the week belongs to, which is not the date's own near a year end (`2027-01-01` is week
+ * 53 of 2026), and `monday` and `sunday` are its first and last day. Throws a `RangeError` for a date that is not real.
+ */
+export function isoWeek(date: string): { year: number; week: number; monday: string; sunday: string } {
+  if (!isValidIsoDate(date)) throw new RangeError(`Invalid date: ${date}`);
+  const [y, m, d] = parts(date);
+  const weekday = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7; // Monday is 0
+  const monday = addDays(date, -weekday);
+  const thursday = addDays(monday, 3);
+  const [year, tm, td] = parts(thursday);
+  const dayOfYear = Math.round((Date.UTC(year, tm - 1, td) - Date.UTC(year, 0, 1)) / MS_PER_DAY);
+  return { year, week: Math.floor(dayOfYear / 7) + 1, monday, sunday: addDays(monday, 6) };
+}

@@ -83,12 +83,19 @@ export function restoreSnapshot(db: MasterpieceDB, id: string): Promise<void> {
   );
 }
 
+/** The upgrade transactions that have saved their snapshot already. */
+const snapshotted = new WeakSet<IDBTransaction>();
+
 /**
  * For a Dexie `version(n).upgrade()`: saves the data as it is before the upgrade changes anything. It uses only `tx`,
  * because nothing else may touch the database during an upgrade. A table whose store does not exist yet (a later
- * version adds it) is saved as empty.
+ * version adds it) is saved as empty. An upgrade across several versions runs each version's upgrade in the same
+ * transaction: only the first saves a snapshot, which already holds the data as it was before any of them, so that one
+ * upgrade never takes more than one of the kept snapshots.
  */
 export async function snapshotInUpgrade(tx: Transaction, reason: SnapshotReason = 'before-update'): Promise<void> {
+  if (snapshotted.has(tx.idbtrans)) return;
+  snapshotted.add(tx.idbtrans);
   const data = {} as Tables;
   for (const name of TABLE_NAMES) {
     data[name] = tx.idbtrans.objectStoreNames.contains(name) ? await tx.table(name).toArray() : [];

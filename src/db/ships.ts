@@ -1,8 +1,8 @@
 import { shipOffsetAt } from '../domain/shipTime';
 import { certificateShell, copyCrewPolicy, copyParticulars } from '../domain/profileCopy';
-import { TABLE_NAMES } from '../domain/types';
+import { SHIP_TABLES } from '../domain/types';
 import type { Certificate, ClockChange, Particulars, ShipProfile } from '../domain/types';
-import { createRecord, listForShip } from './records';
+import { createRecord, listForShip, tombstoneOf } from './records';
 import type { MasterpieceDB } from './schema';
 import { syncTable, syncTables } from './schema';
 import { getSettings, updateSettings } from './settings';
@@ -85,10 +85,11 @@ export async function deleteShip(db: MasterpieceDB, shipId: string): Promise<voi
       if (!ship) throw new Error(`There is no ship with id ${shipId}.`);
       const stamp = { deleted: true, updatedAt: new Date().toISOString(), updatedBy: deviceId };
       if (!ship.deleted) await db.ships.put({ ...ship, ...stamp });
-      for (const name of TABLE_NAMES.filter((n) => n !== 'ships')) {
+      // The forms library is not the ship's: it stays. A deleted photo keeps no image (see `tombstoneOf`).
+      for (const name of SHIP_TABLES) {
         const table = syncTable(db, name);
         const live = await table.where('shipId').equals(shipId).filter((r) => !r.deleted).toArray();
-        await table.bulkPut(live.map((r) => ({ ...r, ...stamp })));
+        await table.bulkPut(live.map((r) => tombstoneOf(name, r, stamp)));
       }
       const { activeShipId } = await getSettings(db);
       const next = liveActiveShipId(activeShipId, await listShips(db));
