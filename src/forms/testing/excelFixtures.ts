@@ -43,7 +43,8 @@ export function inventoryXlsx(rows = 120): Uint8Array {
  * 9) of `Day`, `Hold 1` to `Hold 6` each over `PORT` and `STBD`, and `Remarks`; the days 1 to 31 down column A (rows
  * 10 to 40) with 12 empty value cells and an empty remark each; then `Dated:` and `Signed:`.
  */
-export function dayGridXlsx(): Uint8Array {
+export function dayGridXlsx(options: { looseHeader?: boolean } = {}): Uint8Array {
+  if (options.looseHeader) return looseDayGridXlsx();
   const sheet = new Sheet('Demo day grid').columnWidths(9, ...Array<number>(12).fill(8), 28);
   headerBlock(sheet, {
     logo: 'A1:B3', title: 'Demo Day Grid', titleRange: 'C1:J3', code: 'TST-12', revision: REVISION, formRanges: ['K1:N1', 'K2:N2', 'K3:N3'],
@@ -69,11 +70,45 @@ export function dayGridXlsx(): Uint8Array {
 }
 
 /**
+ * `dayGridXlsx({ looseHeader: true })`: `TST-12 Demo Day Grid` laid out more loosely, columns A to L, as a day grid
+ * drawn by hand often is:
+ * - the corner A8 is an empty bordered cell, and `Day` sits under it in A9;
+ * - `Tank 1` (B8:D8) is over `PORT`, `STBD` and `Centre`; `Tank 2` (E8:F8) over `PORT` and `STBD`;
+ * - `Tank 3` (G8:J8) is over `PORT` (G9:H9) and `STBD` (I9:J9), and its value cells are merged in pairs the same way;
+ * - `Remarks` (K8:L8) is over an empty merged cell (K9:L9), and its value cells are merged across K:L;
+ * - the days 1 to 31 down column A (rows 10 to 40), with number cells, then `Dated:` and `Signed:`.
+ */
+function looseDayGridXlsx(): Uint8Array {
+  const sheet = new Sheet('Demo day grid').columnWidths(9, ...Array<number>(9).fill(8), 14, 14);
+  headerBlock(sheet, {
+    logo: 'A1:B3', title: 'Demo Day Grid', titleRange: 'C1:H3', code: 'TST-12', revision: REVISION, formRanges: ['I1:L1', 'I2:L2', 'I3:L3'],
+  });
+  sheet.set('A6', 'M/V', STYLE.label).merge('B6:E6', STYLE.cell);
+
+  sheet.set('A8', undefined, STYLE.header).set('A9', 'Day', STYLE.header);
+  sheet.merge('B8:D8', STYLE.header, 'Tank 1').set('B9', 'PORT', STYLE.header).set('C9', 'STBD', STYLE.header).set('D9', 'Centre', STYLE.header);
+  sheet.merge('E8:F8', STYLE.header, 'Tank 2').set('E9', 'PORT', STYLE.header).set('F9', 'STBD', STYLE.header);
+  sheet.merge('G8:J8', STYLE.header, 'Tank 3').merge('G9:H9', STYLE.header, 'PORT').merge('I9:J9', STYLE.header, 'STBD');
+  sheet.merge('K8:L8', STYLE.header, 'Remarks').merge('K9:L9', STYLE.header);
+  for (let day = 1; day <= 31; day += 1) {
+    const row = 9 + day;
+    sheet.set(`A${row}`, day, STYLE.centered).blank(`B${row}:F${row}`, STYLE.number);
+    sheet.merge(`G${row}:H${row}`, STYLE.number).merge(`I${row}:J${row}`, STYLE.number).merge(`K${row}:L${row}`, STYLE.wrapped);
+  }
+
+  sheet.set('A42', 'Dated:', STYLE.label).merge('B42:E42', STYLE.dateShort);
+  sheet.set('A43', 'Signed:', STYLE.label).merge('B43:E43', STYLE.cell);
+
+  return sheet.toPackage({ printArea: 'A1:L43', logo: 'A1:B3', landscape: true });
+}
+
+/**
  * `TST-13 Demo Matrix`, columns A to J: nine equipment titles in row 6 (B to J), the attribute names down column A
  * (rows 7 to 15, `Dimensions` and `Schedule` each merged over two rows), empty bordered cells under every title (a number
  * format on `Dimensions`, two date formats on `Schedule`), then `Master:` and `C/O:`.
  */
-export function matrixXlsx(): Uint8Array {
+export function matrixXlsx(options: { subTitles?: boolean } = {}): Uint8Array {
+  if (options.subTitles) return subTitledMatrixXlsx();
   const sheet = new Sheet('Demo matrix').columnWidths(22, ...Array<number>(9).fill(14));
   headerBlock(sheet, {
     logo: 'A1:A3', title: 'Demo Matrix', titleRange: 'B1:E3', code: 'TST-13', revision: REVISION, formRanges: ['F1:J1', 'F2:J2', 'F3:J3'],
@@ -104,6 +139,34 @@ export function matrixXlsx(): Uint8Array {
   sheet.set('A18', 'C/O:', STYLE.label).merge('B18:E18', STYLE.cell);
 
   return sheet.toPackage({ printArea: 'A1:J18', logo: 'A1:A3', landscape: true });
+}
+
+/**
+ * `matrixXlsx({ subTitles: true })`: `TST-13 Demo Matrix` with titles two columns wide, columns A to G. `Unit 1` (B6:C6),
+ * `Unit 2` (D6:E6) and `Unit 3` (F6:G6) over a second title row where only `Unit 2` has words (`Fore side`, D7:E7) and
+ * the others are empty merged cells; the attribute names down column A (rows 8 to 10: `Kind`, `Length` with a number
+ * format, `Due` with a date format) beside value cells merged two columns wide; then `Master:`.
+ */
+function subTitledMatrixXlsx(): Uint8Array {
+  const sheet = new Sheet('Demo matrix').columnWidths(22, ...Array<number>(6).fill(10));
+  headerBlock(sheet, {
+    logo: 'A1:A3', title: 'Demo Matrix', titleRange: 'B1:D3', code: 'TST-13', revision: REVISION, formRanges: ['E1:G1', 'E2:G2', 'E3:G3'],
+  });
+  sheet.set('A6', undefined, STYLE.header).set('A7', undefined, STYLE.header);
+  sheet.merge('B6:C6', STYLE.header, 'Unit 1').merge('D6:E6', STYLE.header, 'Unit 2').merge('F6:G6', STYLE.header, 'Unit 3');
+  sheet.merge('B7:C7', STYLE.header).merge('D7:E7', STYLE.header, 'Fore side').merge('F7:G7', STYLE.header);
+  const values = (row: number, style: StyleId) => {
+    for (const [from, to] of [['B', 'C'], ['D', 'E'], ['F', 'G']]) sheet.merge(`${from}${row}:${to}${row}`, style);
+  };
+  sheet.set('A8', 'Kind', STYLE.bold);
+  values(8, STYLE.cell);
+  sheet.set('A9', 'Length', STYLE.bold);
+  values(9, STYLE.number);
+  sheet.set('A10', 'Due', STYLE.bold);
+  values(10, STYLE.date);
+
+  sheet.set('A12', 'Master:', STYLE.label).merge('B12:D12', STYLE.cell);
+  return sheet.toPackage({ printArea: 'A1:G12', logo: 'A1:A3' });
 }
 
 /**

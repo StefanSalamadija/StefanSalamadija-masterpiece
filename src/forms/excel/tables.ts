@@ -97,7 +97,11 @@ function shownCols(grid: Grid, c1: number, c2: number): number[] {
 /**
  * The title of each column under a header, and the first row of data. Rows covered by the header's own merges belong
  * to the header. When a header cell spans several columns, a sub-header row of texts under it (`PORT`, `STBD` under
- * `Hold 1`) gives the titles `<header> <sub>` (`Hold 1 PORT`).
+ * `Hold 1`) gives the titles `<header> <sub>` (`Hold 1 PORT`). That row is a sub-header when:
+ * - under every column it has the header's own merge, a sub-title (letters, no formula), or nothing (a title with no
+ *   sub-title, such as `Remarks` over an empty cell, keeps its title alone);
+ * - the sub-titles of at least one wide header cell cover all its columns;
+ * - the cell under each sub-title holds no words, so that a first row of items is never taken for one.
  */
 function titlesOf(grid: Grid, header: Header, cols: number[]): { titles: Map<number, string>; dataStart: number } {
   const headerKeys = new Set(header.cells.map((o) => o.key));
@@ -111,8 +115,20 @@ function titlesOf(grid: Grid, header: Header, cols: number[]): { titles: Map<num
       const o = grid.origin(r, c);
       return o.row === r && !grid.isFormula(o) && hasLetters(grid.text(o));
     };
-    const fits = cols.every((c) => underHeader(r, c) || subText(c))
-      && header.cells.filter((o) => o.c2 > o.col).every((o) => cols.filter((c) => c >= o.col && c <= o.c2).every(subText));
+    // Under a title with no sub-title of its own (`Remarks` over an empty cell), the row is empty.
+    const blank = (c: number): boolean => {
+      const o = grid.origin(r, c);
+      return o.row === r && grid.isEmpty(o);
+    };
+    // A sub-title heads a column of values, not of names: the cell under it holds no words. A first row of items whose
+    // name fills a wide title's width (`Item 001` under `Description`) is a row of the table, not its sub-header.
+    const headsValues = (c: number): boolean => {
+      const o = grid.origin(r + 1, c);
+      return o.row !== r + 1 || !hasLetters(grid.text(o));
+    };
+    const fits = cols.every((c) => underHeader(r, c) || subText(c) || blank(c))
+      && cols.filter(subText).every(headsValues)
+      && header.cells.some((o) => o.c2 > o.col && cols.filter((c) => c >= o.col && c <= o.c2).every(subText));
     if (fits) {
       sub = r;
       r += 1;

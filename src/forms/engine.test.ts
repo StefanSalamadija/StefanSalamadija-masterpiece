@@ -33,8 +33,10 @@ const FIXTURES: Fixture[] = [
   { name: 'content controls', fileName: 'controls.docx', make: contentControlsDocx },
   { name: 'odd layouts', fileName: 'odd.docx', make: oddLayoutsDocx },
   { name: 'inventory', fileName: 'inventory.xlsx', make: () => inventoryXlsx(120) },
-  { name: 'day grid', fileName: 'daygrid.xlsx', make: dayGridXlsx },
-  { name: 'matrix', fileName: 'matrix.xlsx', make: matrixXlsx },
+  { name: 'day grid', fileName: 'daygrid.xlsx', make: () => dayGridXlsx() },
+  { name: 'day grid (loose header)', fileName: 'daygrid-loose.xlsx', make: () => dayGridXlsx({ looseHeader: true }) },
+  { name: 'matrix', fileName: 'matrix.xlsx', make: () => matrixXlsx() },
+  { name: 'matrix (sub-titles)', fileName: 'matrix-sub.xlsx', make: () => matrixXlsx({ subTitles: true }) },
   { name: 'condition list', fileName: 'conditions.xlsx', make: conditionListXlsx },
 ];
 

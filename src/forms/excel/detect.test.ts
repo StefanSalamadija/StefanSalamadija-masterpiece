@@ -79,6 +79,39 @@ describe('detectExcel on the fixtures (the brief\'s tests)', () => {
     expect(g.columns.map((c) => c.label)).toContain('Hold 1 PORT');
   });
 
+  it('makes a loosely drawn day grid one dayGrid: empty corner, Day under it, uneven sub-headers and an untitled Remarks sub-cell', () => {
+    const s = detect(dayGridXlsx({ looseHeader: true }), 'daygrid.xlsx');
+    expect(s.fields.filter((f) => f.block !== undefined)).toEqual([]);
+    expect(s.fields.map((f) => f.label)).toEqual(['M/V', 'Dated', 'Signed']);
+    expect(s.rowGroups).toHaveLength(1);
+    const g = s.rowGroups[0]!;
+    expect([g.shape, g.firstRow, g.capacity, g.rowLabels?.length, g.rowLabels?.[0], g.rowLabels?.[30]]).toEqual(['dayGrid', 10, 31, 31, '1', '31']);
+    expect(g.columns.map((c) => [c.label, c.loc])).toEqual([
+      ['Tank 1 PORT', 'B'], ['Tank 1 STBD', 'C'], ['Tank 1 Centre', 'D'], ['Tank 2 PORT', 'E'], ['Tank 2 STBD', 'F'],
+      ['Tank 3 PORT', 'G'], ['Tank 3 STBD', 'I'], ['Remarks', 'K'],
+    ]);
+  });
+
+  it('reads a second title row where only some titles have words as titles, not as a row of the matrix', () => {
+    const s = detect(matrixXlsx({ subTitles: true }), 'matrix.xlsx');
+    const cells = s.fields.filter((f) => f.block !== undefined);
+    expect(cells.map((f) => [f.loc.split('!')[1], f.label, f.kind, f.confidence])).toEqual([
+      ['B8', `Unit 1 ${DOT} Kind`, 'text', 'high'], ['D8', `Unit 2 Fore side ${DOT} Kind`, 'text', 'high'], ['F8', `Unit 3 ${DOT} Kind`, 'text', 'high'],
+      ['B9', `Unit 1 ${DOT} Length`, 'number', 'high'], ['D9', `Unit 2 Fore side ${DOT} Length`, 'number', 'high'], ['F9', `Unit 3 ${DOT} Length`, 'number', 'high'],
+      ['B10', `Unit 1 ${DOT} Due`, 'date', 'high'], ['D10', `Unit 2 Fore side ${DOT} Due`, 'date', 'high'], ['F10', `Unit 3 ${DOT} Due`, 'date', 'high'],
+    ]);
+    expect(s.rowGroups).toEqual([]);
+  });
+
+  it('does not take the first item row for a sub-header when its name fills a wide title', () => {
+    const sheet = probeSheet('List');
+    sheet.merge('B8:C8', STYLE.header, 'Description').set('D8', 'Spec', STYLE.header).set('E8', 'Qty', STYLE.header);
+    for (let r = 9; r <= 12; r += 1) sheet.merge(`B${r}:C${r}`, STYLE.bold, `Item ${r}`).blank(`D${r}`, STYLE.cell).blank(`E${r}`, STYLE.number);
+    const s = detect(sheet.toPackage({ printArea: 'A1:E14', logo: 'A1:A3' }));
+    const g = s.rowGroups[0]!;
+    expect([s.rowGroups.length, g.firstRow, g.capacity, g.columns.map((c) => c.label), g.rowLabels]).toEqual([1, 9, 4, ['Spec', 'Qty'], ['Item 9', 'Item 10', 'Item 11', 'Item 12']]);
+  });
+
   it('merged_label_cells: labels a matrix cell by its column title and the merged attribute name', () => {
     const s = detect(matrixXlsx(), 'matrix.xlsx');
     const dims = s.fields.filter((f) => f.label === `Equipment 1 ${DOT} Dimensions`);
