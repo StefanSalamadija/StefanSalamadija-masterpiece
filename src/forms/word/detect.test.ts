@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readPackage } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, heading, p, row, run, table, tickBox, titleRow, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import type { FieldDef, FormSchema } from '../types';
 import { parseXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
@@ -222,6 +222,49 @@ describe('detectWord', () => {
     expect(s.fields.map((f) => f.confidence)).toEqual([...Array(9).fill('high'), 'low']);
   });
 
+  it('makes rows that hold a field in each cell under a header a row group, named by the header and the first columns', () => {
+    const s = detect(fieldRowsDocx());
+    const groupSummary = (g: FormSchema['rowGroups'][number]) => ({
+      id: g.id, label: g.label, section: g.section, capacity: g.capacity, growable: g.growable, shape: g.shape, rowLabels: g.rowLabels,
+      columns: g.columns.map((c) => ({ ...summary(c), loc: c.loc })),
+    });
+    expect(s.rowGroups.map(groupSummary)).toEqual([
+      {
+        id: 'g1', label: 'Attendees', section: 'Attendees', capacity: 4, growable: true, shape: 'rows', rowLabels: undefined,
+        columns: [
+          { id: 'g1.c1', kind: 'text', label: 'Name', section: 'Attendees', confidence: 'high', loc: '0/1/1/1' },
+          { id: 'g1.c2', kind: 'text', label: 'Rank / Function', section: 'Attendees', confidence: 'high', loc: '1/1/1/1' },
+          // An empty cell under a header is a column too; this one asks for a signature, so nothing is written there.
+          { id: 'g1.c3', kind: 'text', label: 'Signature', section: 'Attendees', confidence: 'high', leftEmpty: true, loc: '2' },
+        ],
+      },
+      {
+        // The first row says N/A where the others hold a field: it is not a row of the group, and the header above it
+        // still names the group's columns. The rows are named by their first cells, so they are fixed and do not grow.
+        id: 'g2', label: 'Documents', section: 'Documents', capacity: 3, growable: false, shape: 'rows',
+        rowLabels: ['2 Demo register', '3 Demo survey', '4 Demo permit'],
+        columns: [
+          { id: 'g2.c1', kind: 'date', label: 'Issued', section: 'Documents', confidence: 'high', formatHint: 'dd/MM/yyyy', loc: '2/1/1/1' },
+          { id: 'g2.c2', kind: 'date', label: 'Expires', section: 'Documents', confidence: 'high', formatHint: 'dd/MM/yyyy', loc: '3/1/1/1' },
+        ],
+      },
+    ]);
+    // The row that is not the group's, a label and field on each row, and a single row of fields keep their own fields.
+    expect(s.fields.map((f) => [f.id, f.kind, f.label, f.confidence])).toEqual([
+      ['f1', 'date', 'Demo letter', 'high'],
+      ['f2', 'text', 'Vessel', 'high'], ['f3', 'text', 'Port', 'high'],
+      ['f4', 'text', 'Port', 'high'], ['f5', 'text', 'Berth', 'high'], ['f6', 'text', 'Agent', 'high'],
+    ]);
+    // Every address resolves in the template, every column in every row.
+    const targets = locateWord(documentOf(fieldRowsDocx()), MAIN, s);
+    for (const def of [...s.fields, ...s.rowGroups]) expect(targets.get(def.id), def.id).toBeDefined();
+    for (const g of s.rowGroups) {
+      const rows = (targets.get(g.id) as WordTarget & { kind: 'group' }).rows;
+      expect(rows).toHaveLength(g.capacity);
+      for (const r of rows) for (const c of g.columns) expect(locateColumn(r, c)?.kind, c.id).toBe(c.loc.includes('/') ? 'formtext' : 'cell');
+    }
+  });
+
   it('makes a date field whose label names a period text, unless the label names a first and a last date', () => {
     const s = detect(shortDatesDocx());
     expect(s.fields.map(summary)).toEqual([
@@ -356,6 +399,19 @@ describe('detectWord', () => {
     expect(performance.now() - started).toBeLessThan(1000);
     expect(s.fields).toHaveLength(6 * 26);
     expect(s.rowGroups).toHaveLength(6);
+  });
+
+  it('detects 600 rows of fields in well under a second, with a header and without one', () => {
+    const c = new Controls();
+    const widths = [3000, 3000, 3638];
+    const rows = () => Array.from({ length: 600 }, () => row(widths, [{ content: p(c.formText()) }, { content: p(c.formText()) }, '']));
+    const body = table(widths, [headerRow(widths, ['Name', 'Rank', 'Signature']), ...rows()]) + p() + table(widths, rows());
+    const bytes = wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Long lists', code: 'TST-90', revision: '0' }), body });
+    const start = performance.now();
+    const s = detect(bytes);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(s.rowGroups.map((g) => [g.capacity, g.columns.length])).toEqual([[600, 3]]);
+    expect(s.fields).toHaveLength(1200);
   });
 });
 

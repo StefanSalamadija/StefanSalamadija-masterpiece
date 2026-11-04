@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { bytesOf, partText, readPackage, writePackage } from '../package';
 import type { Package } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, p, row, run, table, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import { CONTENT_TYPE } from '../testing/zip';
 import type { DraftValues, FieldDef, FormSchema } from '../types';
 import { parseXml } from '../xml';
@@ -306,6 +306,43 @@ describe('writeWord', () => {
     expect(back.fields.f1).toBe('MV DEMO STAR');
     expect(back.rows[jobs.id]).toEqual([1, 2, 3, 4, 5].map(job));
     expect(partText(out, MAIN)).toContain('24.10.2026'); // the date control's own dd.MM.yyyy
+  });
+
+  it('fills rows that hold a field in each cell, clones the last with fresh form-field names, and leaves Signature empty', () => {
+    const pkg = readPackage(fieldRowsDocx());
+    const s = detectWord(pkg, 'docx', 'rows.docx');
+    const [crew, documents] = s.rowGroups;
+    const [name, rank, signature] = crew!.columns;
+    const person = (n: number) => ({ [name!.id]: `Person ${n} & <Co>`, [rank!.id]: `Rank ${n}`, [signature!.id]: 'never written' });
+    const [issued, expires] = documents!.columns;
+    const vals = values({ f2: 'MV DEMO STAR' }, {
+      [crew!.id]: [1, 2, 3, 4, 5, 6].map(person),
+      [documents!.id]: [{ [issued!.id]: '2026-01-15', [expires!.id]: '2031-01-14' }, {}, { [expires!.id]: '2027-03-01' }],
+    });
+    expect(extraRowsOf(s, vals)).toEqual({ [crew!.id]: 2 });
+    const { out } = fill(pkg, s, vals);
+    const doc = mainDoc(out);
+
+    const starts = all(doc, W, 'bookmarkStart');
+    const names = starts.map((b) => wAttr(b, 'name')!);
+    expect(new Set(names).size).toBe(names.length);
+    const ffNames = all(doc, W, 'ffData').map((ff) => wAttr(all(ff, W, 'name')[0], 'val')!);
+    expect(ffNames).toHaveLength(all(mainDoc(pkg), W, 'ffData').length + 2 * 2); // the template's, and 2 in each cloned row
+    expect(new Set(ffNames).size).toBe(ffNames.length);
+    for (const ff of ffNames) expect(names).toContain(ff);
+
+    const back = readWordValues(out, s, extraRowsOf(s, vals));
+    expect(back.fields.f2).toBe('MV DEMO STAR');
+    expect(back.rows[crew!.id]).toEqual([1, 2, 3, 4, 5, 6].map((n) => ({ ...person(n), [signature!.id]: null })));
+    expect(back.rows[documents!.id]).toEqual([
+      { [issued!.id]: '2026-01-15', [expires!.id]: '2031-01-14' }, { [issued!.id]: null, [expires!.id]: null }, { [issued!.id]: null, [expires!.id]: '2027-03-01' },
+    ]);
+    expect(partText(out, MAIN)).toContain('14/01/2031');
+    // The cloned rows sit straight after the last crew row, in the same table: the document table still follows.
+    const crewTable = locateWord(doc, MAIN, s, extraRowsOf(s, vals)).get(crew!.id)!;
+    if (crewTable.kind !== 'group') throw new Error('not a group');
+    expect(crewTable.rows).toHaveLength(6);
+    expect(new Set(crewTable.rows.map((r) => r.parentNode)).size).toBe(1);
   });
 
   it('clears a cloned item, so that a value in the template\'s last item is not copied into the new rows', () => {

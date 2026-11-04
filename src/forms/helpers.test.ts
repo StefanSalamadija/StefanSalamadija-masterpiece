@@ -6,7 +6,7 @@ import {
 } from './helpers';
 import { readPackage } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
-import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { fieldRowsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { detectExcel } from './excel/detect';
 import { detectWord } from './word/detect';
 import { DEFAULT_OK_WORD } from './types';
@@ -60,6 +60,18 @@ describe('suggestHelpers', () => {
     expect(isJobLogGroup(group(weekly, 'g1'))).toBe(true);
     expect(isJobLogGroup(group(weekly, 'g2'))).toBe(false);
     expect(h.pickCrew).toEqual([]);
+  });
+  it('rows of fields: pick from crew on the attendees, and start from last on the named documents', () => {
+    const rows = detectWord(readPackage(fieldRowsDocx()), 'docx', 'rows.docx');
+    const h = suggestHelpers(rows);
+    expect(h.pickCrew).toEqual(['g1']);
+    expect(h.startFromLast).toEqual(['g2']);
+    expect(h.jobLog).toEqual([]);
+    // Rank / Function takes the rank; Signature is left empty.
+    expect(crewRows(group(rows, 'g1'), [ana, ivo])).toEqual([
+      { 'g1.c1': 'Ana Marin', 'g1.c2': 'Chief Officer' },
+      { 'g1.c1': 'Ivo Kovac', 'g1.c2': 'Pumpman' },
+    ]);
   });
   it('excel: day grid, inventory, matrix block and condition list', () => {
     expect(suggestHelpers(dayGrid).todayRow).toEqual(['Demo day grid!g1']);

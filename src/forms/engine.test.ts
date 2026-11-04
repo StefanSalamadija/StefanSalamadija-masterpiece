@@ -9,7 +9,7 @@ import { formatDate, parseDate, usableDateHint } from './format';
 import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
-import { contentControlsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
 import { readWordValues } from './word/read';
@@ -34,6 +34,7 @@ const FIXTURES: Fixture[] = [
   { name: 'content controls', fileName: 'controls.docx', make: contentControlsDocx },
   { name: 'odd layouts', fileName: 'odd.docx', make: oddLayoutsDocx },
   { name: 'short dates', fileName: 'short-dates.docx', make: shortDatesDocx },
+  { name: 'field rows', fileName: 'field-rows.docx', make: fieldRowsDocx },
   { name: 'inventory', fileName: 'inventory.xlsx', make: () => inventoryXlsx(120) },
   { name: 'day grid', fileName: 'daygrid.xlsx', make: () => dayGridXlsx() },
   { name: 'day grid (loose header)', fileName: 'daygrid-loose.xlsx', make: () => dayGridXlsx({ looseHeader: true }) },

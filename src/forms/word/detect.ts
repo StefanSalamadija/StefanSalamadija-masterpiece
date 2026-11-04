@@ -58,6 +58,9 @@ interface RowInfo {
   title?: string;
 }
 
+/** The shape of a row of a list of fields (`Detector.listRow`). */
+interface ListRow { key: string; firstField: number }
+
 /** A tick column: where its cells start in the grid, and the option its header gives. */
 interface TickColumn { grid: number; option: string }
 
@@ -130,6 +133,8 @@ class Detector {
   readonly fields: FieldDef[] = [];
   readonly groups: RowGroupDef[] = [];
   private section = '';
+  /** `listRow` of each row, worked out once: a long run of rows is looked at again from each row that may start it. */
+  private listRows = new Map<RowInfo, ListRow | undefined>();
 
   constructor(private addr: Addresser) {}
 
@@ -239,6 +244,11 @@ class Detector {
         i = this.plainGroup(rows, i, title);
         continue;
       }
+      const after = info.fields ? this.fieldRowsGroup(rows, i, title) : undefined;
+      if (after !== undefined) {
+        i = after;
+        continue;
+      }
       this.rowFields(rows, i, info.cells, boxAbove);
       i += 1;
     }
@@ -292,10 +302,8 @@ class Detector {
   /**
    * Empty rows under a header: a plain row group. Returns the index of the first row after them.
    *
-   * The rows with text just above the empty ones are the table's head. Its header row is the last one marked to
-   * repeat as a header; else the first bold one when not all are bold; else the first one when every row after it is
-   * fully filled and has as many cells (alarm limits under the column titles); else the row just above the empty
-   * rows. Fully filled rows between the header row and the empty rows are the group's `fixedRows` (R8).
+   * The rows with text just above the empty ones are the table's head (`tableHead`), which gives the header row that
+   * names the columns. Fully filled rows between the header row and the empty rows are the group's `fixedRows` (R8).
    */
   private plainGroup(rows: RowInfo[], i: number, title: string | undefined): number {
     let end = i + 1;
@@ -303,18 +311,9 @@ class Detector {
     // counts the rows of a group: the row elements after the first, whatever else sits between them.
     while (end < rows.length && rows[end].empty && !rows[end].row.repeat && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode) end += 1;
 
-    const head: RowInfo[] = [];
-    for (let r = i - 1; r >= 0 && isTextRow(rows[r]); r -= 1) head.unshift(rows[r]);
-    if (head.length === 0) return end;
-    let h = head.findLastIndex((r) => r.row.tblHeader);
-    if (h < 0 && head.some((r) => r.bold) && !head.every((r) => r.bold)) h = head.findIndex((r) => r.bold);
-    if (h < 0) h = head.slice(1).every((r) => r.full && r.cells.length === head[0].cells.length) ? 0 : head.length - 1;
-    let fixed = head.slice(h + 1);
-    if (fixed.some((r) => !r.full)) {
-      h = head.length - 1;
-      fixed = [];
-    }
-    if (head[h].textCells < 2) return end;
+    const found = tableHead(rows, i);
+    if (!found) return end;
+    const { head, h } = found;
 
     const n = this.groups.length + 1;
     const first = rows[i];
@@ -322,18 +321,107 @@ class Detector {
       id: `g${n}.c${k + 1}`, text: columnTitle(head, h, c.cell.grid), fallback: `Column ${k + 1}`, section: this.section,
       loc: this.addr.relative(first.row.el, c.cell.el),
     }));
+    this.pushGroup(rows, i, end, first.cells, found.fixed, columns, title, undefined);
+    return end;
+  }
+
+  /** A group of `rows[i..end)`, with its `fixedRows` read under the cells `under` of its first row. */
+  private pushGroup(rows: RowInfo[], i: number, end: number, under: readonly CellInfo[], fixed: RowInfo[], columns: FieldDef[], title: string | undefined, rowLabels: string[] | undefined): void {
+    const n = this.groups.length + 1;
     const group: RowGroupDef = {
-      id: `g${n}`, label: title ?? (this.section || `Table ${n}`), section: this.section, loc: this.addr.loc(first.row.el),
-      columns, capacity: end - i, growable: true, shape: 'rows',
+      id: `g${n}`, label: title ?? (this.section || `Table ${n}`), section: this.section, loc: this.addr.loc(rows[i].row.el),
+      columns, capacity: end - i, growable: rowLabels === undefined, shape: 'rows',
     };
+    if (rowLabels !== undefined) group.rowLabels = rowLabels;
     if (fixed.length > 0) {
       group.fixedRows = fixed.map((r) => ({
         label: r.cells[0].text,
-        cells: first.cells.map((c) => cellAt(r, c.cell.grid)?.text ?? ''),
+        cells: under.map((c) => cellAt(r, c.cell.grid)?.text ?? ''),
       }));
     }
     this.groups.push(group);
+  }
+
+  /**
+   * Rows that already hold a field in each cell to fill, under a header: a row group whose columns are those cells
+   * (spec §5.1, the participants and document lists). Returns the index of the first row after the group, or
+   * `undefined` when `rows[i]` does not start one; its fields are then found one by one.
+   *
+   * Each row of the group has the same shape as the first (`listRow`): the same cells, the same kind of field at the
+   * same place in each, and the same empty cells. The run needs 2 rows or more. The header is found as for a plain
+   * group (`tableHead`), above the rows; rows of fields with the same cells that are not the group's (a first row that
+   * says `N/A` where the others hold a field) may sit between, and keep their own fields. Every field cell needs a
+   * column title; an empty cell under a title is a column of the cell itself (a `Signature` column is left empty), and
+   * one with no title is no column.
+   *
+   * The cells before the first field name the rows (`rowLabels`, their texts joined by a space): such a list is fixed,
+   * so it does not grow. A list with no names grows by cloning its last row, as a plain group does.
+   */
+  private fieldRowsGroup(rows: RowInfo[], i: number, title: string | undefined): number | undefined {
+    const shape = this.listRow(rows[i]);
+    if (!shape) return undefined;
+    let end = i + 1;
+    while (end < rows.length && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode && this.listRow(rows[end])?.key === shape.key) end += 1;
+    if (end - i < 2) return undefined;
+
+    let top = i;
+    while (top > 0 && rows[top - 1].fields && !rows[top - 1].row.repeat && layoutOf(rows[top - 1]) === layoutOf(rows[i])) top -= 1;
+    const found = tableHead(rows, top);
+    if (!found) return undefined;
+    const { head, h } = found;
+
+    const n = this.groups.length + 1;
+    const first = rows[i];
+    const area = first.cells.slice(shape.firstField);
+    const columns: FieldDef[] = [];
+    for (const c of area) {
+      const text = columnTitle(head, h, c.cell.grid);
+      const field = c.tokens.find((t): t is Token & { t: 'field' } => t.t === 'field');
+      if (field && !hasWords(text)) return undefined;
+      if (!field && !hasWords(text)) continue;
+      const o = { id: `g${n}.c${columns.length + 1}`, text, fallback: `Column ${columns.length + 1}`, section: this.section };
+      columns.push(field
+        ? makeField(field.field, { ...o, loc: this.addr.relative(first.row.el, nodeOf(field.field)) })
+        : makeColumn({ ...o, loc: this.addr.relative(first.row.el, c.cell.el) }));
+    }
+    const names = rows.slice(i, end).map((r) => clean(r.cells.slice(0, shape.firstField).map((c) => c.text).join(' ')));
+    this.pushGroup(rows, i, end, area, top === i ? found.fixed : [], columns, title, names.some(hasWords) ? names : undefined);
     return end;
+  }
+
+  /**
+   * The shape of a row of a list of fields, or `undefined` when it is not one: some cells that name the row (text or
+   * nothing, no field, no box), then cells that each hold exactly one field (not a checkbox) and nothing else, or
+   * nothing at all; at least 2 of them hold a field, and none is merged down. A row whose naming text ends with `:`
+   * (`Vessel: [field]`) labels its fields rather than naming a row of a list. `key` is the same for two rows of the
+   * same shape: their cells, and the kind and address (from the row) of each field.
+   */
+  private listRow(info: RowInfo): ListRow | undefined {
+    if (!this.listRows.has(info)) this.listRows.set(info, this.listRowOf(info));
+    return this.listRows.get(info);
+  }
+
+  private listRowOf(info: RowInfo): ListRow | undefined {
+    if (info.row.repeat || !info.fields || info.boxes) return undefined;
+    const firstField = info.cells.findIndex((c) => c.fields > 0);
+    const naming = info.cells.slice(0, firstField);
+    if (naming.some((c) => c.objects > 0 || /:\s*$/.test(c.text))) return undefined;
+    const parts: string[] = [];
+    let fields = 0;
+    for (const c of info.cells.slice(firstField)) {
+      const tokens = c.tokens.filter((t) => t.t !== 'break');
+      const only = tokens.length === 1 && tokens[0].t === 'field' ? tokens[0].field : undefined;
+      if (c.cell.vMerge !== undefined || (!only && !c.empty) || (only && isCheckbox(only))) return undefined;
+      if (only) {
+        fields += 1;
+        const type = only.kind === 'legacy' ? only.type : only.control;
+        parts.push(`${c.cell.grid}+${c.cell.span}=${type}@${this.addr.relative(info.row.el, nodeOf(only))}`);
+      } else {
+        parts.push(`${c.cell.grid}+${c.cell.span}=empty`);
+      }
+    }
+    if (fields < 2) return undefined;
+    return { key: `${layoutOf(info)}|${firstField}|${parts.join(' ')}`, firstField };
   }
 
   /**
@@ -423,6 +511,33 @@ function boxWords(tokens: readonly Token[], i: number): string | undefined {
   const after = texts.slice(1).every(hasWords);
   if (before && (!after || !/[:?]$/.test(texts[0]))) return texts[k];
   return after ? texts[k + 1] : undefined;
+}
+
+/** The cells of a row, where each starts in the grid and how wide it is. */
+function layoutOf(info: RowInfo): string {
+  return info.cells.map((c) => `${c.cell.grid}+${c.cell.span}`).join(' ');
+}
+
+/**
+ * The head of a table above `rows[i]`: the rows with text just above it, the index `h` of its header row in them, and
+ * the fully filled rows between the header row and `rows[i]` (`fixed`, R8). The header row is the last one marked to
+ * repeat as a header; else the first bold one when not all are bold; else the first one when every row after it is
+ * fully filled and has as many cells (alarm limits under the column titles); else the row just above. `undefined`
+ * when there is no head, or its header row has fewer than 2 cells with text.
+ */
+function tableHead(rows: RowInfo[], i: number): { head: RowInfo[]; h: number; fixed: RowInfo[] } | undefined {
+  const head: RowInfo[] = [];
+  for (let r = i - 1; r >= 0 && isTextRow(rows[r]); r -= 1) head.unshift(rows[r]);
+  if (head.length === 0) return undefined;
+  let h = head.findLastIndex((r) => r.row.tblHeader);
+  if (h < 0 && head.some((r) => r.bold) && !head.every((r) => r.bold)) h = head.findIndex((r) => r.bold);
+  if (h < 0) h = head.slice(1).every((r) => r.full && r.cells.length === head[0].cells.length) ? 0 : head.length - 1;
+  let fixed = head.slice(h + 1);
+  if (fixed.some((r) => !r.full)) {
+    h = head.length - 1;
+    fixed = [];
+  }
+  return head[h].textCells < 2 ? undefined : { head, h, fixed };
 }
 
 /** A row of the head of a table: text, and nothing to fill. */

@@ -33,7 +33,7 @@ import type { DraftValues, FieldDef, FormSchema, FormSetup, FormValue, HelperKey
 
 const NAME_COLUMN = /^(?:full )?name(?: ?(?:\/|and|&) ?(?:rank|function))?$/;
 const NAME_ONLY = /^(?:full )?name$/;
-const RANK_COLUMN = /^(?:rank|function)$/;
+const RANK_COLUMN = /^(?:rank|function)(?: ?(?:\/|and|&) ?(?:rank|function))?$/;
 const NAME_AND_RANK_COLUMN = /^(?:full )?name ?(?:\/|and|&) ?(?:rank|function)$/;
 const TIME_LABEL = /^time(?: in| out)?$/;
 const ALARM_ROW = /alarm/i;
@@ -153,9 +153,9 @@ export function suggestHelpers(schema: FormSchema): Record<HelperKey, string[]> 
 
 /**
  * One row for each person, in the order given (the screen has already chosen who, from `onboardAt`). A Name column gets
- * the full name, a Rank or Function column the rank label (`rankLabel`: the free text for `other`), and a combined
- * `Name / Rank` column `<full name> / <rank>`. A column that is left empty (a signature) is never written, and
- * neither is any other column.
+ * the full name, a Rank, Function or `Rank / Function` column the rank label (`rankLabel`: the free text for `other`),
+ * and a combined `Name / Rank` column `<full name> / <rank>`. A column that is left empty (a signature) is never
+ * written, and neither is any other column.
  */
 export function crewRows(group: RowGroupDef, people: CrewMember[]): Record<string, FormValue>[] {
   return people.map((p) => {

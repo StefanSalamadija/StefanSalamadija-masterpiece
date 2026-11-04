@@ -232,3 +232,50 @@ export function shortDatesDocx(): Uint8Array {
     body: details + p(),
   });
 }
+
+/**
+ * `TST-07 Demo Field Rows`: tables whose rows already hold a FORMTEXT in each cell to fill.
+ * - `Attendees`: a title row, the header `Name | Rank / Function | Signature`, and 4 rows with a FORMTEXT under Name
+ *   and under Rank / Function and an empty Signature cell.
+ * - `Documents`: the header `No. | Document | Issued | Expires`; a first row whose Expires cell says `N/A` instead of
+ *   holding a field; then 3 rows with the number and name of a document and a FORMTEXT date (`dd/MM/yyyy`) under
+ *   Issued and under Expires.
+ * - `Contacts`: the header `Item | Details` over rows of a label and one field each, which name their own fields.
+ * - `Place`: the header `Port | Berth | Agent` over a single row of fields.
+ */
+export function fieldRowsDocx(): Uint8Array {
+  const c = new Controls();
+  const field = () => ({ content: p(c.formText()) });
+  const date = () => ({ content: p(c.formText({ type: 'date', format: 'dd/MM/yyyy' })) });
+
+  const crewWidths = [4000, 3000, 2638];
+  const attendees = table(crewWidths, [
+    titleRow(crewWidths, 'Attendees'),
+    headerRow(crewWidths, ['Name', 'Rank / Function', 'Signature']),
+    ...Array.from({ length: 4 }, () => row(crewWidths, [field(), field(), ''])),
+  ]);
+
+  const docWidths = [800, 4838, 2000, 2000];
+  const documents = ['Demo register', 'Demo survey', 'Demo permit'];
+  const register = table(docWidths, [
+    headerRow(docWidths, ['No.', 'Document', 'Issued', 'Expires']),
+    row(docWidths, ['1', 'Demo letter', date(), 'N/A']),
+    ...documents.map((name, i) => row(docWidths, [String(i + 2), name, date(), date()])),
+  ]);
+
+  const contactWidths = [3000, 6638];
+  const contacts = table(contactWidths, [
+    headerRow(contactWidths, ['Item', 'Details']),
+    row(contactWidths, ['Vessel:', field()]),
+    row(contactWidths, ['Port:', field()]),
+  ]);
+
+  const placeWidths = [3213, 3213, 3212];
+  const place = table(placeWidths, [headerRow(placeWidths, ['Port', 'Berth', 'Agent']), row(placeWidths, [field(), field(), field()])]);
+
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Field Rows', code: 'TST-07', revision: REVISION }),
+    body: attendees + p() + heading('Documents') + register + p() + contacts + p() + place + p(),
+  });
+}
