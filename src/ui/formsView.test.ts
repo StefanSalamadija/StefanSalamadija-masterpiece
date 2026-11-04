@@ -9,7 +9,7 @@ import { farLabelsDocx, guessedLabelsDocx } from '../forms/testing/wordFixtures'
 import type { FieldDef, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
 import { detectWord } from '../forms/word/detect';
 import {
-  applyChoice, choiceOf, confirmName, draftRows, foundSummary, helperSwitches, libraryRows, libraryText, matchesSearch, replacePrompt,
+  applyChoice, choiceOf, confirmName, draftRows, removePrompt, foundSummary, helperSwitches, libraryRows, libraryText, matchesSearch, replacePrompt,
   replaceTarget, revisionNotice, savedSchema, setHelper, setupHeading, setupProblems, setupSections, showsNotFinished,
   templateForDraft,
 } from './formsView';
@@ -166,6 +166,11 @@ const SETUP = emptySetup({
 const ids = (entries: { field: FieldDef }[]) => entries.map((e) => e.field.id);
 
 describe('the setup review', () => {
+  it('asks before a form is removed, naming it by code and title (R26)', () => {
+    expect(removePrompt({ code: 'TST-01', title: 'Toolbox Talk' })).toBe('Remove TST-01 Toolbox Talk and its drafts?');
+    expect(removePrompt({ code: '', title: 'Garbage log' })).toBe('Remove Garbage log and its drafts?');
+  });
+
   it('heads the screen with the code, else the title', () => {
     expect(setupHeading({ code: 'TST-01', title: 'Toolbox Talk' })).toBe('Set up TST-01');
     expect(setupHeading({ code: '', title: 'Garbage log' })).toBe('Set up Garbage log');

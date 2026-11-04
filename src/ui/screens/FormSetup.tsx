@@ -4,18 +4,20 @@ import { useAppState } from '../../app/AppState';
 import { describeError, reportError } from '../../app/errors';
 import { setFlash } from '../../app/flash';
 import { navigate, useRoute } from '../../app/router';
-import { saveSetup, SETUP_STALE } from '../../db/forms';
+import { removeTemplate, saveSetup, SETUP_STALE } from '../../db/forms';
 import type { FormTemplate } from '../../domain/types';
 import { loadFormsEngine } from '../../forms/load';
 import type { FormsEngine } from '../../forms/load';
 import type { FormSetup as Setup, HelperKey } from '../../forms/types';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
 import { SetupFieldRow } from '../components/SetupFieldRow';
 import {
-  applyChoice, choiceOf, confirmName, foundSummary, helperSwitches, savedSchema, setHelper, setupHeading, setupProblems,
-  setupSections, showsNotFinished,
+  applyChoice, choiceOf, confirmName, FORM_REMOVED, foundSummary, helperSwitches, removePrompt, savedSchema, setHelper, setupHeading,
+  setupProblems, setupSections, showsNotFinished,
 } from '../formsView';
 import type { NameReview, SetupEntry } from '../formsView';
+import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
 
 /*
@@ -85,6 +87,10 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   /** The field whose choice just moved it to another section, to give it the focus there. */
   const [moved, setMoved] = useState<{ id: string }>();
   const [checkFocus, setCheckFocus] = useState(0);
+  /** `Remove form` asks first (R26). */
+  const [removing, setRemoving] = useState(false);
+  const remove = useDialogAction();
+  const saveButton = useRef<HTMLButtonElement>(null);
 
   const suggested = useMemo<Record<HelperKey, string[]>>(() => engine.suggestHelpers(schema), [engine, schema]);
   const sections = setupSections(schema, setup);
@@ -183,6 +189,13 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
     setBusy(false);
   }
 
+  /** Removes the form, its drafts, their photos and its last values (R26), then goes back to the library. */
+  async function removeIt(): Promise<void> {
+    await removeTemplate(db, template.id);
+    setFlash(FORM_REMOVED);
+    navigate('/forms');
+  }
+
   const okWordError = shown('okWord');
   const notFinishedError = shown('notFinished');
   const row = (entry: SetupEntry) => {
@@ -199,71 +212,85 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   };
 
   return (
-    <form ref={form} class="screen setup-form" onSubmit={(event) => void save(event)} noValidate>
-      <h2>{setupHeading(template)}</h2>
-      <p class="setup-identity">{[template.title, template.revision === '' ? '' : `Rev ${template.revision}`].filter(Boolean).join(' · ')}</p>
-      <p class="helper-text">{foundSummary(schema)}</p>
-      {stale && <p class="field-error" role="alert">{SETUP_STALE}</p>}
-      {notice.length > 0 && (
-        <div class="setup-notice" role="status">
-          {notice.map((line) => <p key={line}>{line}</p>)}
-        </div>
-      )}
-
-      <Section title="Filled for you">
-        {sections.filled.length === 0 && <p class="empty">No field is filled in by itself. Link one below.</p>}
-        <EntryList entries={sections.filled} render={row} />
-      </Section>
-      <Section title="You fill">
-        {sections.you.length === 0 && <p class="empty">Nothing is left for you to fill in.</p>}
-        <EntryList entries={sections.you} render={row} />
-      </Section>
-      <Section title="Left empty">
-        <p class="helper-text">Signatures and stamps are left empty, for the printed form.</p>
-        {sections.empty.length === 0 && <p class="empty">No field is left empty.</p>}
-        <EntryList entries={sections.empty} render={row} />
-      </Section>
-      <Section title="Can't be filled here">
-        {schema.unsupported.length === 0 && <p class="empty">Every part of this form can be filled here.</p>}
-        {schema.unsupported.length > 0 && (
-          <ul class="setup-unsupported">{schema.unsupported.map((line, i) => <li key={i}>{line}</li>)}</ul>
+    <>
+      <form ref={form} class="screen setup-form" onSubmit={(event) => void save(event)} noValidate>
+        <h2>{setupHeading(template)}</h2>
+        <p class="setup-identity">{[template.title, template.revision === '' ? '' : `Rev ${template.revision}`].filter(Boolean).join(' · ')}</p>
+        <p class="helper-text">{foundSummary(schema)}</p>
+        {stale && <p class="field-error" role="alert">{SETUP_STALE}</p>}
+        {notice.length > 0 && (
+          <div class="setup-notice" role="status">
+            {notice.map((line) => <p key={line}>{line}</p>)}
+          </div>
         )}
-      </Section>
-      <Section title="Helpers">
-        {switches.length === 0 && <p class="empty">No helper applies to this form.</p>}
-        {switches.map((helper) => (
-          <label key={`${helper.key}:${helper.ids.join(',')}`} class="check">
-            <input
-              type="checkbox" role="switch" checked={helper.on}
-              onChange={(event) => setSetup((current) => setHelper(current, helper, event.currentTarget.checked))}
-            />
-            <span>{helper.label}</span>
-          </label>
-        ))}
-      </Section>
-      {/* Each is one field, labelled by its name: no heading of its own, so that the name is said once. */}
-      <div class="setup-section" onFocusOut={() => touch('okWord')}>
-        <Field
-          label="OK word" value={setup.okWord} hint="What All OK writes in a field that has no Yes or OK option."
-          error={okWordError === undefined ? undefined : { field: 'okWord', severity: 'error', message: okWordError }}
-          onInput={(okWord) => setSetup((current) => ({ ...current, okWord }))}
-        />
-      </div>
-      {showsNotFinished(setup) && (
-        <div class="setup-section" onFocusOut={() => touch('notFinished')}>
+
+        <Section title="Filled for you">
+          {sections.filled.length === 0 && <p class="empty">No field is filled in by itself. Link one below.</p>}
+          <EntryList entries={sections.filled} render={row} />
+        </Section>
+        <Section title="You fill">
+          {sections.you.length === 0 && <p class="empty">Nothing is left for you to fill in.</p>}
+          <EntryList entries={sections.you} render={row} />
+        </Section>
+        <Section title="Left empty">
+          <p class="helper-text">Signatures and stamps are left empty, for the printed form.</p>
+          {sections.empty.length === 0 && <p class="empty">No field is left empty.</p>}
+          <EntryList entries={sections.empty} render={row} />
+        </Section>
+        <Section title="Can't be filled here">
+          {schema.unsupported.length === 0 && <p class="empty">Every part of this form can be filled here.</p>}
+          {schema.unsupported.length > 0 && (
+            <ul class="setup-unsupported">{schema.unsupported.map((line, i) => <li key={i}>{line}</li>)}</ul>
+          )}
+        </Section>
+        <Section title="Helpers">
+          {switches.length === 0 && <p class="empty">No helper applies to this form.</p>}
+          {switches.map((helper) => (
+            <label key={`${helper.key}:${helper.ids.join(',')}`} class="check">
+              <input
+                type="checkbox" role="switch" checked={helper.on}
+                onChange={(event) => setSetup((current) => setHelper(current, helper, event.currentTarget.checked))}
+              />
+              <span>{helper.label}</span>
+            </label>
+          ))}
+        </Section>
+        {/* Each is one field, labelled by its name: no heading of its own, so that the name is said once. */}
+        <div class="setup-section" onFocusOut={() => touch('okWord')}>
           <Field
-            label="Not finished value" value={setup.notFinished}
-            hint="Jobs with this status are carried over to next week's form."
-            error={notFinishedError === undefined ? undefined : { field: 'notFinished', severity: 'error', message: notFinishedError }}
-            onInput={(notFinished) => setSetup((current) => ({ ...current, notFinished }))}
+            label="OK word" value={setup.okWord} hint="What All OK writes in a field that has no Yes or OK option."
+            error={okWordError === undefined ? undefined : { field: 'okWord', severity: 'error', message: okWordError }}
+            onInput={(okWord) => setSetup((current) => ({ ...current, okWord }))}
           />
         </div>
-      )}
+        {showsNotFinished(setup) && (
+          <div class="setup-section" onFocusOut={() => touch('notFinished')}>
+            <Field
+              label="Not finished value" value={setup.notFinished}
+              hint="Jobs with this status are carried over to next week's form."
+              error={notFinishedError === undefined ? undefined : { field: 'notFinished', severity: 'error', message: notFinishedError }}
+              onInput={(notFinished) => setSetup((current) => ({ ...current, notFinished }))}
+            />
+          </div>
+        )}
 
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary" aria-disabled={busy ? 'true' : undefined}>Save form</button>
-      </div>
-    </form>
+        <div class="form-actions">
+          <button ref={saveButton} type="submit" class="btn btn-primary" aria-disabled={busy ? 'true' : undefined}>Save form</button>
+          <button type="button" class="btn btn-outline" aria-disabled={busy ? 'true' : undefined} onClick={() => !busy && setRemoving(true)}>
+            Remove form
+          </button>
+        </div>
+      </form>
+      {/* Outside the setup's form: the dialog has a form of its own, whose submit must not save the setup. */}
+      {removing && (
+        <ConfirmDialog
+          title={removePrompt(template)} confirmLabel="Remove form" danger busy={remove.busy} error={remove.failure}
+          focusFallback={saveButton} onCancel={() => setRemoving(false)}
+          onConfirm={() => void remove.run(removeIt)}
+          body={<p>The form leaves the library. Its drafts, their photos and the values of its last file are deleted.</p>}
+        />
+      )}
+    </>
   );
 }
 

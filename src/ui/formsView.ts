@@ -123,6 +123,14 @@ export function revisionNotice(result: { unmatched: string[]; droppedFromDrafts:
 
 /* ---- Setup review ---- */
 
+/** The question asked before a form is removed from the library (R26): `Remove TST-01 Toolbox Talk and its drafts?`. */
+export function removePrompt(identity: { code: string; title: string }): string {
+  return `Remove ${[identity.code, identity.title].filter((part) => part !== '').join(' ')} and its drafts?`;
+}
+
+/** Said once a form has been removed. */
+export const FORM_REMOVED = 'Form removed.';
+
 export function setupHeading(identity: { code: string; title: string }): string {
   return `Set up ${identity.code === '' ? identity.title : identity.code}`;
 }

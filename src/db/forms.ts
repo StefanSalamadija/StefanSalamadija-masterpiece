@@ -263,6 +263,41 @@ export async function discardDraft(db: MasterpieceDB, draftId: string): Promise<
   );
 }
 
+/**
+ * Removes a form from the library (R26), in one transaction (all or nothing), soft-deleting:
+ * - the template, whose tombstone keeps no file (`fileBase64` is emptied, as a photo's keeps no image), so that it stops
+ *   counting toward storage and backups;
+ * - its live drafts, of every ship: those that name it, and those handed over from a copy of the same code and revision
+ *   that it takes as its own (`liveDraftsOf`), unless another live copy with that code and revision takes them too;
+ * - the photos of those drafts, whose tombstones keep no image;
+ * - its last values, of every ship, under its key (`lastValuesKey`), unless another live copy of the form has that key.
+ * A form that is missing is refused, and so is one already removed (`SETUP_GONE`); nothing is written then.
+ */
+export function removeTemplate(db: MasterpieceDB, templateId: string): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.formTemplates, db.formDrafts, db.formPhotos, db.formLastValues, db.settings], async () => {
+      const template = await db.formTemplates.get(templateId);
+      if (!template) throw new Error(`There is no form template with id ${templateId}.`);
+      if (template.deleted) throw new Error(SETUP_GONE);
+      const others = (await db.formTemplates.toArray()).filter((t) => !t.deleted && t.id !== templateId);
+      const live = new Set(others.map((t) => t.id));
+      const twin = template.code !== '' && others.some((t) => t.code === template.code && t.revision === template.revision);
+      const stamp = await stampNow(db);
+
+      const byCode = (d: FormDraft) => !twin && template.code !== '' && d.code === template.code && d.revision === template.revision && !live.has(d.templateId);
+      const drafts = await db.formDrafts.filter((d) => !d.deleted && (d.templateId === templateId || byCode(d))).toArray();
+      for (const draft of drafts) await deleteDraftAndPhotos(db, draft, stamp);
+
+      const key = lastValuesKey(template.code, templateId);
+      const shared = others.some((t) => lastValuesKey(t.code, t.id) === key);
+      const lasts = shared ? [] : await db.formLastValues.where('code').equals(key).filter((r) => !r.deleted).toArray();
+      await db.formLastValues.bulkPut(lasts.map((r) => tombstoneOf('formLastValues', r, stamp)));
+
+      await db.formTemplates.put({ ...tombstoneOf('formTemplates', template, stamp), fileBase64: '' });
+    }),
+  );
+}
+
 /** What `replaceTemplate` did. */
 export interface RevisionResult {
   /** The template as it is now: the same id, with the new revision's file, identity, schema and the carried-over setup. */

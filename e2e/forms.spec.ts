@@ -401,6 +401,41 @@ async function liveDrafts(page: Page): Promise<Record<string, any>[]> {
   return (await stored(page, 'formDrafts')).filter((d) => !d.deleted);
 }
 
+test('Remove form asks first, then takes the form, its draft and its file out, and goes back to Forms (R26)', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');
+  await page.getByLabel('Subject', { exact: true }).fill('Mooring');
+  await expect.poll(async () => (await liveDrafts(page)).length).toBe(1);
+  await openForms(page);
+  await expect(page.getByRole('list', { name: 'In progress' }).getByRole('listitem')).toHaveCount(1);
+
+  await library(page).getByRole('link', { name: 'Set up' }).click();
+  await expect(page.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible();
+  await page.getByRole('button', { name: 'Remove form' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading')).toHaveText('Remove TST-01 Toolbox Talk and its drafts?');
+  await expectNoHorizontalScroll(page);
+  // Cancel keeps everything.
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible();
+  const [before] = await stored(page, 'formTemplates');
+  expect(before.deleted).toBe(false);
+
+  await page.getByRole('button', { name: 'Remove form' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove form' }).click();
+  await expect(page).toHaveURL(/#\/forms$/);
+  await expect(page.getByRole('status')).toHaveText('Form removed.');
+  await expect(library(page).getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByText('No drafts in progress.')).toBeVisible();
+  const [removed] = await stored(page, 'formTemplates');
+  expect([removed.deleted, removed.fileBase64]).toEqual([true, '']);
+  expect(await liveDrafts(page)).toEqual([]);
+  expect((await stored(page, 'formDrafts')).map((d) => d.deleted)).toEqual([true]);
+  // The dialog's own form did not save the setup on the way: the removal is all that happened.
+  expect({ ...removed, deleted: false, fileBase64: before.fileBase64, updatedAt: before.updatedAt }).toEqual(before);
+});
+
 test('a draft opens with its auto values, keeps every change, and Make file gives the form filled in', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await openFillOf(page, 'toolbox.docx', 'TST-01 Toolbox Talk');

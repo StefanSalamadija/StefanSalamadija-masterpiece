@@ -6,8 +6,8 @@ import type { DraftValues, FormSchema, FormSetup } from '../forms/types';
 import { detectWord } from '../forms/word/detect';
 import type { FormDraft, FormLastValues, FormPhoto, FormTemplate } from '../domain/types';
 import {
-  addPhoto, removePhoto, closeDraft, discardDraft, findDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, replaceTemplate, saveDraftValues,
-  saveSetup, saveTemplate, SETUP_GONE, SETUP_STALE,
+  addPhoto, removePhoto, closeDraft, discardDraft, findDraft, lastValuesFor, lastValuesKey, listTemplates, openDraft, photosFor, removeTemplate,
+  replaceTemplate, saveDraftValues, saveSetup, saveTemplate, SETUP_GONE, SETUP_STALE,
 } from './forms';
 import { allTables, createRecord, softDelete } from './records';
 import { openDb } from './schema';
@@ -815,5 +815,90 @@ describe('replaceTemplate', () => {
     vi.spyOn(db.formTemplates, 'put').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
     await expect(replaceTemplate(db, template.id, rev01Input)).rejects.toBeInstanceOf(StorageFullError);
     expect(await allTables(db)).toEqual(before);
+  });
+});
+
+describe('removeTemplate (R26)', () => {
+  /** A form with a draft (and photos) on two ships, last values on two ships, and another form beside it. */
+  async function library() {
+    const base = await draftWithPhotos();
+    const { db, template } = base;
+    await closeDraft(db, (await openDraft(db, 'ship-3', template, '2026-10-27')).id, values('Closed'));
+    const otherForm = await saveTemplate(db, { fileName: 'b.docx', bytes: sampleBytes(10), kind: 'docx', schema: schema('TST-02'), setup });
+    await closeDraft(db, (await openDraft(db, 'ship-1', otherForm, '2026-10-27')).id, values('Other form'));
+    const otherDraft = await openDraft(db, 'ship-1', otherForm, '2026-10-28');
+    return { ...base, otherForm, otherDraft };
+  }
+
+  it('soft-deletes the form with its file, its drafts of every ship, their photos (images emptied) and its last values, in one go', async () => {
+    const { db, template, draft, photo, second, other, otherPhoto, otherForm } = await library();
+    const { deviceId } = await getSettings(db);
+    const othersBefore = {
+      template: await db.formTemplates.get(otherForm.id),
+      drafts: await db.formDrafts.filter((d) => d.templateId === otherForm.id).toArray(),
+      lasts: await db.formLastValues.filter((r) => r.code === 'TST-02').toArray(),
+    };
+    at('2026-10-29T08:00:00.000Z');
+    await removeTemplate(db, template.id);
+    const stamp = { deleted: true, updatedAt: '2026-10-29T08:00:00.000Z', updatedBy: deviceId };
+    expect(await db.formTemplates.get(template.id)).toMatchObject({ ...stamp, fileBase64: '' });
+    for (const id of [draft.id, other.id]) expect(await db.formDrafts.get(id), id).toMatchObject(stamp);
+    for (const id of [photo.id, second.id, otherPhoto.id]) expect(await db.formPhotos.get(id), id).toMatchObject({ ...stamp, jpegBase64: '' });
+    const lasts = await db.formLastValues.filter((r) => r.code === 'TST-01').toArray();
+    expect(lasts.length).toBeGreaterThan(0);
+    for (const r of lasts) expect(r).toMatchObject(stamp);
+    expect(await listTemplates(db)).toEqual([othersBefore.template]);
+    // The other form and its records are untouched.
+    expect(await db.formDrafts.filter((d) => d.templateId === otherForm.id).toArray()).toEqual(othersBefore.drafts);
+    expect(await db.formLastValues.filter((r) => r.code === 'TST-02').toArray()).toEqual(othersBefore.lasts);
+  });
+
+  it('also removes a draft handed over from a copy of the same form and revision, but not one of another revision', async () => {
+    const { db, template } = await withTemplate();
+    const same = await createRecord<FormDraft>(db, 'formDrafts', {
+      shipId: 'ship-1', templateId: 'their-copy', code: 'TST-01', revision: '00 / 01.01.2026', period: '2026-10-27', values: values('Same'), photoIds: [],
+    });
+    const later = await createRecord<FormDraft>(db, 'formDrafts', {
+      shipId: 'ship-1', templateId: 'their-later-copy', code: 'TST-01', revision: '01', period: '2026-10-27', values: values('Later'), photoIds: [],
+    });
+    await removeTemplate(db, template.id);
+    expect((await db.formDrafts.get(same.id))?.deleted).toBe(true);
+    expect(await db.formDrafts.get(later.id)).toEqual(later);
+  });
+
+  it('keeps what another live copy with the same code still uses: its last values and the drafts it takes', async () => {
+    const { db, template } = await withTemplate();
+    const twin = await saveTemplate(db, { fileName: 'twin.docx', bytes: sampleBytes(10), kind: 'docx', schema: schema('TST-01', 'Twin'), setup });
+    const last = await createRecord<FormLastValues>(db, 'formLastValues', { shipId: 'ship-1', code: 'TST-01', revision: '00 / 01.01.2026', values: values('Shared') });
+    const handed = await createRecord<FormDraft>(db, 'formDrafts', {
+      shipId: 'ship-1', templateId: 'their-copy', code: 'TST-01', revision: '00 / 01.01.2026', period: '2026-10-27', values: values('Same'), photoIds: [],
+    });
+    await removeTemplate(db, template.id);
+    expect(await db.formLastValues.get(last.id)).toEqual(last);
+    expect(await db.formDrafts.get(handed.id)).toEqual(handed);
+    expect((await findDraft(db, 'ship-1', twin))?.id).toBe(handed.id);
+  });
+
+  it('removes the last values of a form without a code, kept under its template', async () => {
+    const { db, template } = await withTemplate('');
+    await closeDraft(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, values('Done'));
+    await removeTemplate(db, template.id);
+    expect((await db.formLastValues.toArray()).map((r) => [r.code, r.deleted])).toEqual([[`template:${template.id}`, true]]);
+  });
+
+  it('writes nothing when a write inside fails, reports a full disk as such, and refuses a form that is missing or removed', async () => {
+    const { db, template } = await library();
+    const before = await allTables(db);
+    vi.spyOn(db.formTemplates, 'put').mockRejectedValueOnce(new Error('boom'));
+    await expect(removeTemplate(db, template.id)).rejects.toThrow('boom');
+    expect(await allTables(db)).toEqual(before);
+    vi.spyOn(db.formPhotos, 'bulkPut').mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'));
+    await expect(removeTemplate(db, template.id)).rejects.toBeInstanceOf(StorageFullError);
+    expect(await allTables(db)).toEqual(before);
+    await expect(removeTemplate(db, 'missing')).rejects.toThrow(/missing/);
+    await removeTemplate(db, template.id);
+    const removed = await allTables(db);
+    await expect(removeTemplate(db, template.id)).rejects.toThrow(SETUP_GONE);
+    expect(await allTables(db)).toEqual(removed);
   });
 });
