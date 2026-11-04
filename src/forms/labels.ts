@@ -9,6 +9,15 @@ export function normaliseLabel(s: string): string {
   return s.toLowerCase().replace(/[:()*.]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * A label that names a period rather than a day: `from` and `to` side by side, with at most a dash, a slash or dots
+ * between them (`Date (from to)`, `Date from - to`, `Period from ... to`). `Moved from store to deck` names no period.
+ */
+export function isRangeLabel(raw: string | undefined): boolean {
+  if (raw === undefined) return false;
+  return /\bfrom to\b/.test(normaliseLabel(raw).replace(/[-\u2010-\u2015/\u2026]/g, ' ').replace(/\s+/g, ' '));
+}
+
 const SIGNATURE_WORDS = new Set(['signature', 'signed', 'sign', 'stamp']);
 
 /**

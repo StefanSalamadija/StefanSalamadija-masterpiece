@@ -53,13 +53,17 @@ const NAMES: Readonly<Record<string, { label: string; group: LinkGroup }>> = {
   'time.month': { label: 'Month (October 2026)', group: 'Date and time' },
   'time.yearWeek': { label: 'Year / week (2026 / 44)', group: 'Date and time' },
   'time.weekRange': { label: 'Week, Monday to Sunday', group: 'Date and time' },
+  'time.weekStart': { label: 'Monday of the week', group: 'Date and time' },
+  'time.weekEnd': { label: 'Sunday of the week', group: 'Date and time' },
   today: { label: "Today's date on the ship", group: 'Date and time' },
   now: { label: "Date and time now (ship's time)", group: 'Date and time' },
   nowUtc: { label: 'Date and time now (UTC)', group: 'Date and time' },
   'crew.onboardCount': { label: 'Number of crew onboard', group: 'Crew' },
 };
 
-const TIME_SOURCES = ['time.date', 'time.time', 'time.timeUtc', 'time.month', 'time.yearWeek', 'time.weekRange'];
+const TIME_SOURCES = [
+  'time.date', 'time.time', 'time.timeUtc', 'time.month', 'time.yearWeek', 'time.weekRange', 'time.weekStart', 'time.weekEnd',
+];
 
 /** The dictionary names that give no value a field can hold: the list of people onboard. */
 const NOT_LINKABLE: ReadonlySet<string> = new Set(['crew.onboard']);

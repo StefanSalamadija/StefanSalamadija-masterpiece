@@ -5,7 +5,7 @@ import type { FieldContext } from '../domain/fieldDictionary';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import type { RankKey } from '../domain/types';
 import { formatDate } from './format';
-import { formatHintOf, normaliseLabel } from './labels';
+import { formatHintOf, isRangeLabel, normaliseLabel } from './labels';
 import type { FieldDef, FieldLink, FormSchema } from './types';
 
 /*
@@ -20,7 +20,8 @@ import type { FieldDef, FieldLink, FormSchema } from './types';
  * - `crew.byRank.<RankKey>`, the person of that rank onboard on the draft's date, with `part` `name` (the default),
  *   `rank` or `nameRank` (`<full name> / <rank>`);
  * - `time.date` (the draft's ship date), `time.time` (the ship's time now), `time.timeUtc` (UTC now), `time.month`
- *   (`October 2026`), `time.yearWeek` (`2026 / 44`) and `time.weekRange` (`26-OCT-2026 - 01-NOV-2026`).
+ *   (`October 2026`), `time.yearWeek` (`2026 / 44`), `time.weekRange` (`26-OCT-2026 - 01-NOV-2026`), and
+ *   `time.weekStart` and `time.weekEnd` (the ISO Monday and Sunday of the draft date's week, as dates; R20).
  *
  * Group columns. `suggestLinks` also links the columns of a row group (their ids are the field ids of the columns,
  * `g1.c2` in Word and `<sheet>!g1.C` in Excel), and a link of a column applies to every row. `autoValues` gives the
@@ -56,7 +57,7 @@ interface Synonym {
  * | | Time | time.time (time.timeUtc when the label or hint says `(24:00 UTC)`) |
  * | | Month | time.month |
  * | | Year / Week No. | time.yearWeek |
- * | | Date (from to) | time.weekRange |
+ * | | Date (from to) | time.weekRange; two date fields under one period label: time.weekStart and time.weekEnd (R20) |
  * | Voyage | Port, Arrival port, Next port (a bare `Port` is taken to be the one the ship is going to) | voyage.nextPort |
  * | | Last port | voyage.lastPort |
  * | | ETA | voyage.eta |
@@ -179,12 +180,26 @@ function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
  * The links to suggest for a form, by field id: the fields, and the columns of the row groups (by the column's own id).
  * Only fields that match the synonym table are in the result. A signature, a tick box and a photo never are, and
  * neither is a date or time field whose label names a source that gives text only (`time.yearWeek`, `time.weekRange`).
+ * Exactly two top-level date fields with the same period label (`isRangeLabel`, such as `Date (from to): [from] - [to]`)
+ * are linked to `time.weekStart` and `time.weekEnd`, in document order (R20).
  */
 export function suggestLinks(schema: FormSchema): Record<string, FieldLink> {
   const links: Record<string, FieldLink> = {};
   for (const field of schema.fields) {
     const link = suggest(field, false);
     if (link) links[field.id] = link;
+  }
+  // R20: two date fields under one period label are the first and the last day of the week.
+  const periods = new Map<string, FieldDef[]>();
+  for (const field of schema.fields) {
+    if (field.kind !== 'date' || field.leftEmpty || !isRangeLabel(field.label)) continue;
+    const key = normaliseLabel(field.label);
+    periods.set(key, [...(periods.get(key) ?? []), field]);
+  }
+  for (const pair of periods.values()) {
+    if (pair.length !== 2) continue;
+    links[pair[0]!.id] = { source: 'time.weekStart' };
+    links[pair[1]!.id] = { source: 'time.weekEnd' };
   }
   for (const group of schema.rowGroups) {
     for (const column of group.columns) {
@@ -247,6 +262,8 @@ function candidate(link: SourceLink, field: FieldDef, ctx: FieldContext, date: s
       const { monday, sunday } = isoWeek(date);
       return { text: `${formatDate(monday, hint)} - ${formatDate(sunday, hint)}` };
     }
+    case 'time.weekStart': return dateOk ? { date: isoWeek(date).monday } : undefined;
+    case 'time.weekEnd': return dateOk ? { date: isoWeek(date).sunday } : undefined;
   }
   const parts = source.split('.');
   if (parts.length === 3 && parts[0] === 'crew' && parts[1] === 'byRank') return person(parts[2], link.part ?? 'name', ctx, date);
@@ -286,7 +303,7 @@ function fit(field: FieldDef, c: Candidate): string | undefined {
  * a source with no value, or a value the field cannot take has no entry.
  *
  * `date` is the draft's ship date (`YYYY-MM-DD`). It is the day for `time.date`, `time.month`, `time.yearWeek`,
- * `time.weekRange` and for who is onboard. The time is the ship's time at `ctx.nowUtc`; a field that asks for
+ * `time.weekRange`, `time.weekStart`, `time.weekEnd` and for who is onboard. The time is the ship's time at `ctx.nowUtc`; a field that asks for
  * `(24:00 UTC)` in its format hint or label gets UTC, whichever of the two time sources it is linked to.
  *
  * `missing` has a sentence for a person field with nobody of that rank onboard on `date`: `No Master onboard`. The

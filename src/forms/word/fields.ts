@@ -1,4 +1,4 @@
-import { formatHintOf, isSignatureLabel, normaliseLabel } from '../labels';
+import { formatHintOf, isRangeLabel, isSignatureLabel, normaliseLabel } from '../labels';
 import type { FieldDef, FieldKind } from '../types';
 import { W, child, clean, kids, wAttr, wVal } from './walk';
 import type { RawField, Token } from './walk';
@@ -54,15 +54,6 @@ function isTimeLabel(label: string): boolean {
 /** `formatHintOf` gives a date pattern or the UTC hint `(24:00 UTC)`; this is the date pattern, if that is what it gave. */
 function dateHintOf(hint: string | undefined): string | undefined {
   return hint !== undefined && !/utc/i.test(hint) ? hint : undefined;
-}
-
-/**
- * A label that names a period rather than a day: `from` and `to` side by side, with at most a dash or dots between
- * them (`Date (from to)`, `Date from - to`, `Period from ... to`). `Moved from store to deck` names no period.
- */
-function isRangeLabel(raw: string | undefined): boolean {
-  if (raw === undefined) return false;
-  return /\bfrom to\b/.test(normaliseLabel(raw).replace(/[-\u2010-\u2015/\u2026]/g, ' ').replace(/\s+/g, ' '));
 }
 
 /** The kind a label asks for: `date` when it gives a date pattern, `time` when it names a time, else `text`. */

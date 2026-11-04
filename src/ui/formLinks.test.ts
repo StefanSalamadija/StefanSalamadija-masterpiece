@@ -13,7 +13,7 @@ describe('the sources a field can be linked to', () => {
 
   it('has every dictionary name but the crew list, every time source, and each rank with its three parts', () => {
     for (const name of FIELD_NAMES.filter((n) => n !== 'crew.onboard')) expect(values, name).toContain(`link:${name}`);
-    for (const time of ['date', 'time', 'timeUtc', 'month', 'yearWeek', 'weekRange']) expect(values).toContain(`link:time.${time}`);
+    for (const time of ['date', 'time', 'timeUtc', 'month', 'yearWeek', 'weekRange', 'weekStart', 'weekEnd']) expect(values).toContain(`link:time.${time}`);
     for (const { key } of RANKS.filter((r) => r.key !== 'other')) {
       for (const part of ['name', 'rank', 'nameRank']) expect(values).toContain(`link:crew.byRank.${key}|${part}`);
     }

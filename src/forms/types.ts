@@ -148,8 +148,8 @@ export interface DraftValues {
 /**
  * Where a field is filled in from by itself: the ship, its crew, the voyage or the time. `source` is a name from the field dictionary
  * (`vessel.name`, `vessel.imo`, `voyage.nextPort`, `voyage.agents` and the like), `crew.byRank.<RankKey>` (a person
- * by rank), or one of the time sources `time.date`, `time.time`, `time.timeUtc`, `time.month`, `time.yearWeek` and
- * `time.weekRange`. For a person, `part` says which part to give: `name` the full name, `rank` the rank, `nameRank`
+ * by rank), or one of the time sources `time.date`, `time.time`, `time.timeUtc`, `time.month`, `time.yearWeek`,
+ * `time.weekRange`, `time.weekStart` and `time.weekEnd`. For a person, `part` says which part to give: `name` the full name, `rank` the rank, `nameRank`
  * both as `<full name> / <rank>`. `{ source: 'none' }` is a field the person chose not to link.
  */
 export type FieldLink = { source: string; part?: 'name' | 'rank' | 'nameRank' } | { source: 'none' };

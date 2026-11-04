@@ -224,12 +224,34 @@ describe('autoValues: ship, voyage and time', () => {
     expect(values[byLabel(weekly, 'Date (from to)').id]).toBe('26-OCT-2026 - 01-NOV-2026');
   });
 
-  it('fills a period field with the week\'s first and last day in its own format, and links no date field to the period', () => {
+  it('fills a period field with the week\'s first and last day in its own format, and two date fields under a period label with the Monday and the Sunday (R20)', () => {
     const short = detectWord(readPackage(shortDatesDocx()), 'docx', 'short-dates.docx');
     const links = suggestLinks(short);
     const [day, period, from, to] = short.fields;
-    expect([links[day!.id], links[period!.id], links[from!.id], links[to!.id]]).toEqual([undefined, { source: 'time.weekRange' }, undefined, undefined]);
-    expect(autoValues(short, links, ctx, DATE).values).toEqual({ [period!.id]: '26.10 - 01.11' });
+    expect([links[day!.id], links[period!.id], links[from!.id], links[to!.id]])
+      .toEqual([undefined, { source: 'time.weekRange' }, { source: 'time.weekStart' }, { source: 'time.weekEnd' }]);
+    // DATE is Wednesday 28 October 2026: its ISO week runs from Monday 26 October to Sunday 1 November.
+    expect(autoValues(short, links, ctx, DATE).values).toEqual({ [period!.id]: '26.10 - 01.11', [from!.id]: '2026-10-26', [to!.id]: '2026-11-01' });
+  });
+
+  it('time.weekStart and time.weekEnd: the ISO Monday and Sunday of the draft date\'s week, as ISO or in a text field\'s format', () => {
+    const date = field('Start', 'date');
+    const text = field('End', 'text', { formatHint: 'dd.MM.yyyy' });
+    const schema = schemaOf([date, text]);
+    const links = { [date.id]: { source: 'time.weekStart' }, [text.id]: { source: 'time.weekEnd' } };
+    expect(autoValues(schema, links, ctx, '2026-10-28').values).toEqual({ [date.id]: '2026-10-26', [text.id]: '01.11.2026' });
+    // A Monday and a Sunday are their own week's ends; a week across the new year keeps its ISO days.
+    expect(autoValues(schema, links, ctx, '2026-10-26').values).toEqual({ [date.id]: '2026-10-26', [text.id]: '01.11.2026' });
+    expect(autoValues(schema, links, ctx, '2026-11-01').values).toEqual({ [date.id]: '2026-10-26', [text.id]: '01.11.2026' });
+    expect(autoValues(schema, links, ctx, '2027-01-01').values).toEqual({ [date.id]: '2026-12-28', [text.id]: '03.01.2027' });
+  });
+
+  it('links a pair under a period label only when there are exactly two date fields with that label', () => {
+    const one = field('Date (from to)', 'date');
+    const three = ['a', 'b', 'c'].map((id) => ({ ...field('Period from - to', 'date'), id: `p${id}` }));
+    const links = suggestLinks(schemaOf([one, ...three]));
+    expect(links[one.id]).toBeUndefined();
+    expect(three.map((f) => links[f.id])).toEqual([undefined, undefined, undefined]);
   });
 
   it('returns top-level fields only: a group column is linked but gets no value here', () => {
