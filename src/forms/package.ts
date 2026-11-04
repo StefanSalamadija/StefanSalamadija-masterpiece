@@ -18,15 +18,25 @@ const CONTENT_TYPES_NS = 'http://schemas.openxmlformats.org/package/2006/content
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 /** The start of the compound file that holds an old `.doc` or `.xls`. */
 const CFB_MAGIC = [0xd0, 0xcf, 0x11, 0xe0];
-const MACRO_FILE_NAME = /\.(?:docm|dotm|xlsm|xltm)$/i;
-const VBA_PROJECT_PART = /(?:^|\/)vbaProject\.bin$/i;
-/** Every macro-enabled content type (`...macroEnabled.main+xml`, `...macroEnabledTemplate.main+xml`) and the VBA project itself (`application/vnd.ms-office.vbaProject`). */
-const MACRO_CONTENT_TYPE = /macroenabled|vbaproject/i;
-/** Content types (lower case) of the part that makes a package a form, and which form it is. */
+/**
+ * An Excel 4.0 macro sheet. Its macros are cells of a sheet, not a VBA project that can be taken out as a part, so a
+ * file that has one is refused (R21 strips VBA only).
+ */
+const MACRO_SHEET_TYPE = /^application\/vnd\.ms-excel\.(?:intl)?macrosheet\+xml$/i;
+/**
+ * Content types (lower case) of the part that makes a package a form, and which form it is. A template is the form it
+ * makes (`.xltx` and `.xltm` make an `.xlsx`; Word's `.dotx` keeps a kind of its own). A macro-enabled type is the form
+ * its macros are taken out to (`stripMacros`).
+ */
 const MAIN_PART_KINDS = new Map<string, FormKind>([
   ['application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml', 'docx'],
   ['application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml', 'dotx'],
   ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml', 'xlsx'],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml', 'xlsx'],
+  ['application/vnd.ms-word.document.macroenabled.main+xml', 'docx'],
+  ['application/vnd.ms-word.template.macroenabledtemplate.main+xml', 'dotx'],
+  ['application/vnd.ms-excel.sheet.macroenabled.main+xml', 'xlsx'],
+  ['application/vnd.ms-excel.template.macroenabled.main+xml', 'xlsx'],
 ]);
 
 /**
@@ -123,25 +133,25 @@ export function partText(pkg: Package, path: string): string | undefined {
 }
 
 /**
- * Says what a file is without reading all of it: `docx`, `dotx` or `xlsx`. The zip magic and the main part decide, as
- * declared in `[Content_Types].xml` (not the file name, which only matters for a macro-enabled one). Throws
- * `FormTooLargeError`, `OldFormatError` (the old binary formats), `MacroFileError`, `NotAFormError` (another kind of
- * file, or no main part in the zip) and `DamagedFormError` (a zip or content types that can't be read).
+ * Says what a file is without reading all of it: `docx`, `dotx` or `xlsx` (an Excel template, `.xltx`, is an `xlsx`).
+ * The zip magic and the main part decide, as declared in `[Content_Types].xml`; the file name decides nothing. A
+ * macro-enabled file (`.docm`, `.dotm`, `.xlsm`, `.xltm`) is the form its macros are taken out to: `importForm` strips
+ * them (R21). Throws `FormTooLargeError`, `OldFormatError` (the old binary formats), `MacroFileError` (an Excel 4.0
+ * macro sheet, which cannot be taken out), `NotAFormError` (another kind of file, or no main part in the zip) and
+ * `DamagedFormError` (a zip or content types that can't be read).
  */
-export function sniffFormat(fileName: string, bytes: Uint8Array): FormKind {
+export function sniffFormat(_fileName: string, bytes: Uint8Array): FormKind {
   if (bytes.length > MAX_FILE_BYTES) throw new FormTooLargeError();
   if (startsWith(bytes, CFB_MAGIC)) throw new OldFormatError();
   if (!startsWith(bytes, ZIP_MAGIC)) throw new NotAFormError();
-  if (MACRO_FILE_NAME.test(fileName)) throw new MacroFileError();
 
   const names = listParts(bytes);
-  if (names.some((name) => VBA_PROJECT_PART.test(name))) throw new MacroFileError();
   if (!names.includes(CONTENT_TYPES)) throw new NotAFormError();
   const types = parseXml(utf8(inflateParts(bytes, new Set([CONTENT_TYPES]))[CONTENT_TYPES]!));
 
   const defaults = Array.from(types.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Default'));
   const overrides = Array.from(types.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Override'));
-  if ([...defaults, ...overrides].some((element) => MACRO_CONTENT_TYPE.test(element.getAttribute('ContentType') ?? ''))) throw new MacroFileError();
+  if ([...defaults, ...overrides].some((element) => MACRO_SHEET_TYPE.test((element.getAttribute('ContentType') ?? '').trim()))) throw new MacroFileError();
 
   for (const override of overrides) {
     const kind = MAIN_PART_KINDS.get((override.getAttribute('ContentType') ?? '').trim().toLowerCase());

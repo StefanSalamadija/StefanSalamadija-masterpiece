@@ -16,6 +16,9 @@ const XLSX_MAIN = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const DOCM_MAIN = 'application/vnd.ms-word.document.macroEnabled.main+xml';
 const DOTM_MAIN = 'application/vnd.ms-word.template.macroEnabledTemplate.main+xml';
 const XLSM_MAIN = 'application/vnd.ms-excel.sheet.macroEnabled.main+xml';
+const XLTM_MAIN = 'application/vnd.ms-excel.template.macroEnabled.main+xml';
+const XLTX_MAIN = 'application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml';
+const MACRO_SHEET = 'application/vnd.ms-excel.macrosheet+xml';
 const PPTX_MAIN = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
 
 /** A `[Content_Types].xml` that declares `part` as the main part. */
@@ -170,11 +173,14 @@ describe('package limits', () => {
 });
 
 describe('sniffFormat', () => {
-  it('sniffs kinds and refuses old, macro and foreign files', () => {
+  it('sniffs kinds and refuses old and foreign files', () => {
     expect(sniffFormat('a.dotx', zipOf({ '[Content_Types].xml': CT_DOTX, 'word/document.xml': DOC }))).toBe('dotx');
     expect(() => sniffFormat('a.doc', new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]))).toThrow(OldFormatError);
-    expect(() => sniffFormat('a.docx', zipOf({ '[Content_Types].xml': CT_DOCM, 'word/document.xml': DOC }))).toThrow(MacroFileError);
     expect(() => sniffFormat('a.pdf', bytesOf('%PDF-1.4'))).toThrow(NotAFormError);
+  });
+
+  it('takes an Excel template as the workbook it makes (R21)', () => {
+    expect(sniffFormat('a.xltx', zipOf({ '[Content_Types].xml': contentTypes('xl/workbook.xml', XLTX_MAIN), 'xl/workbook.xml': WORKBOOK }))).toBe('xlsx');
   });
 
   it('reads the kind from the main part, not from the file name', () => {
@@ -198,25 +204,27 @@ describe('sniffFormat', () => {
     for (const name of ['old.doc', 'old.xls', 'old.docx', 'old.xlsx', '']) expect(() => sniffFormat(name, cfb), name).toThrow(OldFormatError);
   });
 
-  it('refuses macro-enabled files by content type, by a VBA project part, and by file name', () => {
+  it('takes a macro-enabled file as the form its macros are taken out to, whatever its name (R21)', () => {
     const word = { 'word/document.xml': DOC };
-    expect(() => sniffFormat('a.dotx', zipOf({ '[Content_Types].xml': contentTypes('word/document.xml', DOTM_MAIN), ...word }))).toThrow(MacroFileError);
-    expect(() => sniffFormat('a.xlsx', zipOf({ '[Content_Types].xml': contentTypes('xl/workbook.xml', XLSM_MAIN), 'xl/workbook.xml': WORKBOOK }))).toThrow(MacroFileError);
-    // An ordinary main part with a macro project beside it.
+    expect(sniffFormat('a.docm', zipOf({ '[Content_Types].xml': CT_DOCM, ...word }))).toBe('docx');
+    expect(sniffFormat('a.dotm', zipOf({ '[Content_Types].xml': contentTypes('word/document.xml', DOTM_MAIN), ...word }))).toBe('dotx');
+    expect(sniffFormat('a.xlsm', zipOf({ '[Content_Types].xml': contentTypes('xl/workbook.xml', XLSM_MAIN), 'xl/workbook.xml': WORKBOOK }))).toBe('xlsx');
+    expect(sniffFormat('a.xltm', zipOf({ '[Content_Types].xml': contentTypes('xl/workbook.xml', XLTM_MAIN.toUpperCase()), 'xl/workbook.xml': WORKBOOK }))).toBe('xlsx');
     const vba = contentTypes('word/document.xml', DOCX_MAIN, '<Override PartName="/word/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>');
-    expect(() => sniffFormat('a.docx', zipOf({ '[Content_Types].xml': vba, ...word, 'word/vbaProject.bin': PNG }))).toThrow(MacroFileError);
-    // The project part by name alone, declared by a Default extension that says nothing about macros.
-    const bare = zipOf({ '[Content_Types].xml': CT_DOCX, ...word, 'xl/VBAProject.BIN': PNG });
-    expect(() => sniffFormat('a.docx', bare)).toThrow(MacroFileError);
-    // A macro-enabled name on a package that says nothing about macros is still refused.
-    for (const name of ['a.docm', 'a.xlsm', 'a.dotm', 'A.XLSM']) {
-      expect(() => sniffFormat(name, zipOf({ '[Content_Types].xml': CT_DOCX, ...word })), name).toThrow(MacroFileError);
-    }
+    expect(sniffFormat('a.docx', zipOf({ '[Content_Types].xml': vba, ...word, 'word/vbaProject.bin': PNG }))).toBe('docx');
+    for (const name of ['a.docm', 'a.xlsm', 'a.dotm', 'A.XLSM']) expect(sniffFormat(name, zipOf({ '[Content_Types].xml': CT_DOCX, ...word })), name).toBe('docx');
   });
 
-  it('still says macros when the main part of a macro file is missing', () => {
-    // That must not turn the macro message into the generic one.
-    expect(() => sniffFormat('a.docm', zipOf({ '[Content_Types].xml': CT_DOCM }))).toThrow(MacroFileError);
+  it('refuses a workbook with an Excel 4.0 macro sheet, whose macros cannot be taken out', () => {
+    const sheet = '<Override PartName="/xl/macrosheets/sheet1.xml" ContentType="' + MACRO_SHEET + '"/>';
+    const xlsm = zipOf({ '[Content_Types].xml': contentTypes('xl/workbook.xml', XLSM_MAIN, sheet), 'xl/workbook.xml': WORKBOOK, 'xl/macrosheets/sheet1.xml': '<xm:macrosheet xmlns:xm="x"/>' });
+    expect(() => sniffFormat('a.xlsm', xlsm)).toThrow(MacroFileError);
+    const intl = contentTypes('xl/workbook.xml', XLSX_MAIN, sheet.replace('macrosheet', 'intlmacrosheet'));
+    expect(() => sniffFormat('a.xlsx', zipOf({ '[Content_Types].xml': intl, 'xl/workbook.xml': WORKBOOK }))).toThrow(MacroFileError);
+  });
+
+  it('says not a form for a macro file whose main part is missing', () => {
+    expect(() => sniffFormat('a.docm', zipOf({ '[Content_Types].xml': CT_DOCM }))).toThrow(NotAFormError);
   });
 
   it('refuses anything else as not a form', () => {

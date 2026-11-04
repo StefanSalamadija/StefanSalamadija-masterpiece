@@ -49,6 +49,8 @@ export { canonicalExcelValue };
  *
  * Only these parts change: the sheets written into, `sharedStrings.xml`, `workbook.xml`, and, when the workbook had no
  * shared strings, the workbook's `.rels` and `[Content_Types].xml` (text insertions, so every other byte stays).
+ * `[Content_Types].xml` also changes for a template (`.xltx`), whose main part becomes a workbook's (R21): the file
+ * made is an `.xlsx`.
  */
 
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
@@ -56,6 +58,8 @@ const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 const TRANSITIONAL = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const SHARED_STRINGS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings';
 const SHARED_STRINGS_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml';
+const WORKBOOK_MAIN = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
+const TEMPLATE_MAIN = /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.template\.main\+xml/i;
 /** The children of `workbook` that come after `calcPr`, in schema order. */
 const AFTER_CALC_PR = new Set([
   'oleSize', 'customWorkbookViews', 'pivotCaches', 'smartTagPr', 'smartTagTypes', 'webPublishing', 'fileRecoveryPr', 'webPublishObjects', 'extLst',
@@ -432,6 +436,8 @@ export function writeExcel(pkg: Package, schema: FormSchema, values: DraftValues
     changed.set(part, bytesOf(sheet.serialize()));
   }
 
+  let types = partText(pkg, '[Content_Types].xml');
+  const typesBefore = types;
   const sst = strings.result();
   if (sst !== undefined) {
     changed.set(strings.path, bytesOf(sst));
@@ -444,13 +450,12 @@ export function writeExcel(pkg: Package, schema: FormSchema, values: DraftValues
         const type = worksheetType ? worksheetType.replace(/worksheet$/, 'sharedStrings') : SHARED_STRINGS_REL;
         changed.set(relsPath, bytesOf(withRelationship(relsText, type, strings.path.slice(dir.length))));
       }
-      const types = partText(pkg, '[Content_Types].xml');
-      if (types !== undefined) {
-        const withPart = withOverride(types, strings.path, SHARED_STRINGS_TYPE);
-        if (withPart !== types) changed.set('[Content_Types].xml', bytesOf(withPart));
-      }
+      if (types !== undefined) types = withOverride(types, strings.path, SHARED_STRINGS_TYPE);
     }
   }
+  // A template (`.xltx`) makes a workbook: its main part's content type becomes a workbook's (R21), as a `.dotx` makes a `.docx`.
+  if (types !== undefined && TEMPLATE_MAIN.test(types)) types = types.replace(new RegExp(TEMPLATE_MAIN.source, 'gi'), WORKBOOK_MAIN);
+  if (types !== undefined && types !== typesBefore) changed.set('[Content_Types].xml', bytesOf(types));
 
   if (setFullCalcOnLoad(root)) changed.set(wbPath, bytesOf(serializeXml(wbDoc)));
   return changed;

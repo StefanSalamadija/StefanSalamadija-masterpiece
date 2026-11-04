@@ -4,6 +4,8 @@ import { FormWriteError } from '../errors';
 import { bytesOf, partText, readPackage, writePackage } from '../package';
 import type { Package } from '../package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../testing/excelFixtures';
+import { asExcelTemplate, MACRO_TYPE } from '../testing/macroFixtures';
+import { CONTENT_TYPE } from '../testing/zip';
 import type { DraftValues, FieldDef, FieldKind, FormSchema, FormValue } from '../types';
 import { parseXml } from '../xml';
 import { detectExcel } from './detect';
@@ -107,6 +109,15 @@ describe('writeExcel (the brief\'s tests)', () => {
     const back = readExcelValues(out, s);
     expect(back.fields[byLabel(s, 'Vessel').id]).toBe('MV DEMO STAR');
     expect(back.rows[group.id]![2]).toMatchObject({ [col('Qty')]: '2.5', [col('Unit')]: 'pcs' });
+  });
+
+  it('makes an .xlsx of an .xltx: the content types change by the main part\'s type alone (R21)', () => {
+    const pkg = readPackage(asExcelTemplate(inventoryXlsx(10)));
+    const s = detect(pkg);
+    const { changed, out, bytes } = fill(pkg, s, values({ [byLabel(s, 'Vessel').id]: 'MV DEMO STAR' }));
+    expect([...changed.keys()].sort()).toEqual([SHEET, STRINGS, TYPES, WORKBOOK].sort());
+    expect(partText(out, TYPES)).toBe(partText(pkg, TYPES)!.replace(MACRO_TYPE.xltx, CONTENT_TYPE.workbook));
+    expect(sheetJs(bytes).C6).toMatchObject({ t: 's', v: 'MV DEMO STAR' });
   });
 
   it('escapes_in_cells: & < > " diacritics and a line break stay inside one cell and round-trip', () => {

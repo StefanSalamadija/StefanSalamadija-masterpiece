@@ -26,9 +26,9 @@ function safe(text: string): string {
 }
 
 /**
- * The name of the file made from a form on `date` (ISO `YYYY-MM-DD`). A `.dotx` template makes a `.docx`. When the
- * name would be longer than 120 characters before the extension, the code and title are cut (never the date), at a
- * character boundary and without a space left at the cut.
+ * The name of the file made from a form on `date` (ISO `YYYY-MM-DD`). A `.dotx` template makes a `.docx`, and an
+ * `.xltx` (whose kind is `xlsx`) an `.xlsx`. When the name would be longer than 120 characters before the extension,
+ * the code and title are cut (never the date), at a character boundary and without a space left at the cut.
  */
 export function formFileName(identity: FormIdentity, date: string, kind: FormKind): string {
   const ext = kind === 'xlsx' ? 'xlsx' : 'docx';

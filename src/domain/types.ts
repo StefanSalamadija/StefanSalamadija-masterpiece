@@ -47,7 +47,8 @@ export interface Certificate extends BaseRecord { shipId: string; key: string; n
   issueDate: string; expiryDate?: string; nextSurveyDue?: string; remarks: string }
 export interface ClockChange extends BaseRecord { shipId: string; effectiveAt: string; toOffsetMinutes: number; note?: string }
 /**
- * A form in the library: the file as it was imported (`fileBase64`), what detection found in it, and how it is set up. It
+ * A form in the library: the file as it was imported (`fileBase64`; a macro file without its macros, R21), what detection
+ * found in it, and how it is set up. It
  * belongs to the person, not to a ship (`scope: 'personal'`, no `shipId`): it goes into a full backup, and into a handover
  * only when the library is included. `code`, `title` and `revision` are the form's identity (`schema.identity`), kept on
  * the record so that the library can be listed and matched by code without reading the schema.

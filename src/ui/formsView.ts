@@ -11,8 +11,8 @@ import { linkFromValue, linkValue } from './formLinks';
  * only ever put into strings that the screens render as text.
  */
 
-/** The files the import takes. */
-export const FORM_FILE_TYPES = '.docx,.dotx,.xlsx';
+/** The files the import takes: Word and Excel forms and templates, and their macro-enabled kinds, whose macros are removed (R21). */
+export const FORM_FILE_TYPES = '.docx,.dotx,.docm,.dotm,.xlsx,.xltx,.xlsm,.xltm';
 
 export const fillHref = (templateId: string): string => `#/forms/${encodeURIComponent(templateId)}/fill`;
 export const setupHref = (templateId: string): string => `#/forms/${encodeURIComponent(templateId)}/setup`;

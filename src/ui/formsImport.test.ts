@@ -19,7 +19,7 @@ function deps(library: FormTemplate[] = [], over: Partial<ImportDeps> = {}): Imp
     saved, replaced,
     read: (name) => {
       if (name.startsWith('bad')) throw new FileProblem(`${name} is no form`);
-      return { kind: 'docx', schema: schemaOf(name.replace('.docx', ''), '01') };
+      return { kind: 'docx', schema: schemaOf(name.replace('.docx', ''), '01'), bytes: new Uint8Array([1]) };
     },
     isFileError: (err): err is Error => err instanceof FileProblem,
     findTarget: async (code) => library.find((t) => t.code === code),
@@ -31,6 +31,19 @@ function deps(library: FormTemplate[] = [], over: Partial<ImportDeps> = {}): Imp
 }
 
 describe('importMany', () => {
+  it('stores the bytes the engine gives back (a macro file without its macros), not the file as chosen', async () => {
+    const stored: Uint8Array[] = [];
+    const replaced: Uint8Array[] = [];
+    const d = deps([existing('B', '00')], {
+      read: (name) => ({ kind: 'docx', schema: schemaOf(name.replace('.docm', ''), '01'), bytes: new Uint8Array([9, 9]) }),
+      save: async (input) => void stored.push(input.bytes),
+      replace: async (_target, input) => void replaced.push(input.bytes),
+    });
+    await importMany([file('A.docm'), file('B.docm')], d, () => {});
+    expect(stored).toEqual([new Uint8Array([9, 9])]);
+    expect(replaced).toEqual([new Uint8Array([9, 9])]);
+  });
+
   it('saves each file in turn and counts them', async () => {
     const d = deps();
     const progress = vi.fn();

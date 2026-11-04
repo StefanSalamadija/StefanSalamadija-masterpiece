@@ -7,6 +7,7 @@ import { canonicalExcelValue } from './excel/values';
 import { writeExcel } from './excel/write';
 import { formFileName } from './fileName';
 import { formatDate, usableDateHint } from './format';
+import { MACROS_REMOVED, stripMacros } from './macros';
 import { partText, readPackage, sniffFormat, writePackage } from './package';
 import type { Package } from './package';
 import type { DraftValues, FieldDef, FormKind, FormSchema, FormValue } from './types';
@@ -52,15 +53,36 @@ const CONTENT_TYPES_NS = 'http://schemas.openxmlformats.org/package/2006/content
 
 const isWord = (kind: FormKind): boolean => kind !== 'xlsx';
 
+/** A file read as a form: what it is, its fields, and the bytes to store as its template. */
+export interface ImportedForm {
+  kind: FormKind;
+  schema: FormSchema;
+  /**
+   * The template to store, which `makeFile` is later given: the file's own bytes, or, for a macro file, the package
+   * with its macros taken out (R21).
+   */
+  bytes: Uint8Array;
+}
+
 /**
- * Says what a file is and finds its fields. Throws the `FormFileError` that says why a file can't be used: an old
- * format, macros, too large, damaged, or not a form at all.
+ * Says what a file is, takes out its macros, and finds its fields. Throws the `FormFileError` that says why a file
+ * can't be used: an old format, an Excel 4.0 macro sheet, too large, damaged, or not a form at all.
+ *
+ * A macro-enabled file (`.docm`, `.dotm`, `.xlsm`, `.xltm`, or any package with a VBA project) is stored without its
+ * macros (`stripMacros`), as a `.docx`, `.dotx`, `.xlsx` or `.xltx`. Detection runs on that stripped package, read back
+ * from the very bytes returned, and the integrity check later compares made files with it. The schema then lists
+ * `Macros were removed from this file.` first in `unsupported`, which the setup review shows under `Can't be filled
+ * here` and which is stored with the schema. A file without macros is stored as the bytes it came as.
  */
-export function importForm(fileName: string, bytes: Uint8Array): { kind: FormKind; schema: FormSchema } {
+export function importForm(fileName: string, bytes: Uint8Array): ImportedForm {
   const kind = sniffFormat(fileName, bytes);
-  const pkg = readPackage(bytes);
+  const read = readPackage(bytes);
+  const stripped = stripMacros(read);
+  const stored = stripped ? writePackage(stripped.pkg, stripped.changed) : bytes;
+  const pkg = stripped ? readPackage(stored) : read;
   const schema = kind === 'xlsx' ? detectExcel(pkg, fileName) : detectWord(pkg, kind, fileName);
-  return { kind, schema };
+  if (stripped && stripped.removed.length > 0) schema.unsupported.unshift(MACROS_REMOVED);
+  return { kind, schema, bytes: stored };
 }
 
 /**

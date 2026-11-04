@@ -1,10 +1,13 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { test, expect } from '@playwright/test';
+import * as XLSX from 'xlsx';
 import type { Download, Page } from '@playwright/test';
 import { detectExcel } from '../src/forms/excel/detect';
 import { readExcelValues } from '../src/forms/excel/read';
 import { readPackage } from '../src/forms/package';
+import { inventoryXlsx } from '../src/forms/testing/excelFixtures';
+import { withMacros } from '../src/forms/testing/macroFixtures';
 import { oddLayoutsDocx } from '../src/forms/testing/wordFixtures';
 import { detectWord } from '../src/forms/word/detect';
 import { readWordValues } from '../src/forms/word/read';
@@ -27,6 +30,9 @@ test.beforeAll(async () => {
   // A form with a field that has no name of its own, and parts that cannot be filled here.
   paths['odd.docx'] = `${dir}/odd.docx`;
   await fs.writeFile(paths['odd.docx'], oddLayoutsDocx());
+  // The inventory saved with a (made-up) VBA project and a ribbon that calls it (R21).
+  paths['inventory.xlsm'] = `${dir}/inventory.xlsm`;
+  await fs.writeFile(paths['inventory.xlsm'], withMacros(inventoryXlsx(), 'xlsm', { printerSettings: true, ribbon: true }));
 });
 
 test.afterAll(async () => {
@@ -823,6 +829,39 @@ test('a day grid opens on today\'s row and offers the other days', async ({ page
   const [template] = await stored(page, 'formTemplates');
   const group = template.schema.rowGroups[0];
   await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows[group.id]?.[27]?.[group.columns[0].id]).toBe('3');
+});
+
+test('a macro file imports without its macros: the setup says so, and Make file gives an .xlsx (R21)', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openForms(page);
+  await importFile(page, 'inventory.xlsm');
+  await expect(page.getByRole('heading', { name: 'Set up TST-11' })).toBeVisible();
+  await expect(section(page, "Can't be filled here").getByRole('listitem').first()).toHaveText('Macros were removed from this file.');
+  await expectNoHorizontalScroll(page);
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(page.getByRole('status')).toHaveText('Form saved.');
+
+  // What is stored is the workbook without its macros.
+  const [template] = await stored(page, 'formTemplates');
+  expect(template.fileName).toBe('inventory.xlsm');
+  const kept = readPackage(Uint8Array.from(atob(template.fileBase64), (c) => c.charCodeAt(0)));
+  expect(kept.order.filter((name) => /vbaProject|customUI/i.test(name))).toEqual([]);
+  expect(kept.entries.has('xl/printerSettings/printerSettings1.bin')).toBe(true);
+  expect(new TextDecoder().decode(kept.entries.get('[Content_Types].xml'))).not.toMatch(/macroEnabled|vbaProject/i);
+
+  await library(page).getByRole('link', { name: /^TST-11 · / }).click();
+  await expect(page.getByRole('heading', { name: 'TST-11 Demo Inventory', exact: true })).toBeVisible();
+  await page.getByRole('group', { name: 'Item 001' }).getByLabel('Qty').fill('4');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Make file' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('TST-11 Demo Inventory 2026-10-25.xlsx');
+  const bytes = await downloaded(file);
+  const made = readPackage(bytes);
+  expect(made.order.filter((name) => /vbaProject|customUI/i.test(name))).toEqual([]);
+  expect(new TextDecoder().decode(made.entries.get('[Content_Types].xml'))).toContain('spreadsheetml.sheet.main+xml');
+  const book = XLSX.read(bytes, { type: 'array' });
+  expect(book.Sheets[book.SheetNames[0]!]!.E9).toMatchObject({ t: 'n', v: 4 });
 });
 
 test('start from last: a second inventory starts from the last file, and says what the last value was', async ({ page }) => {

@@ -8,6 +8,7 @@ import type { FormKind } from '../package';
 import { parseXml } from '../xml';
 import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './wordFixtures';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './excelFixtures';
+import { asExcelTemplate, withMacros } from './macroFixtures';
 import { zipOf } from './zip';
 
 const FIXTURES: { name: string; fileName: string; kind: FormKind; build: () => Uint8Array }[] = [
@@ -24,6 +25,12 @@ const FIXTURES: { name: string; fileName: string; kind: FormKind; build: () => U
   { name: 'matrixXlsx', fileName: 'matrix.xlsx', kind: 'xlsx', build: () => matrixXlsx() },
   { name: 'matrixXlsx (sub-titles)', fileName: 'matrix-sub.xlsx', kind: 'xlsx', build: () => matrixXlsx({ subTitles: true }) },
   { name: 'conditionListXlsx', fileName: 'conditions.xlsx', kind: 'xlsx', build: () => conditionListXlsx() },
+  // R21: an Excel template, and macro files made from the fixtures above.
+  { name: 'inventory as .xltx', fileName: 'inventory.xltx', kind: 'xlsx', build: () => asExcelTemplate(inventoryXlsx()) },
+  { name: 'inventory as .xlsm', fileName: 'inventory.xlsm', kind: 'xlsx', build: () => withMacros(inventoryXlsx(), 'xlsm', { printerSettings: true, ribbon: true }) },
+  { name: 'matrix as .xltm', fileName: 'matrix.xltm', kind: 'xlsx', build: () => withMacros(asExcelTemplate(matrixXlsx()), 'xltm') },
+  { name: 'toolbox as .docm', fileName: 'toolbox.docm', kind: 'docx', build: () => withMacros(toolboxTalkDocx(), 'docm', { signature: true, keyMap: true, ribbon: true, plainRibbon: true }) },
+  { name: 'weekly as .dotm', fileName: 'weekly.dotm', kind: 'dotx', build: () => withMacros(weeklyJobsDotx(), 'dotm') },
 ];
 
 describe.each(FIXTURES)('$name', ({ fileName, kind, build }) => {

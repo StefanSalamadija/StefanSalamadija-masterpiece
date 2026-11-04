@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 import { assemble, DOCX_MIME, importForm, makeFile, verifyOutput, XLSX_MIME } from './engine';
 import type { MakeFileInput } from './engine';
@@ -6,11 +7,14 @@ import { readExcelValues } from './excel/read';
 import { canonicalExcelValue } from './excel/values';
 import { formFileName } from './fileName';
 import { formatDate, parseDate, usableDateHint } from './format';
+import { MACROS_REMOVED } from './macros';
 import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
+import { asExcelTemplate, MACRO_TYPE, withMacros } from './testing/macroFixtures';
 import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
+import { CONTENT_TYPE } from './testing/zip';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
 import { readWordValues } from './word/read';
 import { extraRowsOf } from './word/write';
@@ -631,5 +635,97 @@ describe('verifyOutput passes correct files (fix round 2)', () => {
     // A clone left ticked (as if copied, not cleared) is not blank.
     const ticked = assembled({ ...input, values: { fields: {}, rows: { [g.id]: [0, 1, 2].map((i) => ({ [g.columns[0]!.id]: `Item ${i}`, [g.columns[1]!.id]: i !== 1 })) } } });
     expectIntegrityError(() => verifyOutput(ticked.original, ticked.output, ticked.changed, input.schema, input.values));
+  });
+});
+
+describe('Excel templates and macro files (R21)', () => {
+  type Case = { name: string; fileName: string; plainName: string; plain: () => Uint8Array; make: () => Uint8Array; kind: FormKind; mainType: string; outType: string; macros: boolean };
+  const XLTX = MACRO_TYPE.xltx;
+  const CASES: Case[] = [
+    {
+      name: '.xlsm', fileName: 'inventory.xlsm', plainName: 'inventory.xlsx', plain: () => inventoryXlsx(12),
+      make: () => withMacros(inventoryXlsx(12), 'xlsm', { printerSettings: true, ribbon: true }), kind: 'xlsx', mainType: CONTENT_TYPE.workbook, outType: CONTENT_TYPE.workbook, macros: true,
+    },
+    {
+      name: '.xltm', fileName: 'matrix.xltm', plainName: 'matrix.xltx', plain: () => asExcelTemplate(matrixXlsx()),
+      make: () => withMacros(asExcelTemplate(matrixXlsx()), 'xltm'), kind: 'xlsx', mainType: XLTX, outType: CONTENT_TYPE.workbook, macros: true,
+    },
+    {
+      name: '.xltx', fileName: 'daygrid.xltx', plainName: 'daygrid.xlsx', plain: () => dayGridXlsx(),
+      make: () => asExcelTemplate(dayGridXlsx()), kind: 'xlsx', mainType: XLTX, outType: CONTENT_TYPE.workbook, macros: false,
+    },
+    {
+      name: '.docm', fileName: 'toolbox.docm', plainName: 'toolbox.docx', plain: () => toolboxTalkDocx(),
+      make: () => withMacros(toolboxTalkDocx(), 'docm', { signature: true, keyMap: true, ribbon: true }), kind: 'docx', mainType: CONTENT_TYPE.docx, outType: CONTENT_TYPE.docx, macros: true,
+    },
+    {
+      name: '.dotm', fileName: 'weekly.dotm', plainName: 'weekly.dotx', plain: weeklyJobsDotx,
+      make: () => withMacros(weeklyJobsDotx(), 'dotm'), kind: 'dotx', mainType: CONTENT_TYPE.dotx, outType: CONTENT_TYPE.docx, macros: true,
+    },
+  ];
+  const MACRO_PART = /vbaProject|vbaData|customizations\.xml|customUI14/i;
+
+  it.each(CASES)('$name: imports, the macros noted under what cannot be filled, and detects as its plain form', (c) => {
+    const { kind, schema } = importForm(c.fileName, c.make());
+    expect(kind).toBe(c.kind);
+    expect(schema.kind).toBe(c.kind);
+    const plain = importForm(c.plainName, c.plain()).schema;
+    if (c.macros) {
+      expect(schema.unsupported[0]).toBe(MACROS_REMOVED);
+      expect({ ...schema, unsupported: schema.unsupported.slice(1) }).toEqual({ ...plain, kind: c.kind });
+    } else {
+      expect(schema.unsupported).not.toContain(MACROS_REMOVED);
+      expect(schema).toEqual(plain);
+    }
+  });
+
+  it.each(CASES)('$name: the stored package has no macros, the plain content type, and every other part to the byte', (c) => {
+    const bytes = c.make();
+    const stored = importForm(c.fileName, bytes).bytes;
+    if (!c.macros) {
+      expect(stored).toBe(bytes); // nothing to take out: stored as it came
+      return;
+    }
+    const pkg = readPackage(stored);
+    const before = readPackage(bytes);
+    expect(pkg.order.filter((name) => MACRO_PART.test(name))).toEqual([]);
+    for (const name of pkg.order.filter((n) => n.endsWith('.rels'))) expect(partText(pkg, name), name).not.toMatch(MACRO_PART);
+    const types = partText(pkg, '[Content_Types].xml')!;
+    expect(types).not.toMatch(/macroEnabled|vbaProject|vbaData|keyMap/i);
+    expect(types).toContain(`ContentType="${c.mainType}"`);
+    for (const name of pkg.order) {
+      if (name === '[Content_Types].xml' || name.endsWith('.rels')) continue;
+      expect(pkg.entries.get(name), name).toEqual(before.entries.get(name));
+    }
+    // Every part that stays is there; only the macros and what belongs to them are gone.
+    expect(before.order.filter((name) => !pkg.entries.has(name)).every((name) => MACRO_PART.test(name) || name.startsWith('customUI/') || name.startsWith('word/_rels/vbaProject'))).toBe(true);
+  });
+
+  it.each(CASES)('$name: makes an .xlsx or .docx from the stored package that passes its check', (c) => {
+    const imported = importForm(c.fileName, c.make());
+    const input: MakeFileInput = { kind: imported.kind, fileName: c.fileName, bytes: imported.bytes, schema: imported.schema, values: everything(imported.schema), photos: { [PHOTO]: JPEG }, date: DATE };
+    const made = makeFile(input);
+    const ext = isWord(c.kind) ? 'docx' : 'xlsx';
+    expect(made.fileName.endsWith(`.${ext}`)).toBe(true);
+    expect(made.mime).toBe(isWord(c.kind) ? DOCX_MIME : XLSX_MIME);
+    const out = readPackage(made.bytes);
+    const types = partText(out, '[Content_Types].xml')!;
+    expect(types).toContain(`ContentType="${c.outType}"`);
+    expect(types).not.toMatch(/template\.main|macroEnabled/i);
+    const { original, changed } = assemble(input);
+    expect(() => verifyOutput(original, out, changed, input.schema, input.values)).not.toThrow();
+    if (!isWord(c.kind)) {
+      const book = XLSX.read(made.bytes, { type: 'array' });
+      expect(book.SheetNames.length).toBeGreaterThan(0);
+    }
+    const again = importForm(made.fileName, made.bytes);
+    expect(again.kind).toBe(ext);
+    expect(again.schema.unsupported).not.toContain(MACROS_REMOVED);
+  });
+
+  it('makes an .xlsx from an .xltx when nothing is filled in: only the content types change', () => {
+    const imported = importForm('daygrid.xltx', asExcelTemplate(dayGridXlsx()));
+    const { changed } = assemble({ kind: imported.kind, fileName: 'daygrid.xltx', bytes: imported.bytes, schema: imported.schema, values: { fields: {}, rows: {} }, photos: {}, date: DATE });
+    expect(changed.has('[Content_Types].xml')).toBe(true);
   });
 });

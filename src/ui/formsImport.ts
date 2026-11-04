@@ -20,8 +20,11 @@ export interface ImportFile {
 }
 
 export interface ImportDeps {
-  /** Reads a file as a form; throws what `isFileError` recognises for a file that is not a usable form. */
-  read: (name: string, bytes: Uint8Array) => { kind: FormKind; schema: FormSchema };
+  /**
+   * Reads a file as a form; throws what `isFileError` recognises for a file that is not a usable form. `bytes` is what
+   * is stored as the template: for a macro file, the package without its macros (R21), never the file as chosen.
+   */
+  read: (name: string, bytes: Uint8Array) => { kind: FormKind; schema: FormSchema; bytes: Uint8Array };
   isFileError: (err: unknown) => err is Error;
   /** The library form a file of this code would replace. */
   findTarget: (code: string) => Promise<FormTemplate | undefined>;
@@ -60,7 +63,7 @@ export async function importMany(files: ImportFile[], deps: ImportDeps, onProgre
         summary.failures.push({ name: file.name, message: UNREADABLE });
         continue;
       }
-      let read: { kind: FormKind; schema: FormSchema };
+      let read: ReturnType<ImportDeps['read']>;
       try {
         read = deps.read(file.name, bytes);
       } catch (err) {
@@ -68,7 +71,7 @@ export async function importMany(files: ImportFile[], deps: ImportDeps, onProgre
         summary.failures.push({ name: file.name, message: err.message });
         continue;
       }
-      const input: ReadForm = { fileName: file.name, bytes, kind: read.kind, schema: read.schema };
+      const input: ReadForm = { fileName: file.name, bytes: read.bytes, kind: read.kind, schema: read.schema };
       const target = await deps.findTarget(read.schema.identity.code);
       if (target) {
         if (!(await deps.confirmReplace(target, input))) {

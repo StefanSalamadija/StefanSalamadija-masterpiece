@@ -16,7 +16,11 @@ export class OldFormatError extends FormFileError {
   }
 }
 
-/** A macro-enabled file (`.docm`, `.dotm`, `.xlsm`, or any package with a VBA project). Macros are never imported. */
+/**
+ * A workbook with an Excel 4.0 macro sheet. Its macros are cells of a sheet, which can't be taken out the way a VBA
+ * project is (R21: `.docm`, `.dotm`, `.xlsm` and `.xltm` are imported with their VBA removed), so saving a copy without
+ * macros is the way.
+ */
 export class MacroFileError extends FormFileError {
   constructor() { super("Files with macros can't be imported. Save a copy without macros (.docx or .xlsx) and import that.", 'MacroFileError'); }
 }

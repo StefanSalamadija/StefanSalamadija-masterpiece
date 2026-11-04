@@ -148,11 +148,12 @@ function FormsLibrary({ shipId }: { shipId: string }) {
       const target = replaceTarget(await listTemplates(db), read.schema.identity.code);
       setStatus('');
       if (target) {
-        setPending({ target, input: { fileName: file.name, bytes, kind: read.kind, schema: read.schema } });
+        // The bytes the engine gives back are what is stored: a macro file without its macros (R21).
+        setPending({ target, input: { fileName: file.name, bytes: read.bytes, kind: read.kind, schema: read.schema } });
         return;
       }
       const saved = await saveTemplate(db, {
-        fileName: file.name, bytes, kind: read.kind, schema: read.schema, setup: forms.defaultSetup(read.schema),
+        fileName: file.name, bytes: read.bytes, kind: read.kind, schema: read.schema, setup: forms.defaultSetup(read.schema),
       });
       navigate(setupHref(saved.id));
     } catch (err) {
@@ -228,7 +229,7 @@ function FormsLibrary({ shipId }: { shipId: string }) {
       </div>
       <div class="forms-import">
         {fileName !== undefined && <p id={nameId} class="import-file">{fileName}</p>}
-        <p id={helpId} class="helper-text">Company forms in Word (.docx, .dotx) or Excel (.xlsx); you can choose several at once. They are read on this device and go nowhere else.</p>
+        <p id={helpId} class="helper-text">Company forms in Word (.docx, .dotx) or Excel (.xlsx, .xltx), also with macros, which are removed; you can choose several at once. They are read on this device and go nowhere else.</p>
         {problem && <p class="field-error" role="alert">{problem}</p>}
         {summary && (
           <div class="forms-summary">
