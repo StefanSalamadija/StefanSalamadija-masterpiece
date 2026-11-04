@@ -2011,6 +2011,10 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.setup-confirm {
+  margin-top: 6px;
+}
+
 .setup-unsupported {
   gap: 6px;
   padding-left: 20px;

@@ -144,6 +144,7 @@ describe('writeFormFixtures', () => {
       const paths = await writeFormFixtures(dir);
       expect(Object.keys(paths)).toEqual([
         'toolbox.docx', 'toolbox-rev01.docx', 'permit.docx', 'weekly.dotx', 'jobs-photos.dotx', 'inventory.xlsx', 'daygrid.xlsx', 'matrix.xlsx', 'conditions.xlsx',
+        'guessed.docx',
       ]);
       for (const [fileName, path] of Object.entries(paths)) {
         const bytes = await fs.readFile(path);

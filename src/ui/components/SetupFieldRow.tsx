@@ -19,16 +19,21 @@ export interface SetupFieldRowProps {
   name?: string;
   nameError?: string;
   onName: (name: string) => void;
-  /** The name input lost the focus: its message may show from now on. */
+  /** The name input lost the focus: its message may show from now on, and a new name is taken as confirmed (R24). */
   onNameDone: () => void;
+  /** Whether the person has confirmed the unsure field's name; until then `Confirm name` is offered. */
+  confirmed?: boolean;
+  /** `Confirm name`: the person takes the name as it is (R24). */
+  onConfirm?: () => void;
 }
 
 /**
  * One field of the setup review: its name, and a select of what fills it in (a link to the ship's data, `You fill` or
- * `Leave empty`). An unsure field also has `Name this field`. The select carries the field's id (`data-field`), so that
- * the screen can give it the focus after the field moved to another section.
+ * `Leave empty`). An unsure field also has `Name this field`, and `Confirm name` until its name is confirmed (R24). The
+ * select carries the field's id (`data-field`), so that the screen can give it the focus after the field moved to
+ * another section.
  */
-export function SetupFieldRow({ field, choice, onChoose, name, nameError, onName, onNameDone }: SetupFieldRowProps) {
+export function SetupFieldRow({ field, choice, onChoose, name, nameError, onName, onNameDone, confirmed, onConfirm }: SetupFieldRowProps) {
   const id = useId();
   const shownName = name?.trim() || field.label;
   const current = linkFromValue(choice);
@@ -55,6 +60,9 @@ export function SetupFieldRow({ field, choice, onChoose, name, nameError, onName
             hint="The form gives this field no name of its own."
             error={nameError === undefined ? undefined : { field: field.id, severity: 'error', message: nameError }}
           />
+          {!confirmed && onConfirm && (
+            <button type="button" class="btn btn-outline setup-confirm" aria-label={`Confirm name ${shownName}`} onClick={onConfirm}>Confirm name</button>
+          )}
         </div>
       )}
     </li>

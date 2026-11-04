@@ -12,10 +12,10 @@ import type { FormSetup as Setup, HelperKey } from '../../forms/types';
 import { Field } from '../components/Field';
 import { SetupFieldRow } from '../components/SetupFieldRow';
 import {
-  applyChoice, choiceOf, foundSummary, helperSwitches, savedSchema, setHelper, setupHeading, setupProblems, setupSections,
-  showsNotFinished,
+  applyChoice, choiceOf, confirmName, foundSummary, helperSwitches, savedSchema, setHelper, setupHeading, setupProblems,
+  setupSections, showsNotFinished,
 } from '../formsView';
-import type { SetupEntry } from '../formsView';
+import type { NameReview, SetupEntry } from '../formsView';
 import { useLive } from '../useLive';
 
 /*
@@ -72,6 +72,8 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   const [setup, setSetup] = useState<Setup>(() => template.setup);
   /** Names typed for fields, by id. */
   const [labels, setLabels] = useState<Record<string, string>>({});
+  /** The unsure fields confirmed or renamed, and the links suggested for their names (R24). */
+  const [names, setNames] = useState<Omit<NameReview, 'setup'>>({ confirmed: {}, suggested: {} });
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -87,8 +89,8 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
   const suggested = useMemo<Record<HelperKey, string[]>>(() => engine.suggestHelpers(schema), [engine, schema]);
   const sections = setupSections(schema, setup);
   const switches = helperSwitches(schema, setup, suggested);
-  // Only the fields being named (unsure ones that the person fills) can hold up the save.
-  const naming = new Set(sections.you.filter((e) => e.field.confidence === 'low').map((e) => e.field.id));
+  // Only the fields being named (unsure ones that the person fills, or that a confirmed name linked) can hold up the save.
+  const naming = new Set([...sections.you, ...sections.filled].filter((e) => e.field.confidence === 'low').map((e) => e.field.id));
   const problems = setupProblems({
     okWord: setup.okWord, labels: Object.fromEntries(Object.entries(labels).filter(([id]) => naming.has(id))),
     notFinished: showsNotFinished(setup) ? setup.notFinished : undefined,
@@ -115,6 +117,38 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
     setMoved({ id });
   }
 
+  const entryOf = (id: string): SetupEntry | undefined => [...sections.you, ...sections.filled].find((e) => e.field.id === id);
+  const typedName = (id: string): string | undefined => labels[id]?.trim() || undefined;
+
+  /**
+   * The review with the unsure fields `ids` confirmed under the names shown (R24): each is named, and the link for its name
+   * is suggested, for the person to see and change.
+   */
+  function confirmed(ids: string[], from: NameReview): NameReview {
+    return ids.reduce((review, id) => {
+      const entry = entryOf(id);
+      if (!entry) return review;
+      const name = labels[id] ?? entry.field.label; // an emptied name confirms nothing
+      return confirmName(review, entry.field, name, (named) => engine.suggestLinkFor(named, entry.group !== undefined));
+    }, from);
+  }
+
+  function confirm(id: string): void {
+    const review = confirmed([id], { setup, ...names });
+    setNames({ confirmed: review.confirmed, suggested: review.suggested });
+    if (review.setup !== setup) {
+      setSetup(review.setup);
+      if (choiceOf(review.setup, id) !== choiceOf(setup, id)) setMoved({ id });
+    }
+  }
+
+  /** A name typed and left: a new name is taken as confirmed (R24). */
+  function nameDone(id: string): void {
+    touch(id);
+    const name = typedName(id);
+    if (name !== undefined && name !== names.confirmed[id]) confirm(id);
+  }
+
   async function save(event: Event): Promise<void> {
     event.preventDefault();
     if (saving.current) return;
@@ -123,11 +157,22 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
       setCheckFocus((n) => n + 1);
       return;
     }
+    // A name typed but not yet confirmed (the form sent with Enter from its input) is confirmed now. When that suggests a
+    // link, nothing is saved yet: the person sees the link first, and can change it (R24).
+    const pending = [...naming].filter((id) => typedName(id) !== undefined && typedName(id) !== names.confirmed[id]);
+    const review = confirmed(pending, { setup, ...names });
+    if (pending.length > 0) {
+      setNames({ confirmed: review.confirmed, suggested: review.suggested });
+      if (JSON.stringify(review.setup) !== JSON.stringify(setup)) {
+        setSetup(review.setup);
+        return;
+      }
+    }
     saving.current = true;
     setBusy(true);
     try {
       const final: Setup = { ...setup, okWord: setup.okWord.trim(), notFinished: setup.notFinished.trim() };
-      await saveSetup(db, template.id, basedOn, final, savedSchema(schema, final, labels));
+      await saveSetup(db, template.id, basedOn, final, savedSchema(schema, final, labels, new Set(Object.keys(review.confirmed))));
       setFlash('Form saved.');
       navigate('/forms');
       return; // stays busy until the screen is replaced, so that a second tap cannot save again
@@ -147,7 +192,8 @@ function SetupEditor({ template, engine }: { template: FormTemplate; engine: For
       <SetupFieldRow
         key={id} field={entry.field} choice={choiceOf(setup, id)} onChoose={(choice) => choose(id, choice)}
         name={unsure ? labels[id] ?? entry.field.label : undefined} nameError={shown(id)}
-        onName={(value) => setLabels((current) => ({ ...current, [id]: value }))} onNameDone={() => touch(id)}
+        onName={(value) => setLabels((current) => ({ ...current, [id]: value }))} onNameDone={() => nameDone(id)}
+        confirmed={id in names.confirmed} onConfirm={() => confirm(id)}
       />
     );
   };

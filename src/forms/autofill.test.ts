@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldContext } from '../domain/fieldDictionary';
 import type { Certificate, ClockChange, CrewMember, ShipProfile, Voyage } from '../domain/types';
-import { autoValues, suggestLinks } from './autofill';
+import { autoValues, suggestLinkFor, suggestLinks } from './autofill';
 import { normaliseLabel } from './labels';
 import { readPackage } from './package';
-import { permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { guessedLabelsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, p, row, table, wordPackage } from './testing/wordXml';
 import type { FieldDef, FieldKind, FieldLink, FormSchema } from './types';
 import { detectWord } from './word/detect';
@@ -203,6 +203,35 @@ describe('suggestLinks: the synonym table (spec 6)', () => {
     };
     const links = suggestLinks(schemaOf([], [group]));
     expect(links).toEqual({ [cols[0].id]: { source: 'time.date' }, [cols[3].id]: { source: 'vessel.name' } });
+  });
+});
+
+describe('suggestLinks: guessed labels (R24)', () => {
+  it('never links a field or a column whose label is a guess (low confidence)', () => {
+    const fields = [field('Vessel', 'text', { confidence: 'low' }), field('Date', 'date', { confidence: 'low' }), field('IMO')];
+    const cols = [field('Date', 'date', { confidence: 'low' }), field('Vessel')];
+    const group = { id: 'g1', label: 'Log', section: '', loc: 'x', columns: cols, capacity: 3, growable: false, shape: 'rows' as const };
+    expect(suggestLinks(schemaOf(fields, [group]))).toEqual({ [fields[2].id]: { source: 'vessel.imo' }, [cols[1].id]: { source: 'vessel.name' } });
+  });
+
+  it('never links the first and last day of a period whose label is a guess', () => {
+    const fields = [field('Date (from to)', 'date', { confidence: 'low', range: 'start' }), field('Date (from to)', 'date', { confidence: 'low', range: 'end' })];
+    expect(suggestLinks(schemaOf(fields))).toEqual({});
+  });
+
+  it('leaves the guessed Vessel and Date of a form unlinked, and links the field that names itself', () => {
+    const s = detectWord(readPackage(guessedLabelsDocx()), 'docx', 'guessed.docx');
+    expect(s.fields.map((f) => [f.label, f.confidence])).toEqual([['Vessel', 'low'], ['Date', 'low'], ['Remarks', 'high']]);
+    expect(suggestLinks(s)).toEqual({});
+  });
+
+  it('suggestLinkFor: the link for one field by its name, once the person has confirmed it', () => {
+    expect(suggestLinkFor(field('Vessel'))).toEqual({ source: 'vessel.name' });
+    expect(suggestLinkFor(field('Vessel', 'text', { confidence: 'low' }))).toBeUndefined();
+    expect(suggestLinkFor(field('Time', 'time'))).toEqual({ source: 'time.time' });
+    expect(suggestLinkFor(field('Time', 'time'), true)).toBeUndefined(); // each row of a group has its own time
+    expect(suggestLinkFor(field('Date (from to)', 'date', { range: 'end' }))).toEqual({ source: 'time.weekEnd' });
+    expect(suggestLinkFor(field('Remarks'))).toBeUndefined();
   });
 });
 

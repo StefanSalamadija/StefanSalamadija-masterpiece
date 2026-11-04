@@ -287,6 +287,65 @@ test('the setup names an unsure field, lists what cannot be filled, and asks for
   expect(weekly.setup.helpers.jobLog).toEqual(['g1']);
 });
 
+test('a guessed name links nothing until the person confirms or renames it; then its link is shown and can be changed (R24)', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openForms(page);
+  await importFile(page, 'guessed.docx');
+  await expect(page.getByRole('heading', { name: 'Set up TST-10' })).toBeVisible();
+  const filled = section(page, 'Filled for you');
+  const yours = section(page, 'You fill');
+  // Both guessed fields are among the fields you fill, unlinked, each with its name to confirm.
+  await expect(filled.getByRole('listitem')).toHaveCount(0);
+  await expect(yours.getByLabel('Vessel', { exact: true })).toHaveValue('you');
+  await expect(yours.getByLabel('Date', { exact: true })).toHaveValue('you');
+  await expect(yours.getByLabel('Name this field (Vessel)', { exact: true })).toHaveValue('Vessel');
+
+  // Confirmed as it is: the link for its name is suggested, and shown.
+  await yours.getByRole('button', { name: 'Confirm name Vessel' }).click();
+  await expect(filled.getByLabel('Vessel', { exact: true })).toHaveValue('link:vessel.name');
+  await expect(filled.getByRole('button', { name: /^Confirm name/ })).toHaveCount(0);
+  await expectNoHorizontalScroll(page);
+
+  // Renamed, and the form sent with Enter: nothing is saved yet, so that the link for the new name is seen first.
+  const dateName = yours.getByLabel('Name this field (Date)', { exact: true });
+  await dateName.fill('IMO No.');
+  await dateName.press('Enter');
+  await expect(filled.getByLabel('IMO No.', { exact: true })).toHaveValue('link:vessel.imo');
+  await expect(page.getByRole('heading', { name: 'Set up TST-10' })).toBeVisible();
+  // Renamed again, and left: the link suggested before gives way to the new name's (none).
+  const renamed = filled.getByLabel('Name this field (Date)', { exact: true });
+  await renamed.fill('Notes');
+  await renamed.blur();
+  await expect(yours.getByLabel('Notes', { exact: true })).toHaveValue('you');
+  // The person's own choice is kept.
+  await yours.getByLabel('Notes', { exact: true }).selectOption({ label: 'Voyage number' });
+  await expect(filled.getByLabel('Notes', { exact: true })).toHaveValue('link:voyage.no');
+
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(library(page).getByRole('listitem')).toHaveCount(1);
+  const [saved] = await stored(page, 'formTemplates');
+  expect(saved.schema.fields.map((f: { label: string; confidence: string }) => [f.label, f.confidence])).toEqual([['Vessel', 'high'], ['Notes', 'high'], ['Remarks', 'high']]);
+  expect(saved.setup.links).toEqual({ f1: { source: 'vessel.name' }, f2: { source: 'voyage.no' } });
+});
+
+test('a batch import never links a guessed name (R24)', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await openForms(page);
+  await page.getByLabel('Import form').setInputFiles([paths['guessed.docx'], paths['toolbox.docx']]);
+  await expect(page.getByText('2 forms imported', { exact: true })).toBeVisible();
+  const guessed = (await stored(page, 'formTemplates')).find((t) => t.code === 'TST-10')!;
+  expect(guessed.schema.fields.map((f: { label: string; confidence: string }) => [f.label, f.confidence])).toEqual([['Vessel', 'low'], ['Date', 'low'], ['Remarks', 'high']]);
+  expect(guessed.setup.links).toEqual({});
+  // The fill screen gives the guessed boxes no value of their own.
+  await library(page).getByRole('link', { name: /^TST-10 · / }).click();
+  await expect(page.getByRole('heading', { name: 'TST-10 Demo Guessed Labels', exact: true })).toBeVisible();
+  for (const label of ['Vessel', 'Date']) {
+    const box = page.getByRole('textbox', { name: label, exact: true });
+    await expect(box).toHaveValue('');
+    await expect(box).not.toHaveAccessibleDescription('Auto');
+  }
+});
+
 test('a setup left open while another tab imports a new revision says at once that it is out of date, and saves nothing', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await openForms(page);

@@ -173,7 +173,8 @@ const TEXT_ONLY = new Set(['time.yearWeek', 'time.weekRange']);
 const GIVES_TIME = new Set(['time.time', 'time.timeUtc', 'now', 'nowUtc', 'voyage.eta']);
 
 function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
-  if (!suggestible(field)) return undefined;
+  // R24: a guessed label (low confidence) is for the person to confirm first; a box it names is never filled in by itself.
+  if (!suggestible(field) || field.confidence === 'low') return undefined;
   const link = TABLE.get(canon(labelWithoutHint(field.label)));
   if (link === undefined) return undefined;
   // `Date (from to): [from] - [to]` is two date fields: the week's range is no value for either.
@@ -193,26 +194,35 @@ function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
  * neither is a date or time field whose label names a source that gives text only (`time.yearWeek`, `time.weekRange`),
  * nor a time field whose label names a source that gives no time (a time named `Date`).
  * The two date fields that detection marked as the first and the last day of one period (`FieldDef.range`, such as
- * `Date (from to): [from] - [to]`) are linked to `time.weekStart` and `time.weekEnd` (R20).
+ * `Date (from to): [from] - [to]`) are linked to `time.weekStart` and `time.weekEnd` (R20). A field or column whose
+ * label is a guess (`confidence: 'low'`) is never linked (R24).
  */
 export function suggestLinks(schema: FormSchema): Record<string, FieldLink> {
   const links: Record<string, FieldLink> = {};
   for (const field of schema.fields) {
-    const link = suggest(field, false);
+    const link = suggestLinkFor(field);
     if (link) links[field.id] = link;
-  }
-  // R20: the two date fields that detection marked as the first and the last day of one period.
-  for (const field of schema.fields) {
-    if (field.kind !== 'date' || field.leftEmpty || field.range === undefined) continue;
-    links[field.id] = { source: field.range === 'start' ? 'time.weekStart' : 'time.weekEnd' };
   }
   for (const group of schema.rowGroups) {
     for (const column of group.columns) {
-      const link = suggest(column, true);
+      const link = suggestLinkFor(column, true);
       if (link) links[column.id] = link;
     }
   }
   return links;
+}
+
+/**
+ * The link to suggest for one field (a column of a row group when `inGroup`), as `suggestLinks` does, or none. A field
+ * whose label is a guess (`confidence: 'low'`, R23) gets none (R24): the setup review asks for it again once the person
+ * has confirmed or renamed the field, with the field at high confidence and its new label.
+ */
+export function suggestLinkFor(field: FieldDef, inGroup = false): FieldLink | undefined {
+  // R20: the two date fields that detection marked as the first and the last day of one period.
+  if (!inGroup && field.kind === 'date' && !field.leftEmpty && field.range !== undefined && field.confidence !== 'low') {
+    return { source: field.range === 'start' ? 'time.weekStart' : 'time.weekEnd' };
+  }
+  return suggest(field, inGroup);
 }
 
 /** What a source gives, in the parts a field can take: a date (ISO), a time (`HH:mm`), or text. */

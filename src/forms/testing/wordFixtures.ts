@@ -262,6 +262,27 @@ export function timesDocx(): Uint8Array {
 }
 
 /**
+ * `TST-10 Demo Guessed Labels`: fields whose label only a fallback rule finds (R23), in words that name a source of the
+ * ship's data. A table of two halves: a title row `Vessel` over one field across the table, and a title row `Date` over
+ * one field across the table. Then `Remarks: [field]`, which names its own field.
+ */
+export function guessedLabelsDocx(): Uint8Array {
+  const c = new Controls();
+  const halves = [4819, 4819];
+  const boxes = table(halves, [
+    titleRow(halves, 'Vessel'),
+    row(halves, [{ content: p(c.formText()), span: 2 }]),
+    titleRow(halves, 'Date'),
+    row(halves, [{ content: p(c.formText()), span: 2 }]),
+  ]);
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Guessed Labels', code: 'TST-10', revision: REVISION }),
+    body: boxes + p() + p(run('Remarks: ') + c.formText()),
+  });
+}
+
+/**
  * `TST-08 Demo Uneven Rows`: a table of empty rows whose last empty rows are drawn differently. Under the bold header
  * `Step | Demo task | Lower | Upper | Outcome` (Outcome two grid columns wide), 3 empty rows of the same cells; then an
  * empty row of as many cells whose first is two grid columns wide; then an empty row of two wide cells. Only the 3 rows

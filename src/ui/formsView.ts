@@ -2,7 +2,7 @@ import { alignLeftEmpty } from '../domain/formSetup';
 import type { BaseRecord, FormDraft, FormTemplate } from '../domain/types';
 // Types only: the forms engine is loaded on demand (see `src/forms/load.ts`). What it computes (the suggested helpers,
 // the period label) is passed in.
-import type { FieldDef, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
+import type { FieldDef, FieldLink, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
 import { linkFromValue, linkValue } from './formLinks';
 
 /*
@@ -191,6 +191,39 @@ export function applyChoice(setup: FormSetup, id: string, choice: string): FormS
   return { ...setup, links: { ...setup.links, [id]: link }, leftEmpty: [...others, id], helpers: helpers as FormSetup['helpers'] };
 }
 
+/**
+ * What the setup review keeps of the unsure fields (low confidence, R23) the person confirmed or renamed (R24), with the
+ * setup they change.
+ */
+export interface NameReview {
+  setup: FormSetup;
+  /** The name each confirmed field was confirmed with, by id: such a field is saved at high confidence (`savedSchema`). */
+  confirmed: Record<string, string>;
+  /** The link (select value) the review suggested for a confirmed field, by id, while the person has chosen no other. */
+  suggested: Record<string, string>;
+}
+
+/**
+ * The review once the person has confirmed or renamed the unsure field `field` as `name` (R24): the field counts as
+ * named at high confidence, and `suggest` (the engine's `suggestLinkFor`, given the field with its new name at high
+ * confidence) gives the link for that name. The link is put in the setup, where the person sees it and can change it,
+ * when the field is filled by the person (`you`) or still holds the link suggested for an earlier name; a choice the
+ * person made (another link, `Leave empty`) is kept. With no link for the new name, a link suggested for an earlier one
+ * gives way to `you`. An empty name confirms nothing. The review given is not changed.
+ */
+export function confirmName(review: NameReview, field: FieldDef, name: string, suggest: (named: FieldDef) => FieldLink | undefined): NameReview {
+  const label = name.trim();
+  if (label === '') return review;
+  const link = suggest({ ...field, label, confidence: 'high' });
+  const value = link === undefined ? undefined : linkValue(link);
+  const { [field.id]: before, ...others } = review.suggested;
+  const confirmed = { ...review.confirmed, [field.id]: label };
+  const current = choiceOf(review.setup, field.id);
+  if (current !== 'you' && current !== before) return { setup: review.setup, confirmed, suggested: others };
+  const setup = applyChoice(review.setup, field.id, value ?? 'you');
+  return { setup, confirmed, suggested: value === undefined ? others : { ...others, [field.id]: value } };
+}
+
 const HELPER_ORDER: readonly HelperKey[] = ['pickCrew', 'allOk', 'todayRow', 'startFromLast', 'jobLog', 'thresholds', 'now'];
 
 /** A switch of the `Helpers` section: one helper, for one group or field (or, for All OK, one section's fields). */
@@ -285,13 +318,15 @@ export function setupProblems(state: { okWord: string; labels: Record<string, st
 }
 
 /**
- * The schema as it is saved with the setup: the fields the person named have their new label, and the left-empty marks
- * follow the setup (`alignLeftEmpty`, the rule the store applies too; the writers leave such a field unwritten).
+ * The schema as it is saved with the setup: the fields the person named have their new label, those they confirmed
+ * (`confirmed`, R24) are at high confidence, and the left-empty marks follow the setup (`alignLeftEmpty`, the rule the
+ * store applies too; the writers leave such a field unwritten).
  */
-export function savedSchema(schema: FormSchema, setup: FormSetup, labels: Record<string, string>): FormSchema {
+export function savedSchema(schema: FormSchema, setup: FormSetup, labels: Record<string, string>, confirmed: ReadonlySet<string> = new Set()): FormSchema {
   const rename = (f: FieldDef): FieldDef => {
     const label = labels[f.id]?.trim();
-    return label ? { ...f, label } : f;
+    const named = label ? { ...f, label } : f;
+    return confirmed.has(f.id) && named.confidence !== 'high' ? { ...named, confidence: 'high' } : named;
   };
   const named = { ...schema, fields: schema.fields.map(rename), rowGroups: schema.rowGroups.map((g) => ({ ...g, columns: g.columns.map(rename) })) };
   return alignLeftEmpty(named, setup).schema;

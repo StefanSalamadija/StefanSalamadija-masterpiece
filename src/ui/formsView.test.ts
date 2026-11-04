@@ -3,11 +3,13 @@ import { alignLeftEmpty } from '../domain/formSetup';
 import type { FormDraft, FormTemplate } from '../domain/types';
 import { periodLabel } from '../forms/helpers';
 import { readPackage } from '../forms/package';
-import { farLabelsDocx } from '../forms/testing/wordFixtures';
+import { suggestLinkFor } from '../forms/autofill';
+import { defaultSetup } from '../forms/helpers';
+import { farLabelsDocx, guessedLabelsDocx } from '../forms/testing/wordFixtures';
 import type { FieldDef, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
 import { detectWord } from '../forms/word/detect';
 import {
-  applyChoice, choiceOf, draftRows, foundSummary, helperSwitches, libraryRows, libraryText, matchesSearch, replacePrompt,
+  applyChoice, choiceOf, confirmName, draftRows, foundSummary, helperSwitches, libraryRows, libraryText, matchesSearch, replacePrompt,
   replaceTarget, revisionNotice, savedSchema, setHelper, setupHeading, setupProblems, setupSections, showsNotFinished,
   templateForDraft,
 } from './formsView';
@@ -255,5 +257,49 @@ describe('the setup review', () => {
     expect(SCHEMA).toEqual(before);
     // The same rule as the store's (`alignLeftEmpty`).
     expect(savedSchema(SCHEMA, setup, {})).toEqual(alignLeftEmpty(SCHEMA, setup).schema);
+  });
+});
+
+describe('confirming a guessed name in the setup review (R24)', () => {
+  const schema = detectWord(readPackage(guessedLabelsDocx()), 'docx', 'guessed.docx');
+  const [vessel, date] = schema.fields;
+  const start = { setup: defaultSetup(schema), confirmed: {}, suggested: {} };
+  const suggest = (f: FieldDef) => suggestLinkFor(f);
+
+  it('starts with the guessed fields unlinked, among the fields you fill, unsure first', () => {
+    expect([vessel.label, vessel.confidence, date.label, date.confidence]).toEqual(['Vessel', 'low', 'Date', 'low']);
+    expect([choiceOf(start.setup, vessel.id), choiceOf(start.setup, date.id)]).toEqual(['you', 'you']);
+    expect(ids(setupSections(schema, start.setup).you)).toEqual(['f1', 'f2', 'f3']);
+  });
+
+  it('suggests a link for the name the person confirms, which they see and can change', () => {
+    const confirmed = confirmName(start, vessel, 'Vessel', suggest);
+    expect(choiceOf(confirmed.setup, vessel.id)).toBe('link:vessel.name');
+    expect(confirmed.confirmed).toEqual({ [vessel.id]: 'Vessel' });
+    expect(ids(setupSections(schema, confirmed.setup).filled)).toEqual([vessel.id]);
+    // The person changes it: confirming again keeps their choice.
+    const changed = { ...confirmed, setup: applyChoice(confirmed.setup, vessel.id, 'link:vessel.imo') };
+    expect(choiceOf(confirmName(changed, vessel, 'Ship', suggest).setup, vessel.id)).toBe('link:vessel.imo');
+    const emptied = { ...confirmed, setup: applyChoice(confirmed.setup, vessel.id, 'empty') };
+    expect(choiceOf(confirmName(emptied, vessel, 'Ship', suggest).setup, vessel.id)).toBe('empty');
+    expect(start.setup.links).toEqual({}); // nothing given is changed
+  });
+
+  it('follows a rename: the link suggested before gives way to the new name\'s, or to You fill', () => {
+    const renamed = confirmName(start, date, 'IMO No.', suggest);
+    expect(choiceOf(renamed.setup, date.id)).toBe('link:vessel.imo');
+    const again = confirmName(renamed, date, 'Notes', suggest);
+    expect(choiceOf(again.setup, date.id)).toBe('you');
+    expect(again.confirmed).toEqual({ [date.id]: 'Notes' });
+    expect(again.suggested).toEqual({});
+    // An empty name confirms nothing.
+    expect(confirmName(start, date, '  ', suggest)).toBe(start);
+  });
+
+  it('saves a confirmed field at high confidence, with its name; one left unconfirmed stays unsure', () => {
+    const confirmed = confirmName(start, vessel, ' Ship name ', suggest);
+    const saved = savedSchema(schema, confirmed.setup, { [vessel.id]: ' Ship name ' }, new Set(Object.keys(confirmed.confirmed)));
+    expect(saved.fields.map((f) => [f.label, f.confidence])).toEqual([['Ship name', 'high'], ['Date', 'low'], ['Remarks', 'high']]);
+    expect(choiceOf(confirmed.setup, vessel.id)).toBe('link:vessel.name');
   });
 });
