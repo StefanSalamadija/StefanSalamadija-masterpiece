@@ -120,6 +120,14 @@ function canon(label: string): string {
   return normaliseLabel(label).replace(/[-‐-―]/g, ' ').replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * True when a label names a person by rank, as auto-fill links it (`Master`, `Chief Engineer`, `Name of Master`): word
+ * detection keeps rows named so as fields of their own, each linked to its person.
+ */
+export function isPersonLabel(label: string): boolean {
+  return TABLE.get(canon(labelWithoutHint(label)))?.source.startsWith('crew.byRank.') ?? false;
+}
+
 /** A link to a source (not `none`). */
 type SourceLink = { source: string; part?: 'name' | 'rank' | 'nameRank' };
 

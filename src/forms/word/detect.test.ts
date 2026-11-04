@@ -3,6 +3,7 @@ import { partText, readPackage } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, heading, p, row, run, table, tickBox, titleRow, wordPackage } from '../testing/wordXml';
 import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import type { FieldDef, FormSchema } from '../types';
+import { suggestLinks } from '../autofill';
 import { parseXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
 import type { WordTarget } from './detect';
@@ -263,6 +264,18 @@ describe('detectWord', () => {
       expect(rows).toHaveLength(g.capacity);
       for (const r of rows) for (const c of g.columns) expect(locateColumn(r, c)?.kind, c.id).toBe(c.loc.includes('/') ? 'formtext' : 'cell');
     }
+  });
+
+  it('keeps rows named by a person\'s rank as fields of that person, not a group, so each stays linked to its person', () => {
+    const c = new Controls();
+    const widths = [3000, 3500, 3138];
+    const signed = () => [{ content: p(c.formText()) }, { content: p(c.formText({ type: 'date', format: 'dd.MM.yyyy' })) }];
+    const body = table(widths, [headerRow(widths, ['Role', 'Name', 'Date']), row(widths, ['Master', ...signed()]), row(widths, ['Chief Engineer', ...signed()])]);
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Sign-off', code: 'TST-90', revision: '0' }), body }));
+    expect(s.rowGroups).toEqual([]);
+    expect(s.fields.map((f) => [f.id, f.kind, f.label])).toEqual([['f1', 'text', 'Master'], ['f2', 'date', 'Date'], ['f3', 'text', 'Chief Engineer'], ['f4', 'date', 'Date']]);
+    const links = suggestLinks(s);
+    expect([links.f1, links.f3]).toEqual([{ source: 'crew.byRank.master', part: 'name' }, { source: 'crew.byRank.chiefEngineer', part: 'name' }]);
   });
 
   it('makes a date field whose label names a period text, unless the label names a first and a last date', () => {

@@ -1,3 +1,4 @@
+import { isPersonLabel } from '../autofill';
 import { NotAFormError } from '../errors';
 import { isRangeLabel, isSignatureLabel } from '../labels';
 import { partText } from '../package';
@@ -135,6 +136,7 @@ class Detector {
   private section = '';
   /** `listRow` of each row, worked out once: a long run of rows is looked at again from each row that may start it. */
   private listRows = new Map<RowInfo, ListRow | undefined>();
+  private layouts = new Map<RowInfo, string>();
 
   constructor(private addr: Addresser) {}
 
@@ -364,7 +366,9 @@ class Detector {
    * one with no title is no column.
    *
    * The cells before the first field name the rows (`rowLabels`, their texts joined by a space): such a list is fixed,
-   * so it does not grow. A list with no names grows by cloning its last row, as a plain group does.
+   * so it does not grow. A list with no names grows by cloning its last row, as a plain group does. Rows named by a
+   * person's rank (`isPersonLabel`: `Master`, `Chief Engineer`) make no group: each field stays its own, linked to that
+   * person.
    */
   private fieldRowsGroup(rows: RowInfo[], i: number, title: string | undefined): number | undefined {
     const shape = this.listRow(rows[i]);
@@ -373,8 +377,11 @@ class Detector {
     while (end < rows.length && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode && this.listRow(rows[end])?.key === shape.key) end += 1;
     if (end - i < 2) return undefined;
 
+    // Rows named by a person's rank (`Master | [name] | [date]`) are fields of that person, which auto-fill links.
+    if (rows.slice(i, end).some((r) => r.cells.slice(0, shape.firstField).some((c) => hasWords(c.text) && isPersonLabel(c.text)))) return undefined;
+
     let top = i;
-    while (top > 0 && rows[top - 1].fields && !rows[top - 1].row.repeat && layoutOf(rows[top - 1]) === layoutOf(rows[i])) top -= 1;
+    while (top > 0 && rows[top - 1].fields && !rows[top - 1].row.repeat && this.layoutOf(rows[top - 1]) === this.layoutOf(rows[i])) top -= 1;
     const found = tableHead(rows, top);
     if (!found) return undefined;
     const { head, h } = found;
@@ -405,6 +412,16 @@ class Detector {
    * (`Vessel: [field]`) labels its fields rather than naming a row of a list. `key` is the same for two rows of the
    * same shape: their cells, and the kind and address (from the row) of each field.
    */
+  /** The cells of a row, where each starts in the grid and how wide it is; worked out once per row. */
+  private layoutOf(info: RowInfo): string {
+    let layout = this.layouts.get(info);
+    if (layout === undefined) {
+      layout = info.cells.map((c) => `${c.cell.grid}+${c.cell.span}`).join(' ');
+      this.layouts.set(info, layout);
+    }
+    return layout;
+  }
+
   private listRow(info: RowInfo): ListRow | undefined {
     if (!this.listRows.has(info)) this.listRows.set(info, this.listRowOf(info));
     return this.listRows.get(info);
@@ -430,7 +447,7 @@ class Detector {
       }
     }
     if (fields < 2) return undefined;
-    return { key: `${layoutOf(info)}|${firstField}|${parts.join(' ')}`, firstField };
+    return { key: `${this.layoutOf(info)}|${firstField}|${parts.join(' ')}`, firstField };
   }
 
   /**
@@ -520,11 +537,6 @@ function boxWords(tokens: readonly Token[], i: number): string | undefined {
   const after = texts.slice(1).every(hasWords);
   if (before && (!after || !/[:?]$/.test(texts[0]))) return texts[k];
   return after ? texts[k + 1] : undefined;
-}
-
-/** The cells of a row, where each starts in the grid and how wide it is. */
-function layoutOf(info: RowInfo): string {
-  return info.cells.map((c) => `${c.cell.grid}+${c.cell.span}`).join(' ');
 }
 
 /**
