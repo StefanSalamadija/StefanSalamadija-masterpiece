@@ -351,26 +351,40 @@ export class Walker {
   }
 
   private row(tr: Element, repeat?: Row['repeat']): Row {
-    const trPr = child(tr, W, 'trPr');
-    let grid = Number(wVal(trPr, 'gridBefore') ?? 0) || 0;
-    const cells: Cell[] = [];
-    const collect = (parent: Element): void => {
-      for (const el of kids(parent)) {
-        if (isEl(el, W, 'tc')) {
-          const tcPr = child(el, W, 'tcPr');
-          const span = Math.max(1, Number(wVal(tcPr, 'gridSpan') ?? 1) || 1);
-          const vMergeEl = child(tcPr, W, 'vMerge');
-          const vMerge = vMergeEl ? (wAttr(vMergeEl, 'val') === 'restart' ? 'restart' : 'continue') : undefined;
-          cells.push({ el, grid, span, vMerge, blocks: this.blocks(el) });
-          grid += span;
-        } else if (isEl(el, W, 'sdt') || isEl(el, W, 'customXml')) {
-          collect(isEl(el, W, 'sdt') ? child(el, W, 'sdtContent') ?? el : el);
-        }
-      }
-    };
-    collect(tr);
-    return { el: tr, cells, tblHeader: isOn(child(trPr, W, 'tblHeader')), repeat };
+    const cells: Cell[] = rowCells(tr).map((c) => ({ ...c, blocks: this.blocks(c.el) }));
+    return { el: tr, cells, tblHeader: isOn(child(child(tr, W, 'trPr'), W, 'tblHeader')), repeat };
   }
+}
+
+/**
+ * The cells of a table row (`w:tr`), in order, with the grid column each starts at and how many it covers: after the
+ * row's `w:gridBefore`, each `w:tc` takes its `w:gridSpan`. Cells inside a cell-level content control or custom XML
+ * element count where they stand.
+ */
+export function rowCells(tr: Element): Omit<Cell, 'blocks'>[] {
+  let grid = Number(wVal(child(tr, W, 'trPr'), 'gridBefore') ?? 0) || 0;
+  const cells: Omit<Cell, 'blocks'>[] = [];
+  const collect = (parent: Element): void => {
+    for (const el of kids(parent)) {
+      if (isEl(el, W, 'tc')) {
+        const tcPr = child(el, W, 'tcPr');
+        const span = Math.max(1, Number(wVal(tcPr, 'gridSpan') ?? 1) || 1);
+        const vMergeEl = child(tcPr, W, 'vMerge');
+        const vMerge = vMergeEl ? (wAttr(vMergeEl, 'val') === 'restart' ? 'restart' : 'continue') : undefined;
+        cells.push({ el, grid, span, vMerge });
+        grid += span;
+      } else if (isEl(el, W, 'sdt') || isEl(el, W, 'customXml')) {
+        collect(isEl(el, W, 'sdt') ? child(el, W, 'sdtContent') ?? el : el);
+      }
+    }
+  };
+  collect(tr);
+  return cells;
+}
+
+/** Where a row's cells start in the grid and how wide each is (`0+1 1+2 3+1`): two rows drawn alike have the same layout. */
+export function rowLayout(cells: readonly { grid: number; span: number }[]): string {
+  return cells.map((c) => `${c.grid}+${c.span}`).join(' ');
 }
 
 function formType(field: OpenField): 'FORMTEXT' | 'FORMCHECKBOX' | 'FORMDROPDOWN' | undefined {

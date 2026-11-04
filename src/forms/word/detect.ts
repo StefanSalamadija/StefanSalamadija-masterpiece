@@ -8,7 +8,7 @@ import { parseXml } from '../xml';
 import { Addresser } from './address';
 import { hasWords, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
 import { otherStories } from './stories';
-import { W, Walker, child, clean, flatTokens, itemsOf, paragraphsIn, textOf, wVal } from './walk';
+import { W, Walker, child, clean, flatTokens, itemsOf, paragraphsIn, rowLayout, textOf, wVal } from './walk';
 import type { Block, Cell, Para, RawField, Repeat, Row, Table, Token } from './walk';
 
 export { locateColumn, locateWord } from './address';
@@ -313,6 +313,10 @@ class Detector {
   /**
    * Empty rows under a header: a plain row group. Returns the index of the first row after them.
    *
+   * Every row of the group is laid out like the first (`layoutOf`: the same cells at the same grid columns), since a
+   * column is found in each row by its place among the row's cells. An empty row drawn otherwise (a row of other cells
+   * at the table's foot) ends the group, and is no row of it.
+   *
    * The rows with text just above the empty ones are the table's head (`tableHead`), which gives the header row that
    * names the columns. Fully filled rows between the header row and the empty rows are the group's `fixedRows` (R8).
    */
@@ -320,7 +324,8 @@ class Detector {
     let end = i + 1;
     // Rows under one parent with nothing but markup between them (a bookmark, a permission range), as `locateWord`
     // counts the rows of a group: the row elements after the first, whatever else sits between them.
-    while (end < rows.length && rows[end].empty && !rows[end].row.repeat && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode) end += 1;
+    while (end < rows.length && rows[end].empty && !rows[end].row.repeat && rows[end].row.el.parentNode === rows[end - 1].row.el.parentNode
+      && this.layoutOf(rows[end]) === this.layoutOf(rows[i])) end += 1;
 
     const found = tableHead(rows, i);
     if (!found) return end;
@@ -416,7 +421,7 @@ class Detector {
   private layoutOf(info: RowInfo): string {
     let layout = this.layouts.get(info);
     if (layout === undefined) {
-      layout = info.cells.map((c) => `${c.cell.grid}+${c.cell.span}`).join(' ');
+      layout = rowLayout(info.cells.map((c) => c.cell));
       this.layouts.set(info, layout);
     }
     return layout;

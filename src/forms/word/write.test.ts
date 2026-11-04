@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { bytesOf, partText, readPackage, writePackage } from '../package';
 import type { Package } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, p, row, run, table, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, fieldRowsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, permitDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import { CONTENT_TYPE } from '../testing/zip';
+import { FormWriteError } from '../errors';
 import type { DraftValues, FieldDef, FormSchema } from '../types';
 import { parseXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
@@ -431,6 +432,35 @@ describe('writeWord', () => {
     expect(() => writeWord(pkg, fixed, tooMany, { photos: {} })).toThrow(new RegExp(personnel.id));
     // Nothing given is nothing written.
     expect(writeWord(pkg, s, values({ [check.id]: null, [box.id]: null }), { photos: {} }).size).toBe(0);
+  });
+
+  it('writes a table only into its rows laid out alike, and refuses a stored table that takes in a row drawn otherwise', () => {
+    const pkg = readPackage(unevenRowsDocx());
+    const s = detectWord(pkg, 'docx', 'u.docx');
+    const [g] = s.rowGroups;
+    const record = (i: number) => Object.fromEntries(g.columns.map((c) => [c.id, `${c.label} ${i}`]));
+    const texts = (tr: Element): string[] => all(tr, W, 'tc').map((tc) => all(tc, W, 't').map((t) => t.textContent).join(''));
+
+    // 5 rows into 3: the 2 clones go straight after the third row, and the rows drawn otherwise stay empty below them.
+    const { out } = fill(pkg, s, values({}, { [g.id]: [1, 2, 3, 4, 5].map(record) }));
+    expect(readWordValues(out, s, { [g.id]: 2 }).rows[g.id]).toEqual([1, 2, 3, 4, 5].map(record));
+    const trs = all(all(mainDoc(out), W, 'tbl')[0], W, 'tr');
+    expect(trs.map(texts)).toEqual([
+      ['Step', 'Demo task', 'Lower', 'Upper', 'Outcome'],
+      ...[1, 2, 3, 4, 5].map((i) => ['Step', 'Demo task', 'Lower', 'Upper', 'Outcome'].map((t) => `${t} ${i}`)),
+      ['', '', '', '', ''],
+      ['', ''],
+    ]);
+
+    // A table stored when its rows ran on into a row of other cells (as earlier detection could make): row 4 has as many
+    // cells, but its first spans two columns. Writing it is refused, rather than putting each value one cell off.
+    const stored: FormSchema = { ...s, rowGroups: [{ ...g, capacity: 4, growable: false }] };
+    const write = () => writeWord(pkg, stored, values({}, { [g.id]: [1, 2, 3, 4].map(record) }), { photos: {} });
+    expect(write).toThrow(FormWriteError);
+    expect(write).toThrow(/row 4 of the table g1/);
+    try { write(); } catch (e) { expect((e as FormWriteError).code).toBe('notInFile'); }
+    // Rows 1 to 3 alone are still written.
+    expect(writeWord(pkg, stored, values({}, { [g.id]: [1, 2, 3, {}].map((i) => (typeof i === 'number' ? record(i) : i)) }), { photos: {} }).size).toBe(1);
   });
 
   describe('R12: writing a field never moves another stored address', () => {

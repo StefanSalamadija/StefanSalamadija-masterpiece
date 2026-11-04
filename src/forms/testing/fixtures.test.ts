@@ -6,7 +6,7 @@ import { writeFormFixtures } from '../../../e2e/fixtures/makeForms';
 import { readPackage, sniffFormat, utf8 } from '../package';
 import type { FormKind } from '../package';
 import { parseXml } from '../xml';
-import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './wordFixtures';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './excelFixtures';
 import { asExcelTemplate, withMacros } from './macroFixtures';
 import { zipOf } from './zip';
@@ -19,6 +19,7 @@ const FIXTURES: { name: string; fileName: string; kind: FormKind; build: () => U
   { name: 'oddLayoutsDocx', fileName: 'odd.docx', kind: 'docx', build: () => oddLayoutsDocx() },
   { name: 'shortDatesDocx', fileName: 'short-dates.docx', kind: 'docx', build: () => shortDatesDocx() },
   { name: 'fieldRowsDocx', fileName: 'field-rows.docx', kind: 'docx', build: () => fieldRowsDocx() },
+  { name: 'unevenRowsDocx', fileName: 'uneven-rows.docx', kind: 'docx', build: () => unevenRowsDocx() },
   { name: 'inventoryXlsx', fileName: 'inventory.xlsx', kind: 'xlsx', build: () => inventoryXlsx() },
   { name: 'dayGridXlsx', fileName: 'daygrid.xlsx', kind: 'xlsx', build: () => dayGridXlsx() },
   { name: 'dayGridXlsx (loose header)', fileName: 'daygrid-loose.xlsx', kind: 'xlsx', build: () => dayGridXlsx({ looseHeader: true }) },

@@ -234,6 +234,32 @@ export function shortDatesDocx(): Uint8Array {
 }
 
 /**
+ * `TST-08 Demo Uneven Rows`: a table of empty rows whose last empty rows are drawn differently. Under the bold header
+ * `Step | Demo task | Lower | Upper | Outcome` (Outcome two grid columns wide), 3 empty rows of the same cells; then an
+ * empty row of as many cells whose first is two grid columns wide; then an empty row of two wide cells. Only the 3 rows
+ * laid out like the first are rows of the table.
+ */
+export function unevenRowsDocx(): Uint8Array {
+  const c = new Controls();
+  const widths = [800, 2400, 1600, 1600, 1600, 1638];
+  const empty = (spans: number[]): string => row(widths, spans.map((span) => ({ span })), { height: 400 });
+  const titles = ['Step', 'Demo task', 'Lower', 'Upper', 'Outcome'];
+  const checks = table(widths, [
+    row(widths, titles.map((text, i) => ({ text, bold: true, span: i === 4 ? 2 : 1 }))),
+    empty([1, 1, 1, 1, 2]),
+    empty([1, 1, 1, 1, 2]),
+    empty([1, 1, 1, 1, 2]),
+    empty([2, 1, 1, 1, 1]),
+    empty([3, 3]),
+  ]);
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Uneven Rows', code: 'TST-08', revision: REVISION }),
+    body: heading('Demo steps') + checks + p(),
+  });
+}
+
+/**
  * `TST-07 Demo Field Rows`: tables whose rows already hold a FORMTEXT in each cell to fill.
  * - `Attendees`: a title row, the header `Name | Function / Rank | Signature`, and 4 rows with a FORMTEXT under Name
  *   and under Function / Rank and an empty Signature cell.

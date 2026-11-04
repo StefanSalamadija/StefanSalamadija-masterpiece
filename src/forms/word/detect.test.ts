@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readPackage } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, heading, p, row, run, table, tickBox, titleRow, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import type { FieldDef, FormSchema } from '../types';
 import { suggestLinks } from '../autofill';
 import { parseXml } from '../xml';
@@ -221,6 +221,23 @@ describe('detectWord', () => {
     ]);
     expect(s.fields[8].options).toEqual(['One', 'Two']);
     expect(s.fields.map((f) => f.confidence)).toEqual([...Array(9).fill('high'), 'low']);
+  });
+
+  it('groups only the empty rows laid out like the first, so that a row drawn differently is never a row of the table', () => {
+    const bytes = unevenRowsDocx();
+    const s = detect(bytes);
+    expect(s.fields).toEqual([]);
+    expect(s.rowGroups.map((g) => ({ label: g.label, capacity: g.capacity, growable: g.growable, columns: g.columns.map((c) => c.label) }))).toEqual([
+      { label: 'Demo steps', capacity: 3, growable: true, columns: ['Step', 'Demo task', 'Lower', 'Upper', 'Outcome'] },
+    ]);
+    // The group's rows are the 3 drawn alike, just under the header; the 2 rows drawn otherwise are left out.
+    const doc = documentOf(bytes);
+    const target = locateWord(doc, MAIN, s).get(s.rowGroups[0].id);
+    if (target?.kind !== 'group') throw new Error('no group target');
+    const trs = Array.from(doc.getElementsByTagNameNS(W, 'tbl')[0].getElementsByTagNameNS(W, 'tr'));
+    expect(trs).toHaveLength(6);
+    expect(target.rows).toEqual(trs.slice(1, 4));
+    expect(target.rows.every((r, i) => r === trs[i + 1])).toBe(true);
   });
 
   it('makes rows that hold a field in each cell under a header a row group, named by the header and the first columns', () => {

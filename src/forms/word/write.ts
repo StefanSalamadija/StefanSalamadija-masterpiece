@@ -9,7 +9,7 @@ import { locateColumn, locateWord } from './address';
 import type { WordTarget } from './address';
 import { EMPTY_FORMTEXT, controlOf, fieldRange, isOn, partsOf } from './read';
 import { dirOf, relsPathOf } from './rels';
-import { A, BOX_CHARS, BOX_TEXT, R, W, W14, WP, child, isEl, kids, wAttr } from './walk';
+import { A, BOX_CHARS, BOX_TEXT, R, W, W14, WP, child, isEl, kids, rowCells, rowLayout, wAttr } from './walk';
 
 /*
  * Writing a draft's values into a copy of a Word form (spec §8, rulings R1 and R2).
@@ -736,7 +736,13 @@ function growRows(rows: Element[], extra: number, ids: CloneIds): { rows: Elemen
   return { rows: [...rows, ...clones], clones };
 }
 
-/** Fills a group's rows, cloning rows first when more are given than it holds. True when anything changed. */
+/**
+ * Fills a group's rows, cloning rows first when more are given than it holds. True when anything changed.
+ *
+ * A column is found in each row by its place among the row's cells, so a table row is only written when it is laid out
+ * like the group's first row (the same cells at the same grid columns). Detection groups only such rows; a group stored
+ * with a row drawn otherwise is refused (`notInFile`) rather than written one cell off.
+ */
 function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records: Record<string, FormValue>[], ids: () => CloneIds, pictures: PictureContext): boolean {
   const extra = records.length - group.capacity;
   const anyValue = records.some((record) => group.columns.some((c) => writable(c) && !isBlank(record[c.id])));
@@ -744,6 +750,7 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
   if (!target || target.kind !== 'group') throw new FormWriteError(`The table ${group.id} (${group.label}) is not where it was in the file.`, { code: 'notInFile', fieldId: group.id });
   if (extra > 0 && !group.growable) throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, not ${records.length}.`, { code: 'tooManyRows', fieldId: group.id });
   const { rows, clones } = extra > 0 ? growRows(target.rows, extra, ids()) : { rows: target.rows, clones: new Set<Element>() };
+  const layout = isEl(rows[0], W, 'tr') ? rowLayout(rowCells(rows[0])) : undefined;
 
   records.forEach((record, i) => {
     const row = rows[i];
@@ -759,6 +766,9 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
         throw new FormWriteError(`The column ${describe(column)} is not where it was in row ${i + 1} of the table ${group.id}.`, { code: 'notInFile', fieldId: column.id });
       }
       jobs.push({ column, at, value, blank });
+    }
+    if (jobs.length > 0 && layout !== undefined && rowLayout(rowCells(row)) !== layout) {
+      throw new FormWriteError(`The row ${i + 1} of the table ${group.id} (${group.label}) is not laid out like its first row.`, { code: 'notInFile', fieldId: group.id });
     }
     for (const { column, at, value, blank } of jobs) {
       if (blank) clearTarget(at, column);
