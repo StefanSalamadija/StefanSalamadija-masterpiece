@@ -6,7 +6,7 @@ import { writeFormFixtures } from '../../../e2e/fixtures/makeForms';
 import { readPackage, sniffFormat, utf8 } from '../package';
 import type { FormKind } from '../package';
 import { parseXml } from '../xml';
-import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './wordFixtures';
+import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './wordFixtures';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './excelFixtures';
 import { asExcelTemplate, withMacros } from './macroFixtures';
 import { zipOf } from './zip';
@@ -21,6 +21,7 @@ const FIXTURES: { name: string; fileName: string; kind: FormKind; build: () => U
   { name: 'fieldRowsDocx', fileName: 'field-rows.docx', kind: 'docx', build: () => fieldRowsDocx() },
   { name: 'unevenRowsDocx', fileName: 'uneven-rows.docx', kind: 'docx', build: () => unevenRowsDocx() },
   { name: 'farLabelsDocx', fileName: 'far-labels.docx', kind: 'docx', build: () => farLabelsDocx() },
+  { name: 'mergedRowsDocx', fileName: 'merged-rows.docx', kind: 'docx', build: () => mergedRowsDocx() },
   { name: 'inventoryXlsx', fileName: 'inventory.xlsx', kind: 'xlsx', build: () => inventoryXlsx() },
   { name: 'dayGridXlsx', fileName: 'daygrid.xlsx', kind: 'xlsx', build: () => dayGridXlsx() },
   { name: 'dayGridXlsx (loose header)', fileName: 'daygrid-loose.xlsx', kind: 'xlsx', build: () => dayGridXlsx({ looseHeader: true }) },

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readPackage } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, heading, p, row, run, table, tickBox, titleRow, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import type { FieldDef, FormSchema } from '../types';
 import { suggestLinks } from '../autofill';
+import { isOpenCell } from '../cells';
 import { parseXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
 import type { WordTarget } from './detect';
@@ -240,34 +241,55 @@ describe('detectWord', () => {
     expect(target.rows.every((r, i) => r === trs[i + 1])).toBe(true);
   });
 
-  it('names a cell field that nothing beside or just above names by its row, the title over its box, a header past fields and title rows, or its caption, and never by another field\'s text', () => {
+  it('names a cell field that nothing beside or just above names by its row, the title over its box, a header past fields and title rows, or its caption, at low confidence (R23), and never by another field\'s text', () => {
     const s = detect(farLabelsDocx());
     expect(s.rowGroups).toEqual([]);
     const named = (f: FieldDef) => [f.label, f.kind, f.confidence];
+    // A label only these rules find is kept, at low confidence, for the person to confirm in setup (R23); a label found
+    // as before stays high.
     expect(s.fields.map(named)).toEqual([
       // The row's name, past a printed tick box; under `Demo second round:`, the header above both title rows, which sits
       // over the field's cell. The item field is named by the number before it, as before.
-      ['Demo shutters: look for gaps', 'text', 'high'], ['Demo ropes', 'text', 'high'],
-      ['3.', 'text', 'high'], ['Jottings', 'text', 'high'], ['4.', 'text', 'high'], ['Jottings', 'text', 'high'],
+      ['Demo shutters: look for gaps', 'text', 'low'], ['Demo ropes', 'text', 'low'],
+      ['3.', 'text', 'high'], ['Jottings', 'text', 'low'], ['4.', 'text', 'high'], ['Jottings', 'text', 'low'],
       // The header above, past the cells of fields with their unit in the row above.
       ['Demo fluid A', 'text', 'high'], ['Steady', 'text', 'high'], ['Brisk', 'text', 'high'],
-      ['Demo fluid B', 'text', 'high'], ['Steady', 'text', 'high'], ['Brisk', 'text', 'high'],
+      ['Demo fluid B', 'text', 'high'], ['Steady', 'text', 'low'], ['Brisk', 'text', 'low'],
       // Header cells in a row that holds a field before them.
-      ['Courier', 'text', 'high'], ['Buyer', 'text', 'high'], ['Mass', 'text', 'high'], ['Scale', 'text', 'high'], ['Crates', 'text', 'high'],
+      ['Courier', 'text', 'high'], ['Buyer', 'text', 'high'], ['Mass', 'text', 'low'], ['Scale', 'text', 'low'], ['Crates', 'text', 'low'],
       // ... but not a text that names the field after it.
       ['Gate', 'text', 'high'], ['Demo lane', 'text', 'high'], ['Exit', 'text', 'high'], ['Field 21', 'text', 'low'], ['Field 22', 'text', 'low'],
       // The cells that name the rows above a free row are not its headers.
       ['Demo shed', 'text', 'high'], ['Demo yard', 'text', 'high'], ['Field 25', 'text', 'low'], ['Field 26', 'text', 'low'], ['Looked at', 'text', 'high'],
       // The caption after a field in its cell; `(time of day)` makes it a time. Text that another field follows is that one's.
-      ['Counted', 'text', 'high'], ['large', 'text', 'high'], ['Opens', 'text', 'high'], ['(time of day)', 'time', 'high'],
+      ['Counted', 'text', 'high'], ['large', 'text', 'low'], ['Opens', 'text', 'high'], ['(time of day)', 'time', 'low'],
       ['Field 32', 'text', 'low'], ['plus', 'text', 'high'],
       // A title row names the one box under it, not a second box, and not a row of two.
-      ['Demo account', 'text', 'high'], ['Demo pictures', 'text', 'high'], ['Field 36', 'text', 'low'], ['Field 37', 'text', 'low'], ['Field 38', 'text', 'low'],
+      ['Demo account', 'text', 'low'], ['Demo pictures', 'text', 'low'], ['Field 36', 'text', 'low'], ['Field 37', 'text', 'low'], ['Field 38', 'text', 'low'],
       // A header above a title row that does not sit over the field's cell does not name it.
       ['Demo valve', 'text', 'high'], ['Field 40', 'text', 'low'],
       // A mark is no row name.
       ['Field 41', 'text', 'low'],
     ]);
+  });
+
+  it('never makes a cell that continues a vertical merge a field or a cell to fill, and drops a column or table of only such cells (R22)', () => {
+    const bytes = mergedRowsDocx();
+    const s = detect(bytes);
+    // The FORMTEXT inside the merge's second cell is not a field; the two beside the merge are.
+    expect(s.fields.map((f) => f.label)).toEqual(['Demo note', 'Demo note']);
+    // `Demo notes` is merged down over every row, so it is no column; `Shift` is closed in the rows that continue its
+    // merge; the table of only merged rows is no table.
+    expect(s.rowGroups.map((g) => ({ label: g.label, capacity: g.capacity, columns: g.columns.map((c) => [c.id, c.label]), closed: g.closed }))).toEqual([
+      { label: 'Shifts', capacity: 4, columns: [['g1.c1', 'Shift'], ['g1.c2', 'Demo task'], ['g1.c3', 'Hours']], closed: { 'g1.c1': [1, 2, 3] } },
+    ]);
+    const [g] = s.rowGroups;
+    expect([0, 1, 2, 3, 4, 5].map((i) => isOpenCell(g, i, 'g1.c1'))).toEqual([true, false, false, false, false, false]);
+    expect([0, 3, 5].every((i) => isOpenCell(g, i, 'g1.c2'))).toBe(true);
+    // Every open cell is where its column says.
+    const target = locateWord(documentOf(bytes), MAIN, s).get(g.id);
+    if (target?.kind !== 'group') throw new Error('no group target');
+    for (const r of target.rows) for (const column of g.columns) expect(locateColumn(r, column)?.kind).toBe('cell');
   });
 
   it('makes rows that hold a field in each cell under a header a row group, named by the header and the first columns', () => {

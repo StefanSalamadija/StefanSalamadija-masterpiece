@@ -5,6 +5,7 @@ import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import type { ClockChange, FormDraft } from '../domain/types';
 // Types only: the forms engine is loaded on demand (see `src/forms/load.ts`). What the engine computes (auto values, the
 // period, the jobs that roll over) is passed in.
+import { isOpenCell } from '../forms/cells';
 import type { WriteErrorCode } from '../forms/errors';
 import type { DraftValues, FieldDef, FieldLink, FormKind, FormSchema, FormSetup, FormValue, RowGroupDef } from '../forms/types';
 import { blockTitle } from './formHelpers';
@@ -58,6 +59,14 @@ export function hasPictures(group: RowGroupDef): boolean {
 /** The columns of a table that are asked for, in the table's order. */
 export function visibleColumns(group: RowGroupDef): FieldDef[] {
   return group.columns.filter(isAsked);
+}
+
+/**
+ * The columns asked for in row `index` of a table: `visibleColumns` without the row's closed cells, which continue a
+ * vertical merge that Word does not show (R22).
+ */
+export function rowColumns(group: RowGroupDef, index: number): FieldDef[] {
+  return visibleColumns(group).filter((c) => isOpenCell(group, index, c.id));
 }
 
 /**
@@ -167,7 +176,7 @@ export function fillProblems(schema: FormSchema, values: DraftValues): Record<st
   for (const field of schema.fields) check(field.id, field, values.fields[field.id]);
   for (const group of schema.rowGroups) {
     (values.rows[group.id] ?? []).forEach((row, i) => {
-      for (const column of group.columns) check(cellKey(group.id, i, column.id), column, row?.[column.id]);
+      for (const column of group.columns) if (isOpenCell(group, i, column.id)) check(cellKey(group.id, i, column.id), column, row?.[column.id]);
     });
   }
   return out;

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { alignLeftEmpty } from '../domain/formSetup';
 import type { FormDraft, FormTemplate } from '../domain/types';
 import { periodLabel } from '../forms/helpers';
+import { readPackage } from '../forms/package';
+import { farLabelsDocx } from '../forms/testing/wordFixtures';
 import type { FieldDef, FormSchema, FormSetup, HelperKey, RowGroupDef } from '../forms/types';
+import { detectWord } from '../forms/word/detect';
 import {
   applyChoice, choiceOf, draftRows, foundSummary, helperSwitches, libraryRows, libraryText, matchesSearch, replacePrompt,
   replaceTarget, revisionNotice, savedSchema, setHelper, setupHeading, setupProblems, setupSections, showsNotFinished,
@@ -164,6 +167,20 @@ describe('the setup review', () => {
     // A column carries its group, so that it is shown under the group's heading.
     expect(sections.filled.map((e) => e.group?.id)).toEqual([undefined, undefined, 'g2']);
     expect(sections.you.find((e) => e.field.id === 'g1.c2')?.group?.label).toBe('Participants');
+  });
+
+  it('lists a field named only by a fallback rule first, as unsure, and keeps its name when the person leaves it (R23)', () => {
+    const schema = detectWord(readPackage(farLabelsDocx()), 'docx', 'far.docx');
+    const you = setupSections(schema, emptySetup()).you;
+    const unsure = you.filter((e) => e.field.confidence === 'low');
+    // The unsure ones come first, in the form's order; a field named by a fallback rule is one, with its name.
+    expect(you.slice(0, unsure.length)).toEqual(unsure);
+    const found = unsure.find((e) => e.field.label === 'Demo ropes')!;
+    expect(found).toBeDefined();
+    // The setup review shows that name in the field to edit; kept as it is, it is valid and saved unchanged.
+    const labels = { [found.field.id]: found.field.label };
+    expect(setupProblems({ okWord: 'OK', labels })).toEqual({});
+    expect(savedSchema(schema, emptySetup(), labels).fields.find((f) => f.id === found.field.id)?.label).toBe('Demo ropes');
   });
 
   it('gives the choice of each field as the select shows it', () => {

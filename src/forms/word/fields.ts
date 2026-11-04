@@ -141,8 +141,8 @@ function aliasOf(field: RawField): string | undefined {
 }
 
 /** A field definition with its optional members only when they are set, so that equal detections are equal key by key. */
-function definition(o: { id: string; label: string; section: string; loc: string }, d: Pick<FieldDef, 'kind' | 'options' | 'formatHint'>, raw: string | undefined): FieldDef {
-  const def: FieldDef = { id: o.id, kind: d.kind, label: o.label, section: o.section, loc: o.loc, confidence: raw === undefined ? 'low' : 'high' };
+function definition(o: { id: string; label: string; section: string; loc: string; unsure?: boolean }, d: Pick<FieldDef, 'kind' | 'options' | 'formatHint'>, raw: string | undefined): FieldDef {
+  const def: FieldDef = { id: o.id, kind: d.kind, label: o.label, section: o.section, loc: o.loc, confidence: raw === undefined || o.unsure ? 'low' : 'high' };
   if (d.options !== undefined) def.options = d.options;
   if (d.formatHint !== undefined) def.formatHint = d.formatHint;
   if (raw !== undefined && isSignatureLabel(o.label)) def.leftEmpty = true;
@@ -152,12 +152,14 @@ function definition(o: { id: string; label: string; section: string; loc: string
 /**
  * The definition of a found field. `text` is the nearby text that names it, if any; failing that a content control's
  * alias names it; failing both it is called `fallback` (`Field <n>`, `Column <n>`) with low confidence. `shared` says
- * that another field of the same cell or line has the same label (see `describe`).
+ * that another field of the same cell or line has the same label (see `describe`). `unsure` says that only a fallback
+ * rule found `text` (R23): the field keeps it as its label, with low confidence, for the person to confirm in setup.
  */
-export function makeField(field: RawField, o: { id: string; text: string | undefined; fallback: string; section: string; loc: string; shared?: boolean }): FieldDef {
+export function makeField(field: RawField, o: { id: string; text: string | undefined; fallback: string; section: string; loc: string; shared?: boolean; unsure?: boolean }): FieldDef {
   const alias = aliasOf(field);
   const raw = hasWords(o.text) ? o.text : hasWords(alias) ? alias : undefined;
-  return definition({ ...o, label: raw === undefined ? o.fallback : labelText(raw) }, describe(field, raw, o.shared ?? false), raw);
+  const unsure = raw !== undefined && raw === o.text && o.unsure === true;
+  return definition({ ...o, label: raw === undefined ? o.fallback : labelText(raw), unsure }, describe(field, raw, o.shared ?? false), raw);
 }
 
 /** The definition of a cell column of a plain row group, from its header text: its kind and hint come from the label. */

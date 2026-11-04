@@ -96,6 +96,13 @@ export interface RowGroupDef {
   /** The text already in the first column of each row (item names, day numbers). */
   rowLabels?: string[];
   /**
+   * Word only (R22): the cells of the group that cannot be filled, by column id: the group's rows (from 0) whose cell
+   * under that column continues a vertical merge from the row above. Word shows only the first cell of such a merge,
+   * so nothing is shown, asked or written there (`isOpenCell`). A row past `capacity` (a clone of the last row) takes
+   * the last row's cells. Unset when every cell can be filled.
+   */
+  closed?: Record<string, number[]>;
+  /**
    * Rows that are already filled in the template, between the table's header row and the group's first row: reference
    * rows such as alarm limits (`Alarm 1 | 19.5 | 25 | 5`). They are not rows of the group and are never written.
    * `label` is the row's first-cell text; `cells` are the texts under the group's columns, in column order.

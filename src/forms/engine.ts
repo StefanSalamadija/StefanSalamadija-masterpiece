@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate';
 import { isValidIsoDate } from '../domain/dates';
+import { isOpenCell } from './cells';
 import { IntegrityError } from './errors';
 import { detectExcel } from './excel/detect';
 import { readExcelValues } from './excel/read';
@@ -299,13 +300,15 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
       const row = rows?.[i];
       const draft = given[i] ?? {};
       if (row === undefined) {
-        if (group.columns.some((column) => !column.leftEmpty && !isBlank(draft[column.id]))) throw new IntegrityError(`Row ${i + 1} of ${group.id} (${group.label}) is missing from the output.`);
+        if (group.columns.some((column) => !column.leftEmpty && isOpenCell(group, i, column.id) && !isBlank(draft[column.id]))) throw new IntegrityError(`Row ${i + 1} of ${group.id} (${group.label}) is missing from the output.`);
         continue;
       }
       // Rows past the template's own are the writer's clones, of the template's last row.
       const was = before?.[i];
       const from = before?.[before.length - 1];
       for (const column of group.columns) {
+        // A closed cell (R22) is neither written nor read.
+        if (!isOpenCell(group, i, column.id)) continue;
         const ref: Reference = was ? { template: was[column.id] } : { clone: { from: from?.[column.id], fallback: defaults[column.id] } };
         check(column, draft[column.id], row[column.id], ref, `The column ${column.id} (${column.label}) in row ${i + 1}`);
       }

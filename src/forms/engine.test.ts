@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
+import { isOpenCell } from './cells';
 import { assemble, DOCX_MIME, importForm, makeFile, verifyOutput, XLSX_MIME } from './engine';
 import type { MakeFileInput } from './engine';
 import { FormWriteError, IntegrityError, NotAFormError, OldFormatError } from './errors';
@@ -12,7 +13,7 @@ import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
 import { asExcelTemplate, MACRO_TYPE, withMacros } from './testing/macroFixtures';
-import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
 import { CONTENT_TYPE } from './testing/zip';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
@@ -41,6 +42,7 @@ const FIXTURES: Fixture[] = [
   { name: 'field rows', fileName: 'field-rows.docx', make: fieldRowsDocx },
   { name: 'uneven rows', fileName: 'uneven-rows.docx', make: unevenRowsDocx },
   { name: 'far labels', fileName: 'far-labels.docx', make: farLabelsDocx },
+  { name: 'merged rows', fileName: 'merged-rows.docx', make: mergedRowsDocx },
   { name: 'inventory', fileName: 'inventory.xlsx', make: () => inventoryXlsx(120) },
   { name: 'day grid', fileName: 'daygrid.xlsx', make: () => dayGridXlsx() },
   { name: 'day grid (loose header)', fileName: 'daygrid-loose.xlsx', make: () => dayGridXlsx({ looseHeader: true }) },
@@ -202,7 +204,11 @@ describe('makeFile on every fixture (R1)', () => {
       const rows = values.rows[group.id]!;
       expect(back.rows[group.id]!.length, group.id).toBe(Math.max(rows.length, group.capacity));
       rows.forEach((row, i) => {
-        for (const column of group.columns) expectRead(kind, column, row[column.id], back.rows[group.id]![i]![column.id], `${column.id} row ${i}`);
+        for (const column of group.columns) {
+          // A closed cell (R22) is neither written nor read.
+          if (!isOpenCell(group, i, column.id)) expect(back.rows[group.id]![i]![column.id], `${column.id} row ${i}`).toBeUndefined();
+          else expectRead(kind, column, row[column.id], back.rows[group.id]![i]![column.id], `${column.id} row ${i}`);
+        }
       });
     }
 

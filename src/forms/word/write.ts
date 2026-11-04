@@ -1,4 +1,5 @@
 import { isValidIsoDate } from '../../domain/dates';
+import { isOpenCell } from '../cells';
 import { FormWriteError } from '../errors';
 import { formatDate, usableDateHint } from '../format';
 import { bytesOf, partText } from '../package';
@@ -742,10 +743,13 @@ function growRows(rows: Element[], extra: number, ids: CloneIds): { rows: Elemen
  * A column is found in each row by its place among the row's cells, so a table row is only written when it is laid out
  * like the group's first row (the same cells at the same grid columns). Detection groups only such rows; a group stored
  * with a row drawn otherwise is refused (`notInFile`) rather than written one cell off.
+ *
+ * A closed cell (`RowGroupDef.closed`, R22: it continues a vertical merge, which Word does not show) is skipped, whatever
+ * the record holds for it. A value aimed at a continuation cell that the schema does not mark closed is refused.
  */
 function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records: Record<string, FormValue>[], ids: () => CloneIds, pictures: PictureContext): boolean {
   const extra = records.length - group.capacity;
-  const anyValue = records.some((record) => group.columns.some((c) => writable(c) && !isBlank(record[c.id])));
+  const anyValue = records.some((record, i) => group.columns.some((c) => writable(c) && isOpenCell(group, i, c.id) && !isBlank(record[c.id])));
   if (!anyValue && extra <= 0) return false;
   if (!target || target.kind !== 'group') throw new FormWriteError(`The table ${group.id} (${group.label}) is not where it was in the file.`, { code: 'notInFile', fieldId: group.id });
   if (extra > 0 && !group.growable) throw new FormWriteError(`The table ${group.id} (${group.label}) holds ${group.capacity} rows, not ${records.length}.`, { code: 'tooManyRows', fieldId: group.id });
@@ -757,6 +761,7 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
     // Every column of the row is found before any is written (R12).
     const jobs: { column: FieldDef; at: WordTarget; value: FormValue | undefined; blank: boolean }[] = [];
     for (const column of group.columns) {
+      if (!isOpenCell(group, i, column.id)) continue;
       const value = record[column.id];
       const blank = !writable(column) || isBlank(value);
       if (blank && !clones.has(row)) continue;
@@ -764,6 +769,10 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
       if (!at) {
         if (blank) continue;
         throw new FormWriteError(`The column ${describe(column)} is not where it was in row ${i + 1} of the table ${group.id}.`, { code: 'notInFile', fieldId: column.id });
+      }
+      if (inMergeContinuation(at)) {
+        if (blank) continue;
+        throw new FormWriteError(`The column ${describe(column)} in row ${i + 1} of the table ${group.id} is in a merged cell that Word does not show.`, { code: 'notInFile', fieldId: column.id });
       }
       jobs.push({ column, at, value, blank });
     }
@@ -776,6 +785,22 @@ function writeGroup(group: RowGroupDef, target: WordTarget | undefined, records:
     }
   });
   return true;
+}
+
+/**
+ * Whether a target is in a table cell that continues a vertical merge (`w:vMerge` without `restart`): Word shows only
+ * the merge's first cell, so nothing written there would show (R22).
+ */
+function inMergeContinuation(target: WordTarget): boolean {
+  const nodes = target.kind === 'tick' ? target.cells : target.kind === 'cell' ? [target.tc] : target.kind === 'sdt' ? [target.sdt] : target.kind === 'group' ? [] : [target.begin];
+  return nodes.some((node) => {
+    for (let el: Node | null = node; el; el = el.parentNode) {
+      if (!isEl(el, W, 'tc')) continue;
+      const merge = child(child(el, W, 'tcPr'), W, 'vMerge');
+      return merge !== undefined && wAttr(merge, 'val') !== 'restart';
+    }
+    return false;
+  });
 }
 
 /** Fills one part. Gives back its new XML, or `undefined` when nothing in it was written. */
@@ -796,6 +821,7 @@ function writePart(text: string, part: string, schema: FormSchema, values: Draft
     if (!writable(field) || isBlank(value) || !isHere(field.loc, part)) continue;
     const target = targets.get(field.id);
     if (!target) throw new FormWriteError(`The field ${describe(field)} is not where it was in the file.`, { code: 'notInFile', fieldId: field.id });
+    if (inMergeContinuation(target)) throw new FormWriteError(`The field ${describe(field)} is in a merged cell that Word does not show.`, { code: 'notInFile', fieldId: field.id });
     writeTarget(target, field, value, pictures);
     changed = true;
   }

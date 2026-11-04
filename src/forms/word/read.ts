@@ -1,4 +1,5 @@
 import { isValidIsoDate } from '../../domain/dates';
+import { isOpenCell } from '../cells';
 import { formatDate, parseDate, usableDateHint } from '../format';
 import { partText } from '../package';
 import type { Package } from '../package';
@@ -312,8 +313,8 @@ export function partsOf(schema: FormSchema): string[] {
  * capacity plus those.
  *
  * Every field the reader can find is in `fields`, and every row of every group it can find is in `rows`, each with
- * every column. A field or group whose address does not resolve is left out, so a caller comparing values sees that it
- * is missing. A picture field or column reads as its media part path, or `null` (see the top of this file).
+ * every column but its closed cells (`RowGroupDef.closed`, R22), which are not read. A field or group whose address
+ * does not resolve is left out, so a caller comparing values sees that it is missing. A picture field or column reads as its media part path, or `null` (see the top of this file).
  */
 export function readWordValues(pkg: Package, schema: FormSchema, extraRows: Record<string, number> = {}): DraftValues {
   const out: DraftValues = { fields: {}, rows: {} };
@@ -331,9 +332,11 @@ export function readWordValues(pkg: Package, schema: FormSchema, extraRows: Reco
     for (const group of schema.rowGroups) {
       const target = targets.get(group.id);
       if (!target || target.kind !== 'group') continue;
-      out.rows[group.id] = target.rows.map((row) => {
+      out.rows[group.id] = target.rows.map((row, i) => {
         const record: Record<string, FormValue> = {};
         for (const column of group.columns) {
+          // A closed cell (R22) is never read: Word does not show it.
+          if (!isOpenCell(group, i, column.id)) continue;
           const at = locateColumn(row, column);
           const value = at && readTarget(at, column, rels);
           if (value !== undefined) record[column.id] = value;

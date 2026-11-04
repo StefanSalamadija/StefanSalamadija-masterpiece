@@ -260,6 +260,39 @@ export function unevenRowsDocx(): Uint8Array {
 }
 
 /**
+ * `TST-16 Demo Merged Rows`: tables whose empty rows hold cells that continue a vertical merge, which Word does not show.
+ * - `Shifts`: the bold header `Shift | Demo task | Hours | Demo notes`, whose `Demo notes` cell is merged down over all 4
+ *   empty rows below it; in those rows, the `Shift` cell of the first opens a merge that the other 3 continue.
+ * - `Demo blocks`: a bold header of three cells, each merged down over the 2 empty rows below it.
+ * - `Demo margins`: `Demo note` merged down over two rows, beside a FORMTEXT in each; the second row's merged cell also holds a
+ *   FORMTEXT, which Word does not show.
+ */
+export function mergedRowsDocx(): Uint8Array {
+  const c = new Controls();
+  const widths = [2000, 3000, 2000, 2638];
+  const shifts = table(widths, [
+    row(widths, [{ text: 'Shift', bold: true }, { text: 'Demo task', bold: true }, { text: 'Hours', bold: true }, { text: 'Demo notes', bold: true, vMerge: 'restart' }]),
+    row(widths, [{ vMerge: 'restart' }, '', '', { vMerge: 'continue' }], { height: 400 }),
+    ...Array.from({ length: 3 }, () => row(widths, [{ vMerge: 'continue' }, '', '', { vMerge: 'continue' }], { height: 400 })),
+  ]);
+  const thirds = [3213, 3213, 3212];
+  const blocks = table(thirds, [
+    row(thirds, ['Demo left', 'Demo mid', 'Demo right'].map((text) => ({ text, bold: true, vMerge: 'restart' as const }))),
+    ...Array.from({ length: 2 }, () => row(thirds, thirds.map(() => ({ vMerge: 'continue' as const })), { height: 400 })),
+  ]);
+  const halves = [4819, 4819];
+  const notes = table(halves, [
+    row(halves, [{ text: 'Demo note', vMerge: 'restart' }, { content: p(c.formText()) }]),
+    row(halves, [{ vMerge: 'continue', content: p(c.formText()) }, { content: p(c.formText()) }]),
+  ]);
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Merged Rows', code: 'TST-16', revision: REVISION }),
+    body: heading('Shifts') + shifts + p() + heading('Demo blocks') + blocks + p() + heading('Demo margins') + notes + p(),
+  });
+}
+
+/**
  * `TST-15 Demo Far Labels`: FORMTEXT fields in table cells whose label is neither before them in their cell, nor in the
  * cell before them, nor in a header just above. Each table holds one layout and the cases its rule must leave alone.
  * - `Demo tour`: the header ` | Seen | Jottings` (the first cell two columns wide); a title row `Demo first round` over

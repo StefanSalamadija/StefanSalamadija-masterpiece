@@ -1,7 +1,8 @@
 import { Component } from 'preact';
 import { useId, useLayoutEffect, useRef } from 'preact/hooks';
+import { isOpenCell } from '../../forms/cells';
 import type { FieldDef, FormKind, FormValue, RowGroupDef } from '../../forms/types';
-import { canAddRow, isFixedRows, rowCount, rowTitle, visibleColumns } from '../formFill';
+import { canAddRow, isFixedRows, rowColumns, rowCount, rowTitle, visibleColumns } from '../formFill';
 import { remarksShown, shownRows } from '../formHelpers';
 import type { RemarksRule } from '../formHelpers';
 import { FormField } from './FormField';
@@ -100,7 +101,7 @@ class Row extends Component<RowProps> {
     return (
       <fieldset class="fill-row" data-row={index}>
         <legend>{title}</legend>
-        {visibleColumns(group).filter((c) => !(rule && c.id === rule.remarks && !remarksShown(rule, row))).map((column) => {
+        {rowColumns(group, index).filter((c) => !(rule && c.id === rule.remarks && !remarksShown(rule, row))).map((column) => {
           const value = row?.[column.id] ?? null;
           return (
             <FormField
@@ -114,7 +115,7 @@ class Row extends Component<RowProps> {
             />
           );
         })}
-        {extras?.photos && group.columns.filter((c) => c.kind === 'picture' && !c.leftEmpty).map((column) => (
+        {extras?.photos && group.columns.filter((c) => c.kind === 'picture' && !c.leftEmpty && isOpenCell(group, index, c.id)).map((column) => (
           <PhotoField
             key={column.id} field={column} value={row?.[column.id] ?? null} busy={photoBusy} error={notices?.[`photo:${column.id}`]}
             onFile={(file) => extras.photos?.onFile(index, column, file)} onRemove={() => extras.photos?.onRemove(index, column)}

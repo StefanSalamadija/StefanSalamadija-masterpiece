@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { bytesOf, partText, readPackage, writePackage } from '../package';
 import type { Package } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, p, row, run, table, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, fieldRowsDocx, permitDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, fieldRowsDocx, mergedRowsDocx, permitDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import { CONTENT_TYPE } from '../testing/zip';
 import { FormWriteError } from '../errors';
 import type { DraftValues, FieldDef, FormSchema } from '../types';
@@ -461,6 +461,34 @@ describe('writeWord', () => {
     try { write(); } catch (e) { expect((e as FormWriteError).code).toBe('notInFile'); }
     // Rows 1 to 3 alone are still written.
     expect(writeWord(pkg, stored, values({}, { [g.id]: [1, 2, 3, {}].map((i) => (typeof i === 'number' ? record(i) : i)) }), { photos: {} }).size).toBe(1);
+  });
+
+  it('never writes a cell that continues a vertical merge, and refuses a value aimed at one that the schema does not close (R22)', () => {
+    const pkg = readPackage(mergedRowsDocx());
+    const s = detectWord(pkg, 'docx', 'm.docx');
+    const [g] = s.rowGroups;
+    // A value for every column of every row, closed cells too, and 2 rows more than the table holds.
+    const records = [1, 2, 3, 4, 5, 6].map((i) => ({ 'g1.c1': `Shift ${i}`, 'g1.c2': `Task ${i}`, 'g1.c3': `${i},5` }));
+    const { out } = fill(pkg, s, values({}, { [g.id]: records }));
+    const texts = (tr: Element): string[] => all(tr, W, 'tc').map((tc) => all(tc, W, 't').map((t) => t.textContent).join(''));
+    expect(all(all(mainDoc(out), W, 'tbl')[0], W, 'tr').map(texts)).toEqual([
+      ['Shift', 'Demo task', 'Hours', 'Demo notes'],
+      ['Shift 1', 'Task 1', '1,5', ''],
+      ...[2, 3, 4, 5, 6].map((i) => ['', `Task ${i}`, `${i},5`, '']),
+    ]);
+    // The clones continue the merges of the row they copy.
+    for (const tr of all(all(mainDoc(out), W, 'tbl')[0], W, 'tr').slice(2)) {
+      const first = all(tr, W, 'tc')[0];
+      expect(all(first, W, 'vMerge')[0]?.getAttributeNS(W, 'val')).toBeNull();
+    }
+    // Reading back gives the open cells only.
+    expect(readWordValues(out, s, { [g.id]: 2 }).rows[g.id]).toEqual(records.map((r, i) => (i === 0 ? r : { 'g1.c2': r['g1.c2'], 'g1.c3': r['g1.c3'] })));
+
+    // A schema that does not close them (stored before R22): a value for a merged cell is refused, a blank one is not.
+    const open: FormSchema = { ...s, rowGroups: [{ ...g, closed: undefined }] };
+    const write = (rows: Record<string, string>[]) => () => writeWord(pkg, open, values({}, { [g.id]: rows }), { photos: {} });
+    expect(write(records.slice(0, 4))).toThrow(/row 2 of the table g1 is in a merged cell that Word does not show/);
+    expect(write(records.slice(0, 4).map((r, i) => (i === 0 ? r : { 'g1.c2': r['g1.c2'] })))).not.toThrow();
   });
 
   describe('R12: writing a field never moves another stored address', () => {

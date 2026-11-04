@@ -8,12 +8,12 @@ import type { ClockChange, CrewMember, ShipProfile } from '../domain/types';
 import { autoValues } from '../forms/autofill';
 import { defaultSetup, draftPeriod, isJobLogGroup, rolloverJobs } from '../forms/helpers';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from '../forms/testing/excelFixtures';
-import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
+import { mergedRowsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../forms/testing/wordFixtures';
 import type { DraftValues, FieldDef, FormSchema } from '../forms/types';
 import {
   addRow, autoAt, canAddRow, choiceControl, editField, fileValues, fillHeading, fillProblems, fillSections, fixedState,
   isAuto, isFixed, isFixedRows, isLongText, makeAndHandOver, NUMBER_INVALID, numberProblem, removeRow, rolloverFor, rowCount, rowTitle,
-  setCell, setField, shipDateAt, shownValue, visibleColumns, withAutoValues, writeErrorText,
+  rowColumns, setCell, setField, shipDateAt, shownValue, visibleColumns, withAutoValues, writeErrorText,
 } from './formFill';
 
 const schemaOf = (name: string, bytes: Uint8Array): FormSchema => importForm(name, bytes).schema;
@@ -228,6 +228,14 @@ describe('numbers', () => {
 });
 
 describe('rows', () => {
+  it('asks in each row only for the cells Word shows: not one that continues a vertical merge (R22)', () => {
+    const [group] = importForm('m.docx', mergedRowsDocx()).schema.rowGroups;
+    expect(rowColumns(group, 0).map((c) => c.label)).toEqual(['Shift', 'Demo task', 'Hours']);
+    expect(rowColumns(group, 2).map((c) => c.label)).toEqual(['Demo task', 'Hours']);
+    // A row added past the template's own copies its last row, and its cells.
+    expect(rowColumns(group, 7).map((c) => c.label)).toEqual(['Demo task', 'Hours']);
+  });
+
   const participants = toolbox.rowGroups[0];
   const items = inventory.rowGroups[0];
 

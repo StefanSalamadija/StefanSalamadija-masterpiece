@@ -59,6 +59,22 @@ interface RowInfo {
   title?: string;
 }
 
+/**
+ * The text found to name a field, and whether only a fallback rule found it (`farLabel`): such a label is kept, with low
+ * confidence (R23). `undefined` when nothing names it.
+ */
+type Found = { text: string; unsure: boolean } | undefined;
+
+/** A label as `Found`: a plain text is sure. */
+function foundOf(label: string | Found): Found {
+  return typeof label === 'string' ? { text: label, unsure: false } : label;
+}
+
+/** A label that only a fallback rule found. */
+function unsure(text: string | undefined): Found {
+  return text === undefined ? undefined : { text, unsure: true };
+}
+
 /** The shape of a row of a list of fields (`Detector.listRow`). */
 interface ListRow { key: string; firstField: number }
 
@@ -183,9 +199,9 @@ class Detector {
     return hasWords(before) ? before : undefined;
   }
 
-  private addField(field: RawField, text: string | undefined, shared = false): void {
+  private addField(field: RawField, found: Found, shared = false): void {
     const n = this.fields.length + 1;
-    this.fields.push(makeField(field, { id: `f${n}`, text, fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared }));
+    this.fields.push(makeField(field, { id: `f${n}`, text: found?.text, fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared, unsure: found?.unsure }));
   }
 
   /**
@@ -193,14 +209,15 @@ class Detector {
    * inside a cell are detected where they stand. A field is `shared` when another field of the same tokens has the
    * same label (`Date (from to): [from] - [to]`).
    */
-  private addFields(tokens: readonly Token[], label: (t: Token & { t: 'field' }, i: number) => string | undefined): void {
-    const labels = tokens.map((t, i) => (t.t === 'field' ? label(t, i) : undefined));
+  private addFields(tokens: readonly Token[], label: (t: Token & { t: 'field' }, i: number) => string | Found): void {
+    const found = tokens.map((t, i) => (t.t === 'field' ? foundOf(label(t, i)) : undefined));
+    const labels = found.map((f) => f?.text);
     const named = labels.filter(hasWords).map(labelText);
     const added = new Map<string, FieldDef[]>();
     tokens.forEach((t, i) => {
       const text = labels[i];
       if (t.t === 'field') {
-        this.addField(t.field, text, hasWords(text) && named.filter((l) => l === labelText(text)).length > 1);
+        this.addField(t.field, found[i], hasWords(text) && named.filter((l) => l === labelText(text)).length > 1);
         if (hasWords(text)) added.set(labelText(text), [...(added.get(labelText(text)) ?? []), this.fields[this.fields.length - 1]!]);
       } else if (t.t === 'table') this.table(t.table, undefined, undefined);
       else if (t.t === 'repeat') this.blockRepeat(t.repeat, undefined);
@@ -268,8 +285,10 @@ class Detector {
   /** The fields of some cells of a row, in order, and the tables and repeating sections inside them. */
   private rowFields(rows: RowInfo[], i: number, cells: readonly CellInfo[], boxAbove: string | undefined): void {
     for (const c of cells) {
+      // Word shows only the first cell of a vertical merge (R22): what a continuation holds is no field.
+      if (c.cell.vMerge === 'continue') continue;
       const ci = rows[i].cells.indexOf(c);
-      this.addFields(c.tokens, (t, ti) => this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove ?? farLabel(rows, i, ci, ti, t.field));
+      this.addFields(c.tokens, (t, ti) => this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove ?? unsure(farLabel(rows, i, ci, ti, t.field)));
     }
   }
 
@@ -290,7 +309,7 @@ class Detector {
   private tickRow(rows: RowInfo[], i: number, ticks: readonly TickColumn[], boxAbove: string | undefined): boolean {
     const info = rows[i];
     const cells = ticks.map((col) => info.cells.find((c) => c.cell.grid === col.grid));
-    if (cells.some((c) => !c || c.fields > 0 || c.objects > 0 || c.boxes > 1 || c.text !== '')) return false;
+    if (cells.some((c) => !c || c.cell.vMerge === 'continue' || c.fields > 0 || c.objects > 0 || c.boxes > 1 || c.text !== '')) return false;
     const tickCells = cells as CellInfo[];
     const others = info.cells.filter((c) => !tickCells.includes(c));
     const labelCell = others.find((c) => hasWords(c.text));
@@ -333,11 +352,25 @@ class Detector {
 
     const n = this.groups.length + 1;
     const first = rows[i];
-    const columns = first.cells.map((c, k) => makeColumn({
-      id: `g${n}.c${k + 1}`, text: columnTitle(head, h, c.cell.grid), fallback: `Column ${k + 1}`, section: this.section,
-      loc: this.addr.relative(first.row.el, c.cell.el),
-    }));
-    this.pushGroup(rows, i, end, first.cells, found.fixed, columns, title, undefined);
+    // A cell that continues a vertical merge is not shown (R22): it is closed in its row, and a column closed in every
+    // row is no column. A group left with no column has nothing to fill.
+    const kept: CellInfo[] = [];
+    const columns: FieldDef[] = [];
+    const closed: Record<string, number[]> = {};
+    first.cells.forEach((c, k) => {
+      const shut = rows.slice(i, end).flatMap((r, ri) => (r.cells[k]?.cell.vMerge === 'continue' ? [ri] : []));
+      if (shut.length === end - i) return;
+      const id = `g${n}.c${columns.length + 1}`;
+      if (shut.length > 0) closed[id] = shut;
+      kept.push(c);
+      columns.push(makeColumn({
+        id, text: columnTitle(head, h, c.cell.grid), fallback: `Column ${columns.length + 1}`, section: this.section,
+        loc: this.addr.relative(first.row.el, c.cell.el),
+      }));
+    });
+    if (columns.length === 0) return end;
+    this.pushGroup(rows, i, end, kept, found.fixed, columns, title, undefined);
+    if (Object.keys(closed).length > 0) this.groups[this.groups.length - 1]!.closed = closed;
     return end;
   }
 
@@ -466,10 +499,10 @@ class Detector {
     const columns: FieldDef[] = [];
     for (let i = start; i < end && rows[i].row.repeat!.item === items[0]; i += 1) {
       rows[i].cells.forEach((c, ci) => c.tokens.forEach((t, ti) => {
-        if (t.t !== 'field') return;
+        if (t.t !== 'field' || c.cell.vMerge === 'continue') return;
         const k = columns.length + 1;
-        const text = this.cellLabel(rows, i, ci, ti, t.field) ?? farLabel(rows, i, ci, ti, t.field);
-        columns.push(makeField(t.field, { id: `g${n}.c${k}`, text, fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)) }));
+        const found = foundOf(this.cellLabel(rows, i, ci, ti, t.field) ?? unsure(farLabel(rows, i, ci, ti, t.field)));
+        columns.push(makeField(t.field, { id: `g${n}.c${k}`, text: found?.text, fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)), unsure: found?.unsure }));
       }));
     }
     this.addRepeat(section, items, columns, title);
