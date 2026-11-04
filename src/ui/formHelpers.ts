@@ -2,6 +2,7 @@ import { addDays, isoWeek } from '../domain/dates';
 import { shipOffsetAt } from '../domain/shipTime';
 import type { ClockChange } from '../domain/types';
 // Types only: the forms engine is loaded on demand (see `src/forms/load.ts`). The engine's rules are passed in.
+import { isOpenCell } from '../forms/cells';
 import type { DraftValues, FieldDef, FormKind, FormSchema, FormSetup, FormValue, RowGroupDef } from '../forms/types';
 
 /*
@@ -157,7 +158,10 @@ export function applyAllOk(
     const count = group.rowLabels?.length || existing.length;
     out.rows[id] = Array.from({ length: Math.max(count, existing.length) }, (_, i) => {
       const row = { ...existing[i] };
-      for (const [column, answer] of Object.entries(ok)) if (place(row[column], answer)) row[column] = answer;
+      for (const [column, answer] of Object.entries(ok)) {
+        // A closed cell (R22) is not on the form: nothing is set there.
+        if (isOpenCell(group, i, column) && place(row[column], answer)) row[column] = answer;
+      }
       return row;
     });
   }
@@ -198,20 +202,34 @@ export function rowLimit(group: RowGroupDef, kind: FormKind): number {
 /**
  * Puts `rows` into the free (empty) rows of a table in order, then after its last row, up to `limit` rows in all. Gives
  * the new values and how many rows were placed. The input is not changed.
+ *
+ * A row takes a record only when every cell the record fills is open there (R22: not a cell that continues a vertical
+ * merge, such as a Name cell merged down from the row above); other free rows are passed over and stay empty. So no
+ * value is put where the file would not show it.
  */
 export function placeRows(
-  values: DraftValues, groupId: string, rows: Record<string, FormValue>[], limit: number,
+  values: DraftValues, group: RowGroupDef, rows: Record<string, FormValue>[], limit: number,
 ): { values: DraftValues; placed: number } {
-  const next = [...(values.rows[groupId] ?? [])];
+  const next = [...(values.rows[group.id] ?? [])];
   let placed = 0;
+  const fits = (at: number, row: Record<string, FormValue>): boolean => Object.entries(row).every(([id, v]) => isBlank(v) || isOpenCell(group, at, id));
   for (const row of rows) {
-    let at = next.findIndex(rowIsBlank);
-    if (at < 0) at = next.length;
-    if (at >= limit) break;
+    let at = -1;
+    for (let k = 0; k < limit; k += 1) {
+      const free = k >= next.length || rowIsBlank(next[k]);
+      if (free && fits(k, row)) {
+        at = k;
+        break;
+      }
+      // Past the rows there are, every new row has the cells of the template's last row: if it does not fit, none will.
+      if (k >= next.length && k >= group.capacity - 1) break;
+    }
+    if (at < 0) break;
+    while (next.length < at) next.push({});
     next[at] = { ...row };
     placed += 1;
   }
-  return { values: { ...values, rows: { ...values.rows, [groupId]: next } }, placed };
+  return { values: { ...values, rows: { ...values.rows, [group.id]: next } }, placed };
 }
 
 /** A new job: the date (the ship's today) and, if the form has one, the status of a job that is not finished. */
@@ -236,17 +254,22 @@ export function photoSlots(group: RowGroupDef): PhotoSlot[] {
   });
 }
 
-/** The first place without a photo, row by row, or a new row's first place; none when the table has no room for one. */
+/**
+ * The first place without a photo, row by row, or a new row's first place; none when the table has no room for one.
+ * A picture cell that continues a vertical merge (R22) is no place for a photo.
+ */
 export function nextFreeSlot(
   group: RowGroupDef, rows: Record<string, FormValue>[], limit: number,
 ): { row: number; slot: PhotoSlot } | undefined {
   const slots = photoSlots(group);
   if (slots.length === 0) return undefined;
+  const free = (row: number): PhotoSlot | undefined => slots.find((s) => isOpenCell(group, row, s.picture.id) && isBlank(rows[row]?.[s.picture.id]));
   for (let row = 0; row < rows.length; row += 1) {
-    const slot = slots.find((s) => isBlank(rows[row]?.[s.picture.id]));
+    const slot = free(row);
     if (slot) return { row, slot };
   }
-  return rows.length < limit ? { row: rows.length, slot: slots[0] } : undefined;
+  const slot = rows.length < limit ? free(rows.length) : undefined;
+  return slot && { row: rows.length, slot };
 }
 
 /* ---- Readings, the clock, the rows shown, blocks ---- */

@@ -313,7 +313,7 @@ const isBlank = (v: FormValue | undefined): boolean => v === undefined || v === 
 /**
  * The values the file is made from (and that become the last values): the form's own fields, but none that is left
  * empty or not in the form. A table keeps its rows up to the last one with a value, and only the columns that are not
- * left empty, so that an empty row added and left never makes the table grow.
+ * left empty, and in each row only its open cells (R22), so that an empty row added and left never makes the table grow.
  */
 export function fileValues(schema: FormSchema, values: DraftValues): DraftValues {
   const fields: Record<string, FormValue> = {};
@@ -324,7 +324,8 @@ export function fileValues(schema: FormSchema, values: DraftValues): DraftValues
   const rows: Record<string, Record<string, FormValue>[]> = {};
   for (const group of schema.rowGroups) {
     const kept = new Set(group.columns.filter((c) => !c.leftEmpty).map((c) => c.id));
-    const records = (values.rows[group.id] ?? []).map((row) => Object.fromEntries(Object.entries(row ?? {}).filter(([id]) => kept.has(id))));
+    // A cell that continues a vertical merge (R22) is not on the form: a value there is dropped.
+    const records = (values.rows[group.id] ?? []).map((row, i) => Object.fromEntries(Object.entries(row ?? {}).filter(([id]) => kept.has(id) && isOpenCell(group, i, id))));
     let end = records.length;
     while (end > 0 && Object.values(records[end - 1]).every(isBlank)) end -= 1;
     if (end > 0) rows[group.id] = records.slice(0, end);

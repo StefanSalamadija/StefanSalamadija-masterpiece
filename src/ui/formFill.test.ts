@@ -228,6 +228,13 @@ describe('numbers', () => {
 });
 
 describe('rows', () => {
+  it('makes the file from the open cells only: a value in a cell that continues a merge is dropped (R22)', () => {
+    const { schema } = importForm('m.docx', mergedRowsDocx());
+    const [group] = schema.rowGroups;
+    const values: DraftValues = { fields: {}, rows: { [group.id]: [{ 'g1.c1': 'Early', 'g1.c2': 'Demo A' }, { 'g1.c1': 'Late', 'g1.c2': 'Demo B' }] } };
+    expect(fileValues(schema, values).rows[group.id]).toEqual([{ 'g1.c1': 'Early', 'g1.c2': 'Demo A' }, { 'g1.c2': 'Demo B' }]);
+  });
+
   it('asks in each row only for the cells Word shows: not one that continues a vertical merge (R22)', () => {
     const [group] = importForm('m.docx', mergedRowsDocx()).schema.rowGroups;
     expect(rowColumns(group, 0).map((c) => c.label)).toEqual(['Shift', 'Demo task', 'Hours']);

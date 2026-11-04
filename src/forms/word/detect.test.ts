@@ -273,6 +273,30 @@ describe('detectWord', () => {
     ]);
   });
 
+  it('lets a content control\'s own name win over a guessed label, never leaves a field empty for a guess, and keeps a caption to its first paragraph and a short length', () => {
+    const c = new Controls();
+    const widths = [700, 4300, 900, 3738];
+    // No header: only the row's name, a fallback rule, is near the control.
+    const list = table(widths, [
+      row(widths, ['1.', 'Demo hatch item', { content: p(tickBox()) }, { content: p(c.textControl({ alias: 'Demo reading', tag: 'r', text: 'Type here', placeholder: true })) }]),
+      row(widths, ['2.', 'Demo stamp of the hold', { content: p(tickBox()) }, { content: p(c.formText()) }]),
+    ]);
+    const halves = [4819, 4819];
+    const lines = table(halves, [row(halves, [{ content: p(c.formText()) + p(run('Demo first caption')) + p(run('Demo second caption')) }, ''])]);
+    const long = 'Demo caption that runs on well past the sixty characters a label may show';
+    const longCell = table(halves, [row(halves, [{ content: p(c.formText() + run(` ${long}`)) }, ''])]);
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Guesses', code: 'TST-90', revision: '0' }), body: list + p() + lines + p() + longCell + p() }));
+    expect(s.fields.map((f) => [f.label, f.confidence, f.leftEmpty ?? false])).toEqual([
+      // The control's own name, as before the fallback rules: not the item's text.
+      ['Demo reading', 'high', false],
+      // A guess that reads like a signature or stamp is left for the person to confirm, not left empty.
+      ['Demo stamp of the hold', 'low', false],
+      ['Demo first caption', 'low', false],
+      ['Demo caption that runs on well past the sixty characters a…', 'low', false],
+    ]);
+    expect(long.length).toBeGreaterThan(60);
+  });
+
   it('never makes a cell that continues a vertical merge a field or a cell to fill, and drops a column or table of only such cells (R22)', () => {
     const bytes = mergedRowsDocx();
     const s = detect(bytes);

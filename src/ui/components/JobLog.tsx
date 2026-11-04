@@ -1,9 +1,11 @@
 import { useEffect, useId, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { fromBase64 } from '../../backup/crypto';
+import { isOpenCell } from '../../forms/cells';
 import type { FieldDef, FormValue, RowGroupDef } from '../../forms/types';
 import { rowTitle, visibleColumns } from '../formFill';
 import { photoSlots } from '../formHelpers';
+import type { PhotoSlot } from '../formHelpers';
 import { FormField } from './FormField';
 
 /*
@@ -82,7 +84,9 @@ export function isPhotoTable(group: RowGroupDef): boolean {
 export function PhotoGroup({ group, rows, showLabel, busy, error, onFile, onCells, onCell, onLeave, keyFor }: PhotoGroupProps) {
   const headingId = useId();
   const slots = photoSlots(group);
-  const used = rows.flatMap((row, index) => (slots.some((s) => !blank(row?.[s.picture.id])) ? [index] : []));
+  // A picture cell that continues a vertical merge (R22) is not on the form: it is neither shown nor offered.
+  const shown = (index: number): PhotoSlot[] => slots.filter((s) => isOpenCell(group, index, s.picture.id) && !blank(rows[index]?.[s.picture.id]));
+  const used = rows.flatMap((_, index) => (shown(index).length > 0 ? [index] : []));
   return (
     <div class="fill-group" aria-labelledby={showLabel ? headingId : undefined} role={showLabel ? 'group' : undefined}>
       {showLabel && <h4 id={headingId}>{group.label}</h4>}
@@ -90,7 +94,7 @@ export function PhotoGroup({ group, rows, showLabel, busy, error, onFile, onCell
       {used.map((index) => (
         <fieldset key={index} class="fill-row" data-row={index}>
           <legend>{rowTitle(group, index)}</legend>
-          {slots.filter((s) => !blank(rows[index]?.[s.picture.id])).map((slot) => {
+          {shown(index).map((slot) => {
             const photoId = rows[index][slot.picture.id] as string;
             const choice = slot.choice as FieldDef | undefined;
             return (

@@ -6,7 +6,7 @@ import type { Package } from '../package';
 import type { FieldDef, FormSchema, RowGroupDef } from '../types';
 import { parseXml } from '../xml';
 import { Addresser } from './address';
-import { hasWords, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
+import { hasAlias, hasWords, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
 import { otherStories } from './stories';
 import { W, Walker, child, clean, flatTokens, itemsOf, paragraphsIn, rowLayout, textOf, wVal } from './walk';
 import type { Block, Cell, Para, RawField, Repeat, Row, Table, Token } from './walk';
@@ -68,6 +68,11 @@ type Found = { text: string; unsure: boolean } | undefined;
 /** A label as `Found`: a plain text is sure. */
 function foundOf(label: string | Found): Found {
   return typeof label === 'string' ? { text: label, unsure: false } : label;
+}
+
+/** A found label as `makeField` takes it: a sure one as `text`, a guess as `guess` (tried after a control's alias). */
+function foundText(found: Found): { text: string | undefined; guess?: string } {
+  return found?.unsure ? { text: undefined, guess: found.text } : { text: found?.text };
 }
 
 /** A label that only a fallback rule found. */
@@ -201,7 +206,7 @@ class Detector {
 
   private addField(field: RawField, found: Found, shared = false): void {
     const n = this.fields.length + 1;
-    this.fields.push(makeField(field, { id: `f${n}`, text: found?.text, fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared, unsure: found?.unsure }));
+    this.fields.push(makeField(field, { id: `f${n}`, ...foundText(found), fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared }));
   }
 
   /**
@@ -211,7 +216,11 @@ class Detector {
    */
   private addFields(tokens: readonly Token[], label: (t: Token & { t: 'field' }, i: number) => string | Found): void {
     const found = tokens.map((t, i) => (t.t === 'field' ? foundOf(label(t, i)) : undefined));
-    const labels = found.map((f) => f?.text);
+    // The label each field ends up with: a guess gives way to a content control's own name (`makeField`).
+    const labels = found.map((f, i) => {
+      const t = tokens[i];
+      return f?.unsure && t?.t === 'field' && hasAlias(t.field) ? undefined : f?.text;
+    });
     const named = labels.filter(hasWords).map(labelText);
     const added = new Map<string, FieldDef[]>();
     tokens.forEach((t, i) => {
@@ -502,7 +511,7 @@ class Detector {
         if (t.t !== 'field' || c.cell.vMerge === 'continue') return;
         const k = columns.length + 1;
         const found = foundOf(this.cellLabel(rows, i, ci, ti, t.field) ?? unsure(farLabel(rows, i, ci, ti, t.field)));
-        columns.push(makeField(t.field, { id: `g${n}.c${k}`, text: found?.text, fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)), unsure: found?.unsure }));
+        columns.push(makeField(t.field, { id: `g${n}.c${k}`, ...foundText(found), fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)) }));
       }));
     }
     this.addRepeat(section, items, columns, title);
@@ -700,21 +709,35 @@ function headerOverFields(rows: RowInfo[], i: number, cell: Cell): string | unde
   return undefined;
 }
 
+/** A caption after a field is cut to about this many characters, at a word boundary. */
+const MAX_CAPTION = 60;
+
 /**
- * The text after a field in its own cell, to the cell's end (paragraph ends count as spaces), when that text has
- * words: `[field] large`, `[field]` over `(time of day)`. Text that another field or box follows is that one's label, so
- * then there is none. A checkbox's words are found by `inlineLabel`.
+ * The caption after a field in its own cell: the rest of the field's paragraph when it has words (`[field] large`),
+ * else the first paragraph after it that has words (`[field]` over `(time of day)`), cut to `MAX_CAPTION` characters at
+ * a word boundary. When another field or box follows anywhere in the cell, the text before it is that one's label
+ * (`inlineLabel` reads across paragraphs), so then there is none. A checkbox's words are found by `inlineLabel`.
  */
 function captionAfter(tokens: readonly Token[], ti: number, field: RawField): string | undefined {
   if (isCheckbox(field)) return undefined;
-  const parts: string[] = [];
-  for (const t of tokens.slice(ti + 1)) {
-    if (t.t === 'text') parts.push(t.s);
-    else if (t.t === 'break') parts.push(' ');
-    else if (t.t !== 'object') return undefined;
+  const rest = tokens.slice(ti + 1);
+  if (rest.some((t) => t.t !== 'text' && t.t !== 'break' && t.t !== 'object')) return undefined;
+  let line: string[] = [];
+  for (const t of [...rest, { t: 'break' } as Token]) {
+    if (t.t === 'text') line.push(t.s);
+    if (t.t !== 'break') continue;
+    const text = clean(line.join(''));
+    if (hasWords(text)) return shortCaption(text);
+    line = [];
   }
-  const text = clean(parts.join(''));
-  return hasWords(text) ? text : undefined;
+  return undefined;
+}
+
+/** A text cut to `MAX_CAPTION` characters at the last space before, with `…` to show the cut. */
+function shortCaption(text: string): string {
+  if (text.length <= MAX_CAPTION) return text;
+  const cut = text.lastIndexOf(' ', MAX_CAPTION);
+  return `${text.slice(0, cut > 0 ? cut : MAX_CAPTION).trimEnd()}…`;
 }
 
 /**

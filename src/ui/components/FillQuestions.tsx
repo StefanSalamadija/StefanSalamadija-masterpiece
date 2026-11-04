@@ -149,8 +149,8 @@ export function FillQuestions(p: FillQuestionsProps) {
     setPicking(undefined);
     const rows = engine.crewRows(group, chosen);
     const limit = rowLimit(group, template.kind);
-    const { placed } = placeRows(state.values, group.id, rows, limit);
-    change(withValues((v) => placeRows(v, group.id, rows, limit).values));
+    const { placed } = placeRows(state.values, group, rows, limit);
+    change(withValues((v) => placeRows(v, group, rows, limit).values));
     if (placed < rows.length) p.notify(`Added ${placed} of ${rows.length}: this form has room for ${limit} rows only.`);
   }
 

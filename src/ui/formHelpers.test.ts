@@ -123,6 +123,15 @@ describe('All OK', () => {
     expect(rows[2]).toEqual({ [condition.id]: 'Satisfactory' });
     expect(applyAllOk(start, conditions, c, 'Satisfactory', allOkValues, true).values.rows[g.id][1][condition.id]).toBe('Satisfactory');
   });
+
+  it('sets nothing in a cell that continues a vertical merge (R22)', () => {
+    const g = { ...conditions.rowGroups[0], closed: { [conditions.rowGroups[0].columns[0].id]: [1] } };
+    const condition = g.columns[0];
+    const schema = { ...conditions, rowGroups: [g] };
+    const c = allOkButtons(schema, setupOf(schema), allOkValues)[0];
+    const rows = applyAllOk(EMPTY, schema, c, 'Satisfactory', allOkValues, true).values.rows[g.id];
+    expect([rows[0][condition.id], rows[1][condition.id], rows[2][condition.id]]).toEqual(['Satisfactory', undefined, 'Satisfactory']);
+  });
 });
 
 describe('Remarks under a row that is not OK', () => {
@@ -151,14 +160,25 @@ describe('rows from the crew', () => {
 
   it('fills the free rows first, then adds rows', () => {
     const start: DraftValues = { fields: {}, rows: { [g.id]: [{ [name.id]: 'X' }, {}, { [name.id]: 'Y' }] } };
-    const placed = placeRows(start, g.id, people, Infinity);
+    const placed = placeRows(start, g, people, Infinity);
     expect(placed.placed).toBe(3);
     expect(placed.values.rows[g.id].map((r) => r[name.id])).toEqual(['X', 'A', 'Y', 'B', 'C']);
     expect(start.rows[g.id]).toHaveLength(3);
   });
 
+  it('puts each person only in a row whose cells are open, passing rows whose Name cell continues a merge (R22)', () => {
+    const merged = { ...g, closed: { [name.id]: [1, 2] } };
+    const placed = placeRows(EMPTY, merged, people, Infinity);
+    expect(placed.placed).toBe(3);
+    expect(placed.values.rows[g.id].map((r) => r[name.id])).toEqual(['A', undefined, undefined, 'B', 'C']);
+    // When the template's last row is closed, the rows added after it are too: no room is made up.
+    const last = { ...g, closed: { [name.id]: [g.capacity - 1] } };
+    const full: DraftValues = { fields: {}, rows: { [g.id]: Array.from({ length: g.capacity - 1 }, () => ({ [name.id]: 'X' })) } };
+    expect(placeRows(full, last, people, Infinity).placed).toBe(0);
+  });
+
   it('stops at the form\'s room', () => {
-    const placed = placeRows(EMPTY, g.id, people, 2);
+    const placed = placeRows(EMPTY, g, people, 2);
     expect(placed.placed).toBe(2);
     expect(placed.values.rows[g.id]).toHaveLength(2);
   });
@@ -190,6 +210,10 @@ describe('the job log', () => {
     const full = [{ 'g2.c1': 'p1', 'g2.c3': 'p2', 'g2.c5': 'p3' }];
     expect(nextFreeSlot(pictures, full, Infinity)).toEqual({ row: 1, slot: slots[0] });
     expect(nextFreeSlot(pictures, full, 1)).toBeUndefined();
+    // A picture cell that continues a merge (R22) is never offered.
+    const merged = { ...pictures, closed: { 'g2.c1': [0] } };
+    expect(nextFreeSlot(merged, [], Infinity)).toEqual({ row: 0, slot: slots[1] });
+    expect(nextFreeSlot({ ...pictures, closed: { 'g2.c1': [0], 'g2.c3': [0], 'g2.c5': [0] } }, [], 1)).toBeUndefined();
   });
 });
 

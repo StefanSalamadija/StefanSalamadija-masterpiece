@@ -145,21 +145,28 @@ function definition(o: { id: string; label: string; section: string; loc: string
   const def: FieldDef = { id: o.id, kind: d.kind, label: o.label, section: o.section, loc: o.loc, confidence: raw === undefined || o.unsure ? 'low' : 'high' };
   if (d.options !== undefined) def.options = d.options;
   if (d.formatHint !== undefined) def.formatHint = d.formatHint;
-  if (raw !== undefined && isSignatureLabel(o.label)) def.leftEmpty = true;
+  // A guessed label (R23) is for the person to confirm, so it never leaves the field empty on its own.
+  if (raw !== undefined && !o.unsure && isSignatureLabel(o.label)) def.leftEmpty = true;
   return def;
 }
 
 /**
  * The definition of a found field. `text` is the nearby text that names it, if any; failing that a content control's
- * alias names it; failing both it is called `fallback` (`Field <n>`, `Column <n>`) with low confidence. `shared` says
- * that another field of the same cell or line has the same label (see `describe`). `unsure` says that only a fallback
- * rule found `text` (R23): the field keeps it as its label, with low confidence, for the person to confirm in setup.
+ * alias names it; failing both, `guess` (text that only a fallback rule found, R23) names it, with low confidence, for
+ * the person to confirm in setup; failing all three it is called `fallback` (`Field <n>`, `Column <n>`) with low
+ * confidence. `shared` says that another field of the same cell or line has the same label (see `describe`).
  */
-export function makeField(field: RawField, o: { id: string; text: string | undefined; fallback: string; section: string; loc: string; shared?: boolean; unsure?: boolean }): FieldDef {
+export function makeField(field: RawField, o: { id: string; text: string | undefined; guess?: string; fallback: string; section: string; loc: string; shared?: boolean }): FieldDef {
   const alias = aliasOf(field);
-  const raw = hasWords(o.text) ? o.text : hasWords(alias) ? alias : undefined;
-  const unsure = raw !== undefined && raw === o.text && o.unsure === true;
+  const sure = hasWords(o.text) ? o.text : hasWords(alias) ? alias : undefined;
+  const raw = sure ?? (hasWords(o.guess) ? o.guess : undefined);
+  const unsure = sure === undefined && raw !== undefined;
   return definition({ ...o, label: raw === undefined ? o.fallback : labelText(raw), unsure }, describe(field, raw, o.shared ?? false), raw);
+}
+
+/** The name a content control's author gave it, when it has words: it names the field before any guess does. */
+export function hasAlias(field: RawField): boolean {
+  return hasWords(aliasOf(field));
 }
 
 /** The definition of a cell column of a plain row group, from its header text: its kind and hint come from the label. */
