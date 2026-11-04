@@ -224,10 +224,10 @@ type Reference = { template: FormValue | undefined } | { clone: { from: FormValu
  * - a left-empty field, or one the draft leaves blank, is not written, so it reads exactly as the template has it (a
  *   control that already held text, a ticked default);
  * - in a row the writer cloned, which has no template row of its own, a blank column reads blank: `null`, `''`, or an
- *   unticked checkbox (the writer clears a clone's columns). A picture or choice column may also read as it does in
- *   the row it was cloned from: the writer never clears a picture (a stock image stays), nor a tick column. A choice
- *   may also read as its drop-down's default entry: a legacy drop-down with no prompt entry cannot show nothing, so a
- *   cleared one shows its default. Text, date and checkbox columns stay strict;
+ *   unticked checkbox (the writer clears a clone's columns). A picture column may also read as it does in the row it
+ *   was cloned from: the writer never clears a picture (a stock image stays). A choice may instead read as its
+ *   drop-down's default entry: a legacy drop-down with no prompt entry cannot show nothing, so a cleared one shows its
+ *   default. Every other column stays strict: a choice that still shows the row it was cloned from is refused;
  * - a filled picture, by presence: it shows a picture that the writer added to the file. A control that showed a
  *   picture in the template reads as filled without being written, so reading as filled is not enough;
  * - any other filled value reads back as one of the values `expect` gives (both sides `''` as `null`).
@@ -236,7 +236,8 @@ function readsRight(field: FieldDef, value: FormValue | undefined, back: FormVal
   if (field.leftEmpty || isBlank(value)) {
     if ('template' in ref) return back === ref.template;
     if (back === null || back === '' || (field.kind === 'checkbox' && back === false)) return true;
-    if (field.kind === 'picture' || field.kind === 'choice') return (back !== undefined && back === ref.clone.from) || (field.kind === 'choice' && back !== undefined && back === ref.clone.fallback);
+    if (field.kind === 'picture') return back !== undefined && back === ref.clone.from;
+    if (field.kind === 'choice') return back !== undefined && back === ref.clone.fallback;
     return false;
   }
   if (field.kind === 'picture') return typeof back === 'string' && changed.has(back) && output.entries.has(back);

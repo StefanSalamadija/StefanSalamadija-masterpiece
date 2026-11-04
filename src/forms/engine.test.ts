@@ -612,6 +612,25 @@ describe('verifyOutput passes correct files (fix round 2)', () => {
     expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
   });
 
+  it('refuses a blank choice in a cloned job that still shows the choice of the row it was cloned from (M1)', () => {
+    const input = inputOf(noPrompt(true), (s) => jobs(s, 5));
+    const made = assembled(input);
+    expect(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).not.toThrow();
+    // The fourth job is a clone of the template's last, which shows Completed; the writer cleared it to Pending.
+    corrupt(made, (doc) => {
+      const lists = Array.from(doc.getElementsByTagNameNS(W, 'ddList')).filter((list) => list.getElementsByTagNameNS(W, 'listEntry')[1]?.getAttributeNS(W, 'val') === 'Completed');
+      const clone = lists[3]!;
+      for (const old of Array.from(clone.getElementsByTagNameNS(W, 'result'))) clone.removeChild(old);
+      const result = doc.createElementNS(W, 'w:result');
+      result.setAttributeNS(W, 'w:val', '1');
+      clone.insertBefore(result, clone.firstChild);
+    });
+    const g = jobsGroup(input.schema);
+    const status = g.columns.find((c) => c.label === 'Status')!;
+    expect(readWordValues(made.output, input.schema, extraRowsOf(input.schema, input.values)).rows[g.id]!.map((r) => r[status.id])).toEqual(['Pending', 'Pending', 'Completed', 'Completed', 'Pending']);
+    expect(expectIntegrityError(() => verifyOutput(made.original, made.output, made.changed, input.schema, input.values)).reason).toContain('(Status) in row 4');
+  });
+
   it('a blank picture in a cloned row of a template whose pictures show a stock image', () => {
     const stock: Fixture = { name: 'stock', fileName: 'weekly.dotx', make: () => editedDocument(weeklyJobsDotx(), (x) => x.replace(/<w:showingPlcHdr\/>(<w:picture\/>)/g, '$1')) };
     const input = inputOf(stock, (s) => {

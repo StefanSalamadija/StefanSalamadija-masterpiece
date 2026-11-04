@@ -6,7 +6,7 @@ import { contentControlsDocx, fieldRowsDocx, mergedRowsDocx, permitDocx, toolbox
 import { CONTENT_TYPE } from '../testing/zip';
 import { FormWriteError } from '../errors';
 import type { DraftValues, FieldDef, FormSchema } from '../types';
-import { parseXml } from '../xml';
+import { parseXml, serializeXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
 import { readWordValues } from './read';
 import { extraRowsOf, writeWord } from './write';
@@ -372,6 +372,47 @@ describe('writeWord', () => {
       { [itemCol.id]: null, [noteCol.id]: null },
     ]);
     expect(partText(out, MAIN)!.split('Old text')).toHaveLength(2);
+  });
+
+  it.each([
+    ['an X, as the writer puts in a cell with no box', '<w:r><w:t>X</w:t></w:r>', ''],
+    ['a ticked box symbol', '<w:r><w:sym w:font="Wingdings" w:char="F0FE"/></w:r>', 'F0A8'],
+    ['a ticked box written as text', '<w:r><w:t>☒</w:t></w:r>', '☐'],
+  ])('unticks a tick column in a cloned row whose template row shows %s', (_, ticked, cleared) => {
+    const c = new Controls();
+    const widths = [3000, 3000, 1819, 1819];
+    const pkg = readPackage(wordPackage({
+      kind: 'docx', header: headerBlock(c, { title: 'Demo Checks', code: 'TST-91', revision: '00' }),
+      body: table(widths, [headerRow(widths, ['Name', 'Rank', 'Yes', 'No']), ...Array.from({ length: 3 }, () => row(widths, [{ content: p(c.formText()) }, { content: p(c.formText()) }, '', '']))]) + p(),
+    }));
+    const detected = detectWord(pkg, 'docx', 'checks.docx');
+    const [plain] = detected.rowGroups;
+    expect(plain.columns.map((col) => col.label)).toEqual(['Name', 'Rank', 'Yes', 'No']);
+    // A tick column (unreachable from detection today): one choice over the Yes and No cells of each row.
+    const [name, rank, yes, no] = plain.columns;
+    const tick: FieldDef = { id: `${plain.id}.c3`, kind: 'choice', label: 'Done', section: '', loc: `${yes.loc}+${no.loc}`, options: ['Yes', 'No'], confidence: 'high' };
+    const group = { ...plain, columns: [name, rank, tick] };
+    const s: FormSchema = { ...detected, rowGroups: [group] };
+    // The template's last row shows Yes ticked.
+    const doc = mainDoc(pkg);
+    const lastRow = all(doc, W, 'tr').at(-1)!;
+    const yesCell = locateColumn(lastRow, yes)!;
+    if (yesCell.kind !== 'cell') throw new Error('not a cell');
+    all(yesCell.tc, W, 'p')[0].appendChild(parseXml(`<x xmlns:w="${W}">${ticked}</x>`).documentElement.firstChild!.cloneNode(true));
+    pkg.entries.set(MAIN, bytesOf(serializeXml(doc)));
+    expect(readWordValues(pkg, s).rows[group.id].map((r) => r[tick.id])).toEqual([null, null, 'Yes']);
+
+    const vals = values({}, { [group.id]: Array.from({ length: 5 }, (_, i) => ({ [name.id]: `Person ${i}` })) });
+    const { out } = fill(pkg, s, vals);
+    // The template's own last row is not written, so it keeps its tick; the clones of it do not.
+    expect(readWordValues(out, s, extraRowsOf(s, vals)).rows[group.id].map((r) => r[tick.id])).toEqual([null, null, 'Yes', null, null]);
+    const clones = all(mainDoc(out), W, 'tr').slice(-2);
+    for (const clone of clones) {
+      const target = locateColumn(clone, tick)!;
+      if (target.kind !== 'tick') throw new Error('not a tick');
+      const [shown] = target.cells;
+      expect(cleared === 'F0A8' ? symbols(shown) : [shown.textContent]).toEqual([cleared]);
+    }
   });
 
   it('turns a .dotx into a .docx: the main part\'s content type', () => {

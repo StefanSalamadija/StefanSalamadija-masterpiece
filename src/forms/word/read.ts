@@ -48,9 +48,11 @@ import { A, MC, R, W, W14, child, isEl, kids, wAttr, wVal } from './walk';
 export const EMPTY_FORMTEXT = '\u2002'.repeat(5);
 const EN_SPACES_ONLY = /^\u2002+$/;
 /** `w:sym` characters of a ticked box (Wingdings checked boxes, and the cross `F078`). */
-const TICKED_SYMBOLS = new Set(['F0FE', 'F0FD', 'F0FB', 'F0FC', 'F078']);
+export const TICKED_SYMBOLS = new Set(['F0FE', 'F0FD', 'F0FB', 'F0FC', 'F078']);
 /** A ticked box written as text: ☒ ☑ ✓ ✔ (U+2612, U+2611, U+2713, U+2714). */
 const TICKED_TEXT = /[\u2612\u2611\u2713\u2714]/;
+/** `TICKED_TEXT`, for replacing every one. */
+export const TICKED_TEXT_ALL = new RegExp(TICKED_TEXT.source, 'g');
 
 /** The next node in document order; with `skipChildren`, after `node`'s own subtree. */
 export function nextNode(node: Node, skipChildren = false): Node | null {

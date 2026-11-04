@@ -8,7 +8,7 @@ import type { DraftValues, FieldDef, FormSchema, FormValue, RowGroupDef } from '
 import { parseXml, serializeXml, xmlText } from '../xml';
 import { locateColumn, locateWord } from './address';
 import type { WordTarget } from './address';
-import { EMPTY_FORMTEXT, controlOf, fieldRange, isOn, partsOf } from './read';
+import { EMPTY_FORMTEXT, TICKED_SYMBOLS, TICKED_TEXT_ALL, controlOf, fieldRange, isOn, partsOf, textIn } from './read';
 import { dirOf, relsPathOf } from './rels';
 import { A, BOX_CHARS, BOX_TEXT, R, W, W14, WP, child, isEl, kids, rowCells, rowLayout, wAttr } from './walk';
 
@@ -657,6 +657,32 @@ function writeTick(cells: Element[], index: number): void {
   p.appendChild(textRun(tc.ownerDocument, markProperties(p), 'X'));
 }
 
+/** The empty box a ticked box symbol (`isTicked`) becomes again: Wingdings' empty box. */
+const EMPTY_SYMBOL = 'F0A8';
+/** The empty box a ticked box written as text (☒ ☑ ✓ ✔) becomes again: ☐. */
+const EMPTY_TEXT = '\u2610';
+
+/**
+ * The reverse of `writeTick`, for a tick column of a cloned row: no cell shows a tick afterwards. A ticked box symbol
+ * becomes the empty box symbol, a ticked box written as text becomes ☐, and a cell that shows only an `X` (as the
+ * writer puts in a cell with no box) shows nothing.
+ */
+function untick(cells: Element[]): void {
+  for (const tc of cells) {
+    for (const symbol of Array.from(tc.getElementsByTagNameNS(W, 'sym'))) {
+      if (TICKED_SYMBOLS.has((wAttr(symbol, 'char') ?? '').toUpperCase())) setW(symbol, 'char', EMPTY_SYMBOL);
+    }
+    const onlyX = /^\s*[Xx]\s*$/.test(textIn(tc));
+    for (const t of Array.from(tc.getElementsByTagNameNS(W, 't'))) {
+      const text = t.textContent ?? '';
+      const next = onlyX ? text.replace(/[Xx]/g, '') : text.replace(TICKED_TEXT_ALL, EMPTY_TEXT);
+      if (next === text) continue;
+      while (t.firstChild) t.removeChild(t.firstChild);
+      t.appendChild(t.ownerDocument.createTextNode(next));
+    }
+  }
+}
+
 /**
  * Writes text into a table cell of a plain group: its first paragraph gets one run, in the paragraph's properties.
  * Any other paragraphs stay (a cell often holds two empty ones to make its row taller); `cellText` reads past them.
@@ -715,6 +741,7 @@ function clearTarget(target: WordTarget, field: FieldDef): void {
     case 'formcheck': writeFormCheck(target.begin, false); break;
     case 'formdrop': writeFormDrop(target.begin, undefined, field); break;
     case 'sdt': writeControl(target.sdt, undefined, field); break;
+    case 'tick': untick(target.cells); break;
     default: break; // a cell of a plain group: the row cloned is empty
   }
 }
