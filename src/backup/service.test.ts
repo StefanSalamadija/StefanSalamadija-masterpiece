@@ -1176,6 +1176,8 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a form draft has photo ids that are not a list', 'formDrafts', { photoIds: 'pho-1' }],
     ['a form draft has auto ids that are not a list of ids', 'formDrafts', { autoIds: ['f1', 3] }],
     ['a form draft has no code', 'formDrafts', { code: 7 }],
+    ['a form draft has a revision that is not text', 'formDrafts', { revision: 1 }],
+    ['last values have a revision that is not text', 'formLastValues', { revision: null }],
     ['last values have no shipId', 'formLastValues', { shipId: undefined }],
     ['last values have no values', 'formLastValues', { values: null }],
     ['last values have no code', 'formLastValues', { code: undefined }],
@@ -1194,6 +1196,14 @@ describe('prepareImport rejects what it cannot trust', () => {
     await expect(prepareImport(b, await fileWith('formTemplates', { shipId: undefined }), PW)).resolves.toBeDefined();
     await expect(prepareImport(b, await fileWith('formPhotos', { deleted: true, jpegBase64: '' }), PW)).resolves.toBeDefined();
     await expect(prepareImport(b, await fileWith('formDrafts', { autoIds: ['f1', 'f3'] }), PW)).resolves.toBeDefined(); // R18
+  });
+
+  it('takes the revision of a draft or of last values as optional text (R25)', async () => {
+    const b = freshDb();
+    for (const table of ['formDrafts', 'formLastValues'] as const) {
+      await expect(prepareImport(b, await fileWith(table, { revision: '01 / 01.06.2026' }), PW), table).resolves.toBeDefined();
+      await expect(prepareImport(b, await fileWith(table, { revision: undefined }), PW), table).resolves.toBeDefined();
+    }
   });
 
   it('does not ask for a shipId on a ship', async () => {

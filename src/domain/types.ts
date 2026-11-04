@@ -70,12 +70,19 @@ export interface FormDraft extends BaseRecord {
    * works them out and fixes them at that draft's first change.
    */
   autoIds?: string[];
+  /**
+   * The revision of the form the draft was made with (R25). Its values are kept by that revision's field ids, so a draft
+   * is taken by code into another copy of the form only when that copy has the same revision. Missing on an older record.
+   */
+  revision?: string;
 }
 /**
  * The values of the last file made from a form on a ship, for "start from last". One live record per ship and key. `code`
- * is the key (see `lastValuesKey`): the form's code, or `template:<templateId>` for a form that has none.
+ * is the key (see `lastValuesKey`): the form's code, or `template:<templateId>` for a form that has none. `revision` is
+ * the revision of the form they were made with (R25): they are used only for a form of that revision. Missing on an
+ * older record.
  */
-export interface FormLastValues extends BaseRecord { shipId: string; code: string; values: DraftValues }
+export interface FormLastValues extends BaseRecord { shipId: string; code: string; values: DraftValues; revision?: string }
 /** A photo taken for a draft, as JPEG in standard base64. A deleted photo keeps no image: its `jpegBase64` is `''`. */
 export interface FormPhoto extends BaseRecord { shipId: string; draftId: string; jpegBase64: string; width: number; height: number }
 export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange

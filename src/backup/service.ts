@@ -103,6 +103,11 @@ function isTimestamp(value: unknown): boolean {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
 
+/** Text, or nothing: a field that an older record has not got. */
+function isOptionalText(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
 /** Base64 text, as the forms tables keep their files and photos in (`''` for a photo's tombstone). */
 function isBase64Text(value: unknown): boolean {
   return typeof value === 'string' && isBase64(value);
@@ -122,11 +127,12 @@ function hasOwnFields(name: TableName, r: Record<string, unknown>): boolean {
   switch (name) {
     // A document is found by its contract; without one it would belong to nobody.
     case 'crewDocuments': return typeof r.crewId === 'string';
-    // A draft is filled from its template, found by its id or its code.
+    // A draft is filled from its template, found by its id or its code and revision (R25; an older one has no revision).
     case 'formDrafts':
       return typeof r.templateId === 'string' && typeof r.code === 'string' && isObject(r.values) && Array.isArray(r.photoIds)
-        && (r.autoIds === undefined || (Array.isArray(r.autoIds) && r.autoIds.every((id) => typeof id === 'string')));
-    case 'formLastValues': return typeof r.code === 'string' && isObject(r.values);
+        && (r.autoIds === undefined || (Array.isArray(r.autoIds) && r.autoIds.every((id) => typeof id === 'string')))
+        && isOptionalText(r.revision);
+    case 'formLastValues': return typeof r.code === 'string' && isObject(r.values) && isOptionalText(r.revision);
     // A photo is found by its draft.
     case 'formPhotos': return typeof r.draftId === 'string' && isBase64Text(r.jpegBase64);
     default: return true;

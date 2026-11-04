@@ -176,7 +176,7 @@ describe('openDraft', () => {
     const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
     expect(draft).toMatchObject({
       scope: 'ship', deleted: false, shipId: 'ship-1', templateId: template.id, code: 'TST-01', period: '2026-10-28',
-      values: { fields: {}, rows: {} }, photoIds: [],
+      values: { fields: {}, rows: {} }, photoIds: [], revision: '00 / 01.01.2026', // R25: the revision it is made with
     });
     expect(await db.formDrafts.get(draft.id)).toEqual(draft);
   });
@@ -233,12 +233,27 @@ describe('openDraft', () => {
     expect(await db.formDrafts.count()).toBe(2);
   });
 
-  it("continues a draft handed over from a copy of the same form that is not here, found by the form's code", async () => {
+  it("continues a draft handed over from a copy of the same form that is not here, found by the form's code and revision", async () => {
     const { db, template } = await withTemplate();
     const handedOver = await createRecord<FormDraft>(db, 'formDrafts', {
-      shipId: 'ship-1', templateId: 'their-copy', code: 'TST-01', period: '2026-10-27', values: values('Handed over'), photoIds: [],
+      shipId: 'ship-1', templateId: 'their-copy', code: 'TST-01', revision: '00 / 01.01.2026', period: '2026-10-27', values: values('Handed over'), photoIds: [],
     });
+    expect(await findDraft(db, 'ship-1', template)).toEqual(handedOver);
     expect((await openDraft(db, 'ship-1', template, '2026-10-28')).id).toBe(handedOver.id);
+  });
+
+  it('never takes by code a draft made with another revision, or with no revision recorded (R25): its ids may be other boxes', async () => {
+    const { db, template } = await withTemplate();
+    for (const revision of ['01 / 01.06.2026', undefined]) {
+      await createRecord<FormDraft>(db, 'formDrafts', {
+        shipId: 'ship-1', templateId: `their-copy-${revision}`, code: 'TST-01', ...(revision === undefined ? {} : { revision }), period: '2026-10-27',
+        values: values('Other revision'), photoIds: [],
+      });
+    }
+    expect(await findDraft(db, 'ship-1', template)).toBeUndefined();
+    const own = await openDraft(db, 'ship-1', template, '2026-10-28');
+    expect(own).toMatchObject({ templateId: template.id, revision: '00 / 01.01.2026', values: { fields: {}, rows: {} } });
+    expect(await db.formDrafts.count()).toBe(3); // the other drafts are left as they are
   });
 
   it('does not take the draft of another form here that has the same code, nor match forms that have no code', async () => {
@@ -375,10 +390,32 @@ describe('lastValuesFor', () => {
     at('2026-10-28T10:00:00.000Z');
     const gone = await createRecord<FormLastValues>(db, 'formLastValues', { shipId: 'ship-1', code: 'TST-01', values: values('Gone') });
     await softDelete(db, 'formLastValues', gone.id);
-    const form = (code: string) => ({ id: 'tpl-x', code });
+    const form = (code: string) => ({ id: 'tpl-x', code, revision: undefined as unknown as string });
     expect((await lastValuesFor(db, 'ship-1', form('TST-01')))?.id).toBe(newest.id);
     expect(await lastValuesFor(db, 'ship-2', form('TST-01'))).toBeUndefined();
     expect(await lastValuesFor(db, 'ship-1', form('TST-02'))).toBeUndefined();
+  });
+});
+
+describe('lastValuesFor and the revision (R25)', () => {
+  it('gives the last values only when they were made with the revision of the form here, and ignores them otherwise', async () => {
+    const db = freshDb();
+    const form = (revision: string) => ({ id: 'tpl-x', code: 'TST-01', revision });
+    const last = await createRecord<FormLastValues>(db, 'formLastValues', { shipId: 'ship-1', code: 'TST-01', revision: '00', values: values('Old') });
+    expect(await lastValuesFor(db, 'ship-1', form('00'))).toEqual(last);
+    expect(await lastValuesFor(db, 'ship-1', form('01'))).toBeUndefined();
+    // An older record, with no revision, is not known to fit any.
+    const db2 = freshDb();
+    await createRecord<FormLastValues>(db2, 'formLastValues', { shipId: 'ship-1', code: 'TST-01', values: values('Old') });
+    expect(await lastValuesFor(db2, 'ship-1', form('00'))).toBeUndefined();
+  });
+
+  it('closeDraft keeps the revision of the draft with the last values, and gives it to the rollover draft', async () => {
+    const { db, template } = await withTemplate();
+    const draft = await openDraft(db, 'ship-1', template, '2026-10-28');
+    await closeDraft(db, draft.id, values('Done'), { period: '2026-W45', values: values('Next') });
+    expect(await lastValuesFor(db, 'ship-1', template)).toMatchObject({ revision: '00 / 01.01.2026', values: values('Done') });
+    expect(await findDraft(db, 'ship-1', template)).toMatchObject({ revision: '00 / 01.01.2026', period: '2026-W45' });
   });
 });
 
@@ -706,13 +743,31 @@ describe('replaceTemplate', () => {
     const draft = await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, filled('MV OCEAN STAR'));
     const last = (await lastValuesFor(db, 'ship-2', template))!;
     at('2026-10-29T08:00:00.000Z');
-    // The same layout re-issued: only the revision changes.
+    // The same file again: nothing changes.
+    const again = await replaceTemplate(db, template.id, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: rev00 });
+    expect(again).toMatchObject({ unmatched: [], removed: [], droppedFromDrafts: 0, droppedFromLastValues: 0 });
+    expect(await db.formDrafts.get(draft.id)).toEqual(draft);
+    expect(await db.formLastValues.get(last.id)).toEqual(last);
+  });
+
+  it('keeps the stored revision of the drafts and last values it moves up to date, values or not (R25)', async () => {
+    const { db, template } = await library();
+    await closeDraft(db, (await openDraft(db, 'ship-2', template, '2026-10-27')).id, filled('MV NORTH WIND'));
+    const draft = await saveDraftValues(db, (await openDraft(db, 'ship-1', template, '2026-10-28')).id, filled('MV OCEAN STAR'));
+    const last = (await lastValuesFor(db, 'ship-2', template))!;
+    expect([draft.revision, last.revision]).toEqual(['00 / 01.01.2026', '00 / 01.01.2026']);
+    at('2026-10-29T08:00:00.000Z');
+    // The same layout re-issued: only the revision changes, and it is all that is written.
     const same = { ...rev00, identity: { ...rev00.identity, revision: '01 / 01.06.2026' } };
     const result = await replaceTemplate(db, template.id, { fileName: 'toolbox.docx', bytes: rev00Bytes, kind: 'docx', schema: same });
     expect(result).toMatchObject({ unmatched: [], removed: [], droppedFromDrafts: 0, droppedFromLastValues: 0 });
-    expect(result.template.revision).toBe('01 / 01.06.2026');
-    expect(await db.formDrafts.get(draft.id)).toEqual(draft);
-    expect(await db.formLastValues.get(last.id)).toEqual(last);
+    const { deviceId } = await getSettings(db);
+    const stamp = { revision: '01 / 01.06.2026', updatedAt: '2026-10-29T08:00:00.000Z', updatedBy: deviceId };
+    expect(await db.formDrafts.get(draft.id)).toEqual({ ...draft, ...stamp });
+    expect(await db.formLastValues.get(last.id)).toEqual({ ...last, ...stamp });
+    // So the form here still finds both.
+    expect((await findDraft(db, 'ship-1', result.template))?.id).toBe(draft.id);
+    expect((await lastValuesFor(db, 'ship-2', result.template))?.id).toBe(last.id);
   });
 
   it('moves the last values of a form without a code, kept under its template id', async () => {

@@ -210,9 +210,9 @@ describe('formsInProgress', () => {
     expect(formsInProgress([dr('d3', 't3', 'TST-13', '2026-10')], [other], '2026-10-28', label)[0].text).toBe('TST-13 Inventory — October 2026');
   });
 
-  it('finds the form by code when the template id is gone, and leaves out deleted drafts', () => {
+  it('finds the form by code and revision when the template id is gone, and leaves out deleted drafts', () => {
     const rows = formsInProgress(
-      [dr('d1', 'old-id', 'TST-01', '2026-W44'), { ...dr('d9', 't1', 'TST-01', '2026-W44'), deleted: true }], [toolbox], '2026-10-28', label,
+      [{ ...dr('d1', 'old-id', 'TST-01', '2026-W44'), revision: toolbox.revision }, { ...dr('d9', 't1', 'TST-01', '2026-W44'), deleted: true }], [toolbox], '2026-10-28', label,
     );
     expect(rows.map((r) => [r.key, r.href])).toEqual([['d1', '#/forms/t1/fill']]);
   });

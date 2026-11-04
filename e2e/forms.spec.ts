@@ -231,10 +231,14 @@ test('In progress lists the ship\'s drafts with their period, and a draft whose 
     { ...base, id: 'd2', shipId: ship.id, templateId: 'from-another-device', code: 'TST-77', period: '2026-W43' },
     { ...base, id: 'd3', shipId: 'another-ship', templateId: toolbox.id, code: 'TST-01', period: '2026-10-24' },
     { ...base, id: 'd4', shipId: ship.id, templateId: toolbox.id, code: 'TST-01', period: '2026-10-20', deleted: true },
+    // R25: handed over from a device whose copy of the form is another revision.
+    { ...base, id: 'd5', shipId: ship.id, templateId: 'from-another-device', code: 'TST-01', revision: '07 / 01.07.2026', period: '2026-10-23' },
   ]);
   await page.reload();
   const drafts = page.getByRole('list', { name: 'In progress' });
-  await expect(drafts.getByRole('listitem')).toHaveText(['TST-01 Toolbox Talk — 25-OCT-2026', 'TST-77 — import this form to continue']);
+  await expect(drafts.getByRole('listitem')).toHaveText([
+    'TST-01 Toolbox Talk — 25-OCT-2026', 'TST-01 — made with Revision 07 / 01.07.2026; import that revision to continue', 'TST-77 — import this form to continue',
+  ]);
   await expect(drafts.getByRole('link', { name: 'TST-01 Toolbox Talk — 25-OCT-2026' })).toHaveAttribute('href', `#/forms/${toolbox.id}/fill`);
   await expect(drafts.getByRole('link')).toHaveCount(1);
   await expectNoHorizontalScroll(page);

@@ -62,9 +62,20 @@ export function replaceTarget(templates: FormTemplate[], code: string): FormTemp
   return templates.filter((t) => !t.deleted && t.code === code).sort(newestFirst)[0];
 }
 
-/** The form a draft is filled from: the live one it names, else the live one with its (non-empty) code, else none. */
-export function templateForDraft(draft: Pick<FormDraft, 'templateId' | 'code'>, templates: FormTemplate[]): FormTemplate | undefined {
-  return templates.find((t) => t.id === draft.templateId && !t.deleted) ?? replaceTarget(templates, draft.code);
+/**
+ * The form a draft is filled from: the live one it names, else the live one with its (non-empty) code and the revision it
+ * was made with (R25: another revision's field ids can name other boxes; the newest, when several), else none.
+ */
+export function templateForDraft(draft: Pick<FormDraft, 'templateId' | 'code' | 'revision'>, templates: FormTemplate[]): FormTemplate | undefined {
+  const own = templates.find((t) => t.id === draft.templateId && !t.deleted);
+  if (own || draft.code === '') return own;
+  return templates.filter((t) => !t.deleted && t.code === draft.code && t.revision === draft.revision).sort(newestFirst)[0];
+}
+
+/** What a draft whose form is not here says: the revision it was made with, when it has one recorded (R25). */
+function orphanText(draft: FormDraft): string {
+  const code = draft.code === '' ? '(no code)' : draft.code;
+  return draft.revision ? `${code} — made with Revision ${draft.revision}; import that revision to continue` : `${code} — import this form to continue`;
 }
 
 /** A line of `In progress`, and the form it opens (none when the form is not in the library). */
@@ -76,13 +87,14 @@ export interface DraftRow {
 
 /**
  * The drafts in progress: `<code> <title> — <period>` (`periodLabel` from the helpers), in library order and then by
- * period. A draft whose form is not here (it came in a handover without the library) says
- * `<code> — import this form to continue`, and these come last.
+ * period. A draft whose form is not here (it came in a handover without the library, or was made with another
+ * revision) says `<code> — made with Revision <r>; import that revision to continue` (R25), or, with no revision
+ * recorded, `<code> — import this form to continue`; these come last.
  */
 export function draftRows(drafts: FormDraft[], templates: FormTemplate[], periodLabel: (period: string) => string): DraftRow[] {
   const rows = drafts.filter((d) => !d.deleted).map((draft): DraftRow => {
     const template = templateForDraft(draft, templates);
-    if (!template) return { draft, text: `${draft.code === '' ? '(no code)' : draft.code} — import this form to continue` };
+    if (!template) return { draft, text: orphanText(draft) };
     const name = template.code === '' ? template.title : `${template.code} ${template.title}`;
     return { draft, template, text: `${name} — ${periodLabel(draft.period)}` };
   });

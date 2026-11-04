@@ -65,11 +65,16 @@ describe('the drafts in progress', () => {
   const toolbox = template('t1', 'TST-01', 'Toolbox Talk');
   const weekly = template('t3', 'TST-03', 'Demo Weekly Jobs');
 
-  it('finds a draft its template by id, else the live one with the same code (the newest), else none', () => {
+  it('finds a draft its template by id, else the live one with the same code and revision (the newest), else none', () => {
     const older = template('t1b', 'TST-01', 'Toolbox Talk (old copy)', '00', { updatedAt: '2026-09-01T00:00:00.000Z' });
     const newer = template('t1c', 'TST-01', 'Toolbox Talk (new copy)', '00', { updatedAt: '2026-10-20T00:00:00.000Z' });
+    const later = template('t1d', 'TST-01', 'Toolbox Talk (later revision)', '01', { updatedAt: '2026-10-25T00:00:00.000Z' });
     expect(templateForDraft(draft('d', 't3', 'TST-03', '2026-10-28'), [toolbox, weekly])).toBe(weekly);
-    expect(templateForDraft(draft('d', 'elsewhere', 'TST-01', '2026-10-28'), [older, newer])).toBe(newer);
+    expect(templateForDraft(draft('d', 'elsewhere', 'TST-01', '2026-10-28', { revision: '00' }), [older, newer, later])).toBe(newer);
+    expect(templateForDraft(draft('d', 'elsewhere', 'TST-01', '2026-10-28', { revision: '01' }), [older, newer, later])).toBe(later);
+    // R25: made with another revision, or with none recorded, it fits no copy here.
+    expect(templateForDraft(draft('d', 'elsewhere', 'TST-01', '2026-10-28', { revision: '02' }), [older, newer, later])).toBeUndefined();
+    expect(templateForDraft(draft('d', 'elsewhere', 'TST-01', '2026-10-28'), [older, newer])).toBeUndefined();
     expect(templateForDraft(draft('d', 'elsewhere', 'TST-99', '2026-10-28'), [toolbox])).toBeUndefined();
     // An empty code says nothing: a code-less draft from elsewhere is matched to no code-less form.
     expect(templateForDraft(draft('d', 'elsewhere', '', '2026-10-28'), [template('x', '', 'Log')])).toBeUndefined();
@@ -89,6 +94,17 @@ describe('the drafts in progress', () => {
       ['d1', 'TST-03 Demo Weekly Jobs — Week 44, 2026', 't3'],
       ['d2', 'TST-77 — import this form to continue', undefined],
       ['d4', '(no code) — import this form to continue', undefined],
+    ]);
+  });
+
+  it('says which revision a draft from elsewhere was made with, when no copy here has it (R25)', () => {
+    const rows = draftRows([
+      draft('d1', 'elsewhere', 'TST-01', '2026-10-28', { revision: '01 / 01.06.2026' }),
+      draft('d2', 'elsewhere', 'TST-01', '2026-10-27', { revision: '00' }),
+    ], [toolbox], periodLabel);
+    expect(rows.map((r) => [r.draft.id, r.text, r.template?.id])).toEqual([
+      ['d2', 'TST-01 Toolbox Talk — 27-OCT-2026', 't1'],
+      ['d1', 'TST-01 — made with Revision 01 / 01.06.2026; import that revision to continue', undefined],
     ]);
   });
 
