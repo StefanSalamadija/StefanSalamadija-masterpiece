@@ -1,10 +1,12 @@
 import { unzipSync } from 'fflate';
+import { isValidIsoDate } from '../domain/dates';
 import { IntegrityError } from './errors';
 import { detectExcel } from './excel/detect';
 import { readExcelValues } from './excel/read';
 import { canonicalExcelValue } from './excel/values';
 import { writeExcel } from './excel/write';
 import { formFileName } from './fileName';
+import { formatDate, usableDateHint } from './format';
 import { partText, readPackage, sniffFormat, writePackage } from './package';
 import type { Package } from './package';
 import type { DraftValues, FieldDef, FormKind, FormSchema, FormValue } from './types';
@@ -172,7 +174,20 @@ function wordValue(value: string | boolean): FormValue {
   return text === '' ? null : text;
 }
 
-type Expect = (field: FieldDef, value: string | boolean) => FormValue;
+/**
+ * What a filled value may read back as from a Word form: `wordValue`; and for an ISO date in a `date` field, also the
+ * very text the writer shows for it (`formatDate` in the field's format). A format with no year, or no month (`dd.MM`),
+ * cannot be read back to a date, so the reader gives that text as it is: it is compared as text, the way a date content
+ * control is checked against its `w:fullDate`.
+ */
+function wordValues(field: FieldDef, value: string | boolean): FormValue[] {
+  const read = wordValue(value);
+  if (field.kind !== 'date' || typeof value !== 'string' || !isValidIsoDate(value)) return [read];
+  return [read, formatDate(value, usableDateHint(field.formatHint))];
+}
+
+/** The values a filled value may read back as (see `wordValues`). */
+type Expect = (field: FieldDef, value: string | boolean) => FormValue[];
 
 /**
  * What an unwritten field or column is compared with: the template's value where the template has the row (`template`),
@@ -192,7 +207,7 @@ type Reference = { template: FormValue | undefined } | { clone: { from: FormValu
  *   cleared one shows its default. Text, date and checkbox columns stay strict;
  * - a filled picture, by presence: it shows a picture that the writer added to the file. A control that showed a
  *   picture in the template reads as filled without being written, so reading as filled is not enough;
- * - any other filled value reads back as `expect` gives it (both sides `''` as `null`).
+ * - any other filled value reads back as one of the values `expect` gives (both sides `''` as `null`).
  */
 function readsRight(field: FieldDef, value: FormValue | undefined, back: FormValue | undefined, ref: Reference, expect: Expect, changed: Set<string>, output: Package): boolean {
   if (field.leftEmpty || isBlank(value)) {
@@ -202,8 +217,8 @@ function readsRight(field: FieldDef, value: FormValue | undefined, back: FormVal
     return false;
   }
   if (field.kind === 'picture') return typeof back === 'string' && changed.has(back) && output.entries.has(back);
-  const want = expect(field, value!);
-  return (back === '' ? null : back) === (want === '' ? null : want);
+  const read = back === '' ? null : back;
+  return expect(field, value!).some((want) => read === (want === '' ? null : want));
 }
 
 /**
@@ -215,9 +230,10 @@ function readsRight(field: FieldDef, value: FormValue | undefined, back: FormVal
  *   photo, is not parsed;
  * - every value reads back from `output` through the stored schema (R1), as `readsRight` says: the Word reader with the
  *   rows the writer cloned (`extraRowsOf`), the Excel reader as it is. The Word reader reads a content control as
- *   it shows, and as `null` where its stored state disagrees with what it shows (see `word/read.ts`). Every row the
- *   output has is checked, rows the draft does not fill included; a filled value in a row the output does not have
- *   fails.
+ *   it shows, and as `null` where its stored state disagrees with what it shows (see `word/read.ts`). A Word date
+ *   whose format the reader cannot read back to a date (no year: `dd.MM`) reads as its text, and passes when that is
+ *   the very text `formatDate` gives for the date written (`wordValues`). Every row the output has is checked, rows the
+ *   draft does not fill included; a filled value in a row the output does not have fails.
  *
  * Nothing else escapes it: whatever stops the check is an `IntegrityError` too.
  *
@@ -244,7 +260,7 @@ function checkValues(original: Package, output: Package, changed: Set<string>, s
   const word = isWord(schema.kind);
   const back = word ? readWordValues(output, schema, extraRowsOf(schema, values)) : readExcelValues(output, schema);
   const template = word ? readWordValues(original, schema) : readExcelValues(original, schema);
-  const expect: Expect = word ? (_field, value) => wordValue(value) : canonicalExcelValue;
+  const expect: Expect = word ? wordValues : (field, value) => [canonicalExcelValue(field, value)];
   const defaults = word ? wordCloneDefaults(original, schema) : {};
   const check = (field: FieldDef, value: FormValue | undefined, read: FormValue | undefined, ref: Reference, where: string) => {
     if (!readsRight(field, value, read, ref, expect, changed, output)) throw new IntegrityError(`${where} does not read back as written.`);

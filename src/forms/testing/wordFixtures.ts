@@ -210,3 +210,25 @@ export function oddLayoutsDocx(): Uint8Array {
     body: unlabelled + mergedLabel + p() + labelAbove + p() + textBox,
   });
 }
+
+/**
+ * `TST-06 Demo Short Dates`: date fields whose own format has no year, as a weekly form writes the days of its week.
+ * A details table of `Day:` (one FORMTEXT date, `dd.MM`), `Date (from - to):` (one FORMTEXT date, `dd.MM`, that holds
+ * the whole period) and `Date (from to):` (two FORMTEXT dates, `dd.MM`, with ` - ` between them: the first and the last
+ * day).
+ */
+export function shortDatesDocx(): Uint8Array {
+  const c = new Controls();
+  const widths = [2700, 6938];
+  const date = () => c.formText({ type: 'date', format: 'dd.MM' });
+  const details = table(widths, [
+    row(widths, ['Day:', { content: p(date()) }]),
+    row(widths, ['Date (from - to):', { content: p(date()) }]),
+    row(widths, ['Date (from to):', { content: p(date() + run(' - ') + date()) }]),
+  ]);
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Short Dates', code: 'TST-06', revision: REVISION }),
+    body: details + p(),
+  });
+}

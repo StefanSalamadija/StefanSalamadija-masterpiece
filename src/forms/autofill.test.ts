@@ -4,7 +4,7 @@ import type { Certificate, ClockChange, CrewMember, ShipProfile, Voyage } from '
 import { autoValues, suggestLinks } from './autofill';
 import { normaliseLabel } from './labels';
 import { readPackage } from './package';
-import { permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import type { FieldDef, FieldKind, FieldLink, FormSchema } from './types';
 import { detectWord } from './word/detect';
 
@@ -222,6 +222,14 @@ describe('autoValues: ship, voyage and time', () => {
     expect(values[byLabel(weekly, 'Vessel').id]).toBe('MV OCEAN STAR');
     expect(values[byLabel(weekly, 'Year / Week No.').id]).toBe('2026 / 44');
     expect(values[byLabel(weekly, 'Date (from to)').id]).toBe('26-OCT-2026 - 01-NOV-2026');
+  });
+
+  it('fills a period field with the week\'s first and last day in its own format, and links no date field to the period', () => {
+    const short = detectWord(readPackage(shortDatesDocx()), 'docx', 'short-dates.docx');
+    const links = suggestLinks(short);
+    const [day, period, from, to] = short.fields;
+    expect([links[day!.id], links[period!.id], links[from!.id], links[to!.id]]).toEqual([undefined, { source: 'time.weekRange' }, undefined, undefined]);
+    expect(autoValues(short, links, ctx, DATE).values).toEqual({ [period!.id]: '26.10 - 01.11' });
   });
 
   it('returns top-level fields only: a group column is linked but gets no value here', () => {

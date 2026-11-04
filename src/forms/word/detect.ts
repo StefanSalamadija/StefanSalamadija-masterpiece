@@ -141,9 +141,8 @@ class Detector {
       if (block.t === 'p') {
         const { tokens } = block.p;
         if (tokens.some((t) => t.t === 'field')) {
-          tokens.forEach((t, i) => {
-            if (t.t === 'field') this.addField(t.field, this.inlineLabel(tokens, i, t.field) ?? previous?.text);
-          });
+          const above = previous?.text;
+          this.addFields(tokens, (t, i) => this.inlineLabel(tokens, i, t.field) ?? above);
           previous = undefined;
           continue;
         }
@@ -177,9 +176,25 @@ class Detector {
     return hasWords(before) ? before : undefined;
   }
 
-  private addField(field: RawField, text: string | undefined): void {
+  private addField(field: RawField, text: string | undefined, shared = false): void {
     const n = this.fields.length + 1;
-    this.fields.push(makeField(field, { id: `f${n}`, text, fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)) }));
+    this.fields.push(makeField(field, { id: `f${n}`, text, fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared }));
+  }
+
+  /**
+   * The fields of one paragraph or cell (`tokens`), each named by `label`, in order; tables and repeating sections
+   * inside a cell are detected where they stand. A field is `shared` when another field of the same tokens has the
+   * same label (`Date (from to): [from] - [to]`).
+   */
+  private addFields(tokens: readonly Token[], label: (t: Token & { t: 'field' }, i: number) => string | undefined): void {
+    const labels = tokens.map((t, i) => (t.t === 'field' ? label(t, i) : undefined));
+    const named = labels.filter(hasWords).map(labelText);
+    tokens.forEach((t, i) => {
+      const text = labels[i];
+      if (t.t === 'field') this.addField(t.field, text, hasWords(text) && named.filter((l) => l === labelText(text)).length > 1);
+      else if (t.t === 'table') this.table(t.table, undefined, undefined);
+      else if (t.t === 'repeat') this.blockRepeat(t.repeat, undefined);
+    });
   }
 
   /**
@@ -233,11 +248,7 @@ class Detector {
   private rowFields(rows: RowInfo[], i: number, cells: readonly CellInfo[], boxAbove: string | undefined): void {
     for (const c of cells) {
       const ci = rows[i].cells.indexOf(c);
-      c.tokens.forEach((t, ti) => {
-        if (t.t === 'field') this.addField(t.field, this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove);
-        else if (t.t === 'table') this.table(t.table, undefined, undefined);
-        else if (t.t === 'repeat') this.blockRepeat(t.repeat, undefined);
-      });
+      this.addFields(c.tokens, (t, ti) => this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove);
     }
   }
 

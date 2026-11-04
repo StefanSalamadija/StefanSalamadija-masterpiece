@@ -56,10 +56,25 @@ function dateHintOf(hint: string | undefined): string | undefined {
   return hint !== undefined && !/utc/i.test(hint) ? hint : undefined;
 }
 
+/**
+ * A label that names a period rather than a day: `from` and `to` side by side, with at most a dash or dots between
+ * them (`Date (from to)`, `Date from - to`, `Period from ... to`). `Moved from store to deck` names no period.
+ */
+function isRangeLabel(raw: string | undefined): boolean {
+  if (raw === undefined) return false;
+  return /\bfrom to\b/.test(normaliseLabel(raw).replace(/[-\u2010-\u2015/\u2026]/g, ' ').replace(/\s+/g, ' '));
+}
+
 /** The kind a label asks for: `date` when it gives a date pattern, `time` when it names a time, else `text`. */
-function kindFromLabel(raw: string | undefined, hint: string | undefined): FieldKind {
+function labelKind(raw: string | undefined, hint: string | undefined): FieldKind {
   if (dateHintOf(hint)) return 'date';
   return raw !== undefined && isTimeLabel(labelText(raw)) ? 'time' : 'text';
+}
+
+/** `labelKind`, with a label that names a period (`isRangeLabel`) taking text rather than a date. */
+function kindFromLabel(raw: string | undefined, hint: string | undefined): FieldKind {
+  const kind = labelKind(raw, hint);
+  return kind === 'date' && isRangeLabel(raw) ? 'text' : kind;
 }
 
 /**
@@ -85,8 +100,15 @@ function listItems(list: Element | undefined): string[] {
   }));
 }
 
-/** The kind, options and format hint of a field, from its settings and its label (`raw`, the text that names it). */
-function describe(field: RawField, raw: string | undefined): Pick<FieldDef, 'kind' | 'options' | 'formatHint'> {
+/**
+ * The kind, options and format hint of a field, from its settings and its label (`raw`, the text that names it).
+ *
+ * A legacy text field that would be a date (by its own type, or by a date pattern in its label) is `text` when its
+ * label names a period (`isRangeLabel`): one field then holds the whole period, written as text (`26.10 - 01.11`), and it
+ * keeps the date format for that text. When `shared` (another field of the same cell or line has the same label: the
+ * first and the last day), each field holds one date and stays a `date`.
+ */
+function describe(field: RawField, raw: string | undefined, shared: boolean): Pick<FieldDef, 'kind' | 'options' | 'formatHint'> {
   const hint = raw === undefined ? undefined : formatHintOf(raw);
   if (field.kind === 'legacy') {
     switch (field.type) {
@@ -102,9 +124,10 @@ function describe(field: RawField, raw: string | undefined): Pick<FieldDef, 'kin
         const input = child(field.ffData, W, 'textInput');
         const type = wVal(input, 'type');
         const own = wVal(input, 'format') || undefined;
-        const kind: FieldKind = type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'currentTime' ? 'time' : kindFromLabel(raw, hint);
-        // A date is written in the label's format when it gives one, else in the field's own (R2).
-        const formatHint = kind === 'date' ? dateHintOf(hint) ?? own ?? hint : hint;
+        const typed: FieldKind = type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'currentTime' ? 'time' : labelKind(raw, hint);
+        // A date is written in the label's format when it gives one, else in the field's own (R2); so is a period.
+        const formatHint = typed === 'date' ? dateHintOf(hint) ?? own ?? hint : hint;
+        const kind: FieldKind = typed === 'date' && !shared && isRangeLabel(raw) ? 'text' : typed;
         return formatHint === undefined ? { kind } : { kind, formatHint };
       }
     }
@@ -137,12 +160,13 @@ function definition(o: { id: string; label: string; section: string; loc: string
 
 /**
  * The definition of a found field. `text` is the nearby text that names it, if any; failing that a content control's
- * alias names it; failing both it is called `fallback` (`Field <n>`, `Column <n>`) with low confidence.
+ * alias names it; failing both it is called `fallback` (`Field <n>`, `Column <n>`) with low confidence. `shared` says
+ * that another field of the same cell or line has the same label (see `describe`).
  */
-export function makeField(field: RawField, o: { id: string; text: string | undefined; fallback: string; section: string; loc: string }): FieldDef {
+export function makeField(field: RawField, o: { id: string; text: string | undefined; fallback: string; section: string; loc: string; shared?: boolean }): FieldDef {
   const alias = aliasOf(field);
   const raw = hasWords(o.text) ? o.text : hasWords(alias) ? alias : undefined;
-  return definition({ ...o, label: raw === undefined ? o.fallback : labelText(raw) }, describe(field, raw), raw);
+  return definition({ ...o, label: raw === undefined ? o.fallback : labelText(raw) }, describe(field, raw, o.shared ?? false), raw);
 }
 
 /** The definition of a cell column of a plain row group, from its header text: its kind and hint come from the label. */

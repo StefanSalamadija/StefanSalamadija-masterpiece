@@ -5,10 +5,11 @@ import { FormWriteError, IntegrityError, NotAFormError, OldFormatError } from '.
 import { readExcelValues } from './excel/read';
 import { canonicalExcelValue } from './excel/values';
 import { formFileName } from './fileName';
+import { formatDate, parseDate, usableDateHint } from './format';
 import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
-import { contentControlsDocx, oddLayoutsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { contentControlsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
 import { readWordValues } from './word/read';
@@ -32,6 +33,7 @@ const FIXTURES: Fixture[] = [
   { name: 'weekly jobs (template)', fileName: 'weekly.dotx', make: weeklyJobsDotx },
   { name: 'content controls', fileName: 'controls.docx', make: contentControlsDocx },
   { name: 'odd layouts', fileName: 'odd.docx', make: oddLayoutsDocx },
+  { name: 'short dates', fileName: 'short-dates.docx', make: shortDatesDocx },
   { name: 'inventory', fileName: 'inventory.xlsx', make: () => inventoryXlsx(120) },
   { name: 'day grid', fileName: 'daygrid.xlsx', make: () => dayGridXlsx() },
   { name: 'day grid (loose header)', fileName: 'daygrid-loose.xlsx', make: () => dayGridXlsx({ looseHeader: true }) },
@@ -71,11 +73,16 @@ function everything(s: FormSchema): DraftValues {
 
 /**
  * What a value reads back as, worked out here from the writers' contracts: Excel through `canonicalExcelValue`; Word
- * text with `\n` line ends, ISO dates as given, booleans and options as given. Pictures are checked by presence apart.
+ * text with `\n` line ends, ISO dates as given (or, in a format that cannot be read back to a date, such as `dd.MM`, as
+ * the text written), booleans and options as given. Pictures are checked by presence apart.
  */
 function expected(kind: FormKind, f: FieldDef, value: FormValue | undefined): FormValue {
   if (f.leftEmpty || value === undefined || value === null || value === '') return null;
   if (!isWord(kind)) return canonicalExcelValue(f, value);
+  if (f.kind === 'date' && typeof value === 'string') {
+    const shown = formatDate(value, usableDateHint(f.formatHint));
+    return parseDate(shown, usableDateHint(f.formatHint)) === value ? value : shown;
+  }
   return typeof value === 'boolean' ? value : value.replace(/\r\n/g, '\n');
 }
 
@@ -469,6 +476,21 @@ describe('verifyOutput: a content control must show what it holds', () => {
 });
 
 describe('verifyOutput: more', () => {
+  it('checks a legacy date whose format has no year by the text written, and refuses another day', () => {
+    const values = (s: FormSchema): DraftValues => ({ fields: { [s.fields[0]!.id]: '2026-10-28', [s.fields[2]!.id]: '2026-10-26', [s.fields[3]!.id]: '2026-11-01' }, rows: {} });
+    const input = inputOf(fixture('short dates'), values);
+    const made = makeFile(input);
+    const back = readWordValues(readPackage(made.bytes), input.schema).fields;
+    expect([back.f1, back.f2, back.f3, back.f4]).toEqual(['28.10', null, '26.10', '01.11']);
+
+    const { original, output, changed } = assembled(input);
+    expect(() => verifyOutput(original, output, changed, input.schema, input.values)).not.toThrow();
+    const other = { ...input.values, fields: { ...input.values.fields, f1: '2026-10-29' } };
+    expect(expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, other)).reason).toContain('f1');
+    // A format with no year shows the same text for that day of any year: the file shows what was asked for.
+    expect(() => verifyOutput(original, output, changed, input.schema, { ...input.values, fields: { ...input.values.fields, f1: '2025-10-28' } })).not.toThrow();
+  });
+
   it('refuses a part the writer added that has no content type', () => {
     const input = inputOf(fixture('weekly jobs (template)'));
     const made = assembled(input);

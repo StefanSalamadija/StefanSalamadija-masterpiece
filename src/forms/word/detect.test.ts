@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { partText, readPackage } from '../package';
 import { Controls, emptyRows, headerBlock, headerRow, heading, p, row, run, table, tickBox, titleRow, wordPackage } from '../testing/wordXml';
-import { contentControlsDocx, oddLayoutsDocx, permitDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
+import { contentControlsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from '../testing/wordFixtures';
 import type { FieldDef, FormSchema } from '../types';
 import { parseXml } from '../xml';
 import { detectWord, locateColumn, locateWord } from './detect';
@@ -220,6 +220,30 @@ describe('detectWord', () => {
     ]);
     expect(s.fields[8].options).toEqual(['One', 'Two']);
     expect(s.fields.map((f) => f.confidence)).toEqual([...Array(9).fill('high'), 'low']);
+  });
+
+  it('makes a date field whose label names a period text, unless the label names a first and a last date', () => {
+    const s = detect(shortDatesDocx());
+    expect(s.fields.map(summary)).toEqual([
+      { id: 'f1', kind: 'date', label: 'Day', section: '', confidence: 'high', formatHint: 'dd.MM' },
+      // One field holds the whole period: it takes text, such as the week's first and last day.
+      { id: 'f2', kind: 'text', label: 'Date (from - to)', section: '', confidence: 'high', formatHint: 'dd.MM' },
+      // Two fields share the label: the first and the last day, each a date.
+      { id: 'f3', kind: 'date', label: 'Date (from to)', section: '', confidence: 'high', formatHint: 'dd.MM' },
+      { id: 'f4', kind: 'date', label: 'Date (from to)', section: '', confidence: 'high', formatHint: 'dd.MM' },
+    ]);
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const body = table(widths, [
+      row(widths, ['Date from - to (DD.MM.YYYY):', { content: p(c.formText()) }]),
+      row(widths, ['Moved from store to deck on:', { content: p(c.formText({ type: 'date', format: 'dd.MM.yyyy' })) }]),
+    ]) + p(run('Period from ... to: ') + c.formText({ type: 'date' }));
+    const kinds = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Ranges', code: 'TST-90', revision: '0' }), body })).fields;
+    expect(kinds.map((f) => [f.kind, f.label, f.formatHint])).toEqual([
+      ['text', 'Date from - to (DD.MM.YYYY)', 'DD.MM.YYYY'],
+      ['date', 'Moved from store to deck on', 'dd.MM.yyyy'], // `from` and `to` with other words between them name no period
+      ['text', 'Period from ... to', undefined],
+    ]);
   });
 
   it('names each checkbox of a line that starts with text by the words before it, never by a neighbour\'s', () => {

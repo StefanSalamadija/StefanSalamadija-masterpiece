@@ -158,10 +158,15 @@ function suggestible(field: FieldDef): boolean {
   return !field.leftEmpty && (field.kind === 'text' || field.kind === 'number' || field.kind === 'date' || field.kind === 'time');
 }
 
+/** Sources that give text only (`2026 / 44`, `26-OCT-2026 - 01-NOV-2026`): a date or time field cannot take them. */
+const TEXT_ONLY = new Set(['time.yearWeek', 'time.weekRange']);
+
 function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
   if (!suggestible(field)) return undefined;
   const link = TABLE.get(canon(labelWithoutHint(field.label)));
   if (link === undefined) return undefined;
+  // `Date (from to): [from] - [to]` is two date fields: the week's range is no value for either.
+  if (TEXT_ONLY.has(link.source) && (field.kind === 'date' || field.kind === 'time')) return undefined;
   const time = link.source === 'time.time';
   // Each row of a group has its own time (a reading, a visit), so a column is never filled with the time now.
   if (inGroup && time) return undefined;
@@ -172,7 +177,8 @@ function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
 
 /**
  * The links to suggest for a form, by field id: the fields, and the columns of the row groups (by the column's own id).
- * Only fields that match the synonym table are in the result. A signature, a tick box and a photo never are.
+ * Only fields that match the synonym table are in the result. A signature, a tick box and a photo never are, and
+ * neither is a date or time field whose label names a source that gives text only (`time.yearWeek`, `time.weekRange`).
  */
 export function suggestLinks(schema: FormSchema): Record<string, FieldLink> {
   const links: Record<string, FieldLink> = {};
