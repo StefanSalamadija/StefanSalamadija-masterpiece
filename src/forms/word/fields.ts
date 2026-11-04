@@ -23,6 +23,15 @@ export function nodeOf(field: RawField): Element {
   return field.kind === 'legacy' ? field.begin : field.sdt;
 }
 
+/**
+ * A legacy text field whose value Word calculates (`w:textInput/w:type` `calculated`). It is no field (R27): Word works
+ * its value out again, so nothing is asked or written there, and it is left as it is in the file. It still stands where
+ * it is, so it ends a label and keeps its cell from being an empty one.
+ */
+export function isCalculated(field: RawField): boolean {
+  return field.kind === 'legacy' && field.type === 'FORMTEXT' && wVal(child(field.ffData, W, 'textInput'), 'type') === 'calculated';
+}
+
 export function isCheckbox(field: RawField): boolean {
   return field.kind === 'legacy' ? field.type === 'FORMCHECKBOX' : field.control === 'checkbox';
 }
@@ -60,6 +69,35 @@ function dateHintOf(hint: string | undefined): string | undefined {
 function labelKind(raw: string | undefined, hint: string | undefined): FieldKind {
   if (dateHintOf(hint)) return 'date';
   return raw !== undefined && isTimeLabel(labelText(raw)) ? 'time' : 'text';
+}
+
+/** A Word date format without its quoted text (`'at'`, `"h"`), which is shown as it is. */
+function unquoted(format: string): string {
+  return format.replace(/'[^']*'|"[^"]*"/g, '');
+}
+
+/** A time token of a Word date format: an hour (`H`, `h`), seconds (`s`), or the AM/PM marker. Minutes are `m`, months `M`. */
+const TIME_TOKEN = /[hHs]|am\/pm|a\/p/i;
+/** A date token of a Word date format: a day (`d`), a month (`M`) or a year (`y`). */
+const DATE_TOKEN = /[dDMyY]/;
+
+/** True when a Word date format (`w:textInput/w:format`) shows a time and no date: `HH:mm`, `h:mm am/pm`. */
+function isTimeFormat(format: string): boolean {
+  const bare = unquoted(format);
+  return TIME_TOKEN.test(bare) && !DATE_TOKEN.test(bare.replace(/am\/pm|a\/p/gi, ''));
+}
+
+/**
+ * The date part of a Word date format: the format itself when it has no time in it, else the format without its time
+ * and without the text that only joined the two (`dd/MM/yyyy HH:mm` is `dd/MM/yyyy`, `dd.MM.yyyy 'at' HH:mm` is
+ * `dd.MM.yyyy`). `undefined` when nothing of a date is left.
+ */
+function datePart(format: string | undefined): string | undefined {
+  if (format === undefined || !TIME_TOKEN.test(unquoted(format))) return format;
+  const date = unquoted(format)
+    .replace(/(?:[hHs]+|m+)(?:[:.](?:[hHs]+|m+))*(?:\s*(?:am\/pm|a\/p))?/gi, (run) => (TIME_TOKEN.test(run) ? ' ' : run))
+    .replace(/^[\s,:.\-/]+|[\s,:.\-/]+$/g, '');
+  return DATE_TOKEN.test(date) ? date : undefined;
 }
 
 /** `labelKind`, with a label that names a period (`isRangeLabel`) taking text rather than a date. */
@@ -115,9 +153,15 @@ function describe(field: RawField, raw: string | undefined, shared: boolean): Pi
         const input = child(field.ffData, W, 'textInput');
         const type = wVal(input, 'type');
         const own = wVal(input, 'format') || undefined;
+        // Word's time field is a date field whose own format has only a time in it (`HH:mm`): it takes a time.
+        if (type === 'date' && own !== undefined && isTimeFormat(own)) {
+          const formatHint = hint ?? own;
+          return { kind: 'time', formatHint };
+        }
         const typed: FieldKind = type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'currentTime' ? 'time' : labelKind(raw, hint);
-        // A date is written in the label's format when it gives one, else in the field's own (R2); so is a period.
-        const formatHint = typed === 'date' ? dateHintOf(hint) ?? own ?? hint : hint;
+        // A date is written in the label's format when it gives one, else in the field's own (R2); so is a period. Of
+        // an own format with a time in it (`dd/MM/yyyy HH:mm`), only the date part is used, as a date is all it holds.
+        const formatHint = typed === 'date' ? dateHintOf(hint) ?? datePart(own) ?? hint : hint;
         const kind: FieldKind = typed === 'date' && !shared && isRangeLabel(raw) ? 'text' : typed;
         return formatHint === undefined ? { kind } : { kind, formatHint };
       }

@@ -136,7 +136,7 @@ type NamePrefix = 'Text' | 'Check' | 'Dropdown';
 
 export interface TextFieldOptions {
   /** `w:textInput/w:type`: left out for a plain text field. */
-  type?: 'number' | 'date' | 'currentDate' | 'currentTime';
+  type?: 'number' | 'date' | 'currentDate' | 'currentTime' | 'calculated';
   /** `w:textInput/w:format`, such as the date format of a `date` field. */
   format?: string;
 }

@@ -397,6 +397,44 @@ describe('detectWord', () => {
     ]);
   });
 
+  it('takes a date field whose own format holds only a time as a time, and keeps the date part of a date and time format', () => {
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const body = table(widths, [
+      row(widths, ['Time', { content: p(c.formText({ type: 'date', format: 'HH:mm' })) }]),
+      row(widths, ['Started', { content: p(c.formText({ type: 'date', format: 'h:mm am/pm' })) }]),
+      row(widths, ['Time (24:00 UTC)', { content: p(c.formText({ type: 'date', format: 'HH:mm' })) }]),
+      row(widths, ['Checked on', { content: p(c.formText({ type: 'date', format: 'dd/MM/yyyy HH:mm' })) }]),
+      row(widths, ['Due', { content: p(c.formText({ type: 'date', format: "dd.MM.yyyy 'at' HH:mm" })) }]),
+      row(widths, ['Inspected', { content: p(c.formText({ type: 'date', format: 'dd/MM/yyyy' })) }]),
+      row(widths, ['Date', { content: p(c.formText({ type: 'date', format: 'HH:mm' })) }]),
+    ]);
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Times', code: 'TST-90', revision: '0' }), body }));
+    expect(s.fields.map((f) => [f.kind, f.label, f.formatHint])).toEqual([
+      ['time', 'Time', 'HH:mm'],
+      ['time', 'Started', 'h:mm am/pm'],
+      ['time', 'Time (24:00 UTC)', '(24:00 UTC)'], // the label's UTC hint wins, so the time is taken in UTC
+      ['date', 'Checked on', 'dd/MM/yyyy'],
+      ['date', 'Due', 'dd.MM.yyyy'],
+      ['date', 'Inspected', 'dd/MM/yyyy'],
+      ['time', 'Date', 'HH:mm'],
+    ]);
+    // A time is linked to the time now; a time named `Date` gets no link, as the date is no value for it.
+    expect(suggestLinks(s)).toEqual({ f1: { source: 'time.time' }, f3: { source: 'time.timeUtc' } });
+  });
+
+  it('leaves a calculated text field out (R27): it is not a field, and its result is left as it is', () => {
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const body = table(widths, [
+      row(widths, ['Hours', { content: p(c.formText({ type: 'number' })) }]),
+      row(widths, ['Total', { content: p(c.formText({ type: 'calculated' })) }]),
+    ]) + p(run('Remarks: ') + c.formText());
+    const s = detect(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Totals', code: 'TST-90', revision: '0' }), body }));
+    expect(s.fields.map((f) => [f.id, f.kind, f.label])).toEqual([['f1', 'number', 'Hours'], ['f2', 'text', 'Remarks']]);
+    expect(s.rowGroups).toEqual([]);
+  });
+
   it('names each checkbox of a line that starts with text by the words before it, never by a neighbour\'s', () => {
     const c = new Controls();
     const widths = [3000, 6638];

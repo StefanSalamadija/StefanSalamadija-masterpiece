@@ -6,7 +6,7 @@ import type { Package } from '../package';
 import type { FieldDef, FormSchema, RowGroupDef } from '../types';
 import { parseXml } from '../xml';
 import { Addresser } from './address';
-import { hasAlias, hasWords, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
+import { hasAlias, hasWords, isCalculated, isCheckbox, labelText, makeColumn, makeField, nodeOf, segment } from './fields';
 import { otherStories } from './stories';
 import { W, Walker, child, clean, flatTokens, itemsOf, paragraphsIn, rowLayout, textOf, wVal } from './walk';
 import type { Block, Cell, Para, RawField, Repeat, Row, Table, Token } from './walk';
@@ -205,6 +205,7 @@ class Detector {
   }
 
   private addField(field: RawField, found: Found, shared = false): void {
+    if (isCalculated(field)) return; // R27: no field
     const n = this.fields.length + 1;
     this.fields.push(makeField(field, { id: `f${n}`, ...foundText(found), fallback: `Field ${n}`, section: this.section, loc: this.addr.loc(nodeOf(field)), shared }));
   }
@@ -440,6 +441,7 @@ class Detector {
     for (const c of area) {
       const text = columnTitle(head, h, c.cell.grid);
       const field = c.tokens.find((t): t is Token & { t: 'field' } => t.t === 'field');
+      if (field && isCalculated(field.field)) continue; // R27: a calculated cell is left as it is, and is no column
       if (field && !hasWords(text)) return undefined;
       if (!field && !hasWords(text)) continue;
       const o = { id: `g${n}.c${columns.length + 1}`, text, fallback: `Column ${columns.length + 1}`, section: this.section };
@@ -508,7 +510,7 @@ class Detector {
     const columns: FieldDef[] = [];
     for (let i = start; i < end && rows[i].row.repeat!.item === items[0]; i += 1) {
       rows[i].cells.forEach((c, ci) => c.tokens.forEach((t, ti) => {
-        if (t.t !== 'field' || c.cell.vMerge === 'continue') return;
+        if (t.t !== 'field' || c.cell.vMerge === 'continue' || isCalculated(t.field)) return;
         const k = columns.length + 1;
         const found = foundOf(this.cellLabel(rows, i, ci, ti, t.field) ?? unsure(farLabel(rows, i, ci, ti, t.field)));
         columns.push(makeField(t.field, { id: `g${n}.c${k}`, ...foundText(found), fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)) }));
@@ -524,7 +526,7 @@ class Detector {
     const [first] = repeat.items;
     for (const p of first ? paragraphsIn(first.blocks) : []) {
       p.tokens.forEach((t, ti) => {
-        if (t.t !== 'field') return;
+        if (t.t !== 'field' || isCalculated(t.field)) return;
         const k = columns.length + 1;
         columns.push(makeField(t.field, { id: `g${n}.c${k}`, text: this.inlineLabel(p.tokens, ti, t.field), fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(first.el, nodeOf(t.field)) }));
       });

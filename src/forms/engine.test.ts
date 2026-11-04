@@ -13,7 +13,7 @@ import { bytesOf, partText, readPackage, writePackage } from './package';
 import type { FormKind, Package } from './package';
 import { conditionListXlsx, dayGridXlsx, inventoryXlsx, matrixXlsx } from './testing/excelFixtures';
 import { asExcelTemplate, MACRO_TYPE, withMacros } from './testing/macroFixtures';
-import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { contentControlsDocx, farLabelsDocx, fieldRowsDocx, mergedRowsDocx, oddLayoutsDocx, permitDocx, shortDatesDocx, timesDocx, toolboxTalkDocx, unevenRowsDocx, weeklyJobsDotx } from './testing/wordFixtures';
 import { Controls, headerBlock, heading, headerRow, p, row, table, wordPackage } from './testing/wordXml';
 import { CONTENT_TYPE } from './testing/zip';
 import type { DraftValues, FieldDef, FormSchema, FormValue } from './types';
@@ -39,6 +39,7 @@ const FIXTURES: Fixture[] = [
   { name: 'content controls', fileName: 'controls.docx', make: contentControlsDocx },
   { name: 'odd layouts', fileName: 'odd.docx', make: oddLayoutsDocx },
   { name: 'short dates', fileName: 'short-dates.docx', make: shortDatesDocx },
+  { name: 'times', fileName: 'times.docx', make: timesDocx },
   { name: 'field rows', fileName: 'field-rows.docx', make: fieldRowsDocx },
   { name: 'uneven rows', fileName: 'uneven-rows.docx', make: unevenRowsDocx },
   { name: 'far labels', fileName: 'far-labels.docx', make: farLabelsDocx },
@@ -502,6 +503,26 @@ describe('verifyOutput: more', () => {
     expect(expectIntegrityError(() => verifyOutput(original, output, changed, input.schema, other)).reason).toContain('f1');
     // A format with no year shows the same text for that day of any year: the file shows what was asked for.
     expect(() => verifyOutput(original, output, changed, input.schema, { ...input.values, fields: { ...input.values.fields, f1: '2025-10-28' } })).not.toThrow();
+  });
+
+  it('writes a time into Word\'s time field as HH:mm, and only the date into a date and time field; a calculated field is no field', () => {
+    const input = inputOf(fixture('times'), (s) => ({ fields: { [s.fields[0]!.id]: '14:30', [s.fields[1]!.id]: DATE }, rows: {} }));
+    expect(input.schema.fields.map((f) => [f.id, f.kind, f.label, f.formatHint])).toEqual([
+      ['f1', 'time', 'Time', 'HH:mm'],
+      ['f2', 'date', 'Checked on', 'dd/MM/yyyy'],
+    ]);
+    const made = makeFile(input);
+    const out = readPackage(made.bytes);
+    const document = partText(out, 'word/document.xml')!;
+    expect(document).toContain('<w:t>14:30</w:t>');
+    expect(document).toContain('<w:t>28/10/2026</w:t>');
+    expect(document).not.toContain('28-OCT-2026');
+    expect(readWordValues(out, input.schema).fields).toEqual({ f1: '14:30', f2: DATE });
+    // The calculated fields are left as they are in the file, and a calculated column is no column of its group.
+    expect(document.match(/w:val="calculated"/g)).toHaveLength(4);
+    const [readings] = input.schema.rowGroups;
+    expect(readings!.columns.map((c) => [c.kind, c.label])).toEqual([['number', 'Before'], ['number', 'After']]);
+    expect([readings!.capacity, readings!.growable]).toEqual([3, true]);
   });
 
   it('refuses a part the writer added that has no content type', () => {

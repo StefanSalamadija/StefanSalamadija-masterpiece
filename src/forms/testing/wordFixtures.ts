@@ -234,6 +234,34 @@ export function shortDatesDocx(): Uint8Array {
 }
 
 /**
+ * `TST-09 Demo Times`: Word's time field and its neighbours. A details table of `Time:` (a FORMTEXT of type date whose
+ * own format is `HH:mm`, which is how Word makes a time field), `Checked on:` (a FORMTEXT date in `dd/MM/yyyy HH:mm`,
+ * a date and a time), and `Total:` (a FORMTEXT of type calculated, which Word works out itself). Then `Readings`: the
+ * header `Tank | Before | After | Difference` over 3 rows of an empty Tank cell, a number FORMTEXT under Before and
+ * under After, and a calculated FORMTEXT under Difference.
+ */
+export function timesDocx(): Uint8Array {
+  const c = new Controls();
+  const widths = [2700, 6938];
+  const details = table(widths, [
+    row(widths, ['Time:', { content: p(c.formText({ type: 'date', format: 'HH:mm' })) }]),
+    row(widths, ['Checked on:', { content: p(c.formText({ type: 'date', format: 'dd/MM/yyyy HH:mm' })) }]),
+    row(widths, ['Total:', { content: p(c.formText({ type: 'calculated' })) }]),
+  ]);
+  const number = () => ({ content: p(c.formText({ type: 'number' })) });
+  const readingWidths = [3000, 2213, 2213, 2212];
+  const readings = table(readingWidths, [
+    headerRow(readingWidths, ['Tank', 'Before', 'After', 'Difference']),
+    ...Array.from({ length: 3 }, () => row(readingWidths, ['', number(), number(), { content: p(c.formText({ type: 'calculated' })) }])),
+  ]);
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Times', code: 'TST-09', revision: REVISION }),
+    body: details + p() + readings + p(),
+  });
+}
+
+/**
  * `TST-08 Demo Uneven Rows`: a table of empty rows whose last empty rows are drawn differently. Under the bold header
  * `Step | Demo task | Lower | Upper | Outcome` (Outcome two grid columns wide), 3 empty rows of the same cells; then an
  * empty row of as many cells whose first is two grid columns wide; then an empty row of two wide cells. Only the 3 rows
