@@ -5,7 +5,7 @@ import type { FieldContext } from '../domain/fieldDictionary';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import type { RankKey } from '../domain/types';
 import { formatDate } from './format';
-import { formatHintOf, isRangeLabel, normaliseLabel } from './labels';
+import { formatHintOf, normaliseLabel } from './labels';
 import type { FieldDef, FieldLink, FormSchema } from './types';
 
 /*
@@ -180,8 +180,8 @@ function suggest(field: FieldDef, inGroup: boolean): FieldLink | undefined {
  * The links to suggest for a form, by field id: the fields, and the columns of the row groups (by the column's own id).
  * Only fields that match the synonym table are in the result. A signature, a tick box and a photo never are, and
  * neither is a date or time field whose label names a source that gives text only (`time.yearWeek`, `time.weekRange`).
- * Exactly two top-level date fields with the same period label (`isRangeLabel`, such as `Date (from to): [from] - [to]`)
- * are linked to `time.weekStart` and `time.weekEnd`, in document order (R20).
+ * The two date fields that detection marked as the first and the last day of one period (`FieldDef.range`, such as
+ * `Date (from to): [from] - [to]`) are linked to `time.weekStart` and `time.weekEnd` (R20).
  */
 export function suggestLinks(schema: FormSchema): Record<string, FieldLink> {
   const links: Record<string, FieldLink> = {};
@@ -189,17 +189,10 @@ export function suggestLinks(schema: FormSchema): Record<string, FieldLink> {
     const link = suggest(field, false);
     if (link) links[field.id] = link;
   }
-  // R20: two date fields under one period label are the first and the last day of the week.
-  const periods = new Map<string, FieldDef[]>();
+  // R20: the two date fields that detection marked as the first and the last day of one period.
   for (const field of schema.fields) {
-    if (field.kind !== 'date' || field.leftEmpty || !isRangeLabel(field.label)) continue;
-    const key = normaliseLabel(field.label);
-    periods.set(key, [...(periods.get(key) ?? []), field]);
-  }
-  for (const pair of periods.values()) {
-    if (pair.length !== 2) continue;
-    links[pair[0]!.id] = { source: 'time.weekStart' };
-    links[pair[1]!.id] = { source: 'time.weekEnd' };
+    if (field.kind !== 'date' || field.leftEmpty || field.range === undefined) continue;
+    links[field.id] = { source: field.range === 'start' ? 'time.weekStart' : 'time.weekEnd' };
   }
   for (const group of schema.rowGroups) {
     for (const column of group.columns) {

@@ -275,6 +275,8 @@ describe('detectWord', () => {
       { id: 'f3', kind: 'date', label: 'Date (from to)', section: '', confidence: 'high', formatHint: 'dd.MM' },
       { id: 'f4', kind: 'date', label: 'Date (from to)', section: '', confidence: 'high', formatHint: 'dd.MM' },
     ]);
+    // R20: the pair is marked as the first and the last day; nothing else is.
+    expect(s.fields.map((f) => f.range)).toEqual([undefined, undefined, 'start', 'end']);
     const c = new Controls();
     const widths = [3000, 6638];
     const body = table(widths, [

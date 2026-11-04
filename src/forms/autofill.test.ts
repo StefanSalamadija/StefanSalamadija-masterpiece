@@ -5,6 +5,7 @@ import { autoValues, suggestLinks } from './autofill';
 import { normaliseLabel } from './labels';
 import { readPackage } from './package';
 import { permitDocx, shortDatesDocx, toolboxTalkDocx, weeklyJobsDotx } from './testing/wordFixtures';
+import { Controls, headerBlock, p, row, table, wordPackage } from './testing/wordXml';
 import type { FieldDef, FieldKind, FieldLink, FormSchema } from './types';
 import { detectWord } from './word/detect';
 
@@ -246,12 +247,18 @@ describe('autoValues: ship, voyage and time', () => {
     expect(autoValues(schema, links, ctx, '2027-01-01').values).toEqual({ [date.id]: '2026-12-28', [text.id]: '03.01.2027' });
   });
 
-  it('links a pair under a period label only when there are exactly two date fields with that label', () => {
-    const one = field('Date (from to)', 'date');
-    const three = ['a', 'b', 'c'].map((id) => ({ ...field('Period from - to', 'date'), id: `p${id}` }));
-    const links = suggestLinks(schemaOf([one, ...three]));
-    expect(links[one.id]).toBeUndefined();
-    expect(three.map((f) => links[f.id])).toEqual([undefined, undefined, undefined]);
+  it('links only the pair detection marked: not two lone period fields elsewhere in the form, nor unmarked fields (R20)', () => {
+    const c = new Controls();
+    const widths = [3000, 6638];
+    const lone = () => table(widths, [row(widths, ['Period (from - to):', { content: p(c.dateControl({ alias: 'Period', tag: 'period', format: 'dd.MM.yyyy', text: 'Pick a date.', placeholder: true })) }])]);
+    const s = detectWord(readPackage(wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Two periods', code: 'TST-90', revision: '0' }), body: lone() + p() + lone() })), 'docx', 'two.docx');
+    expect(s.fields.map((f) => [f.kind, f.label, f.range])).toEqual([['date', 'Period (from - to)', undefined], ['date', 'Period (from - to)', undefined]]);
+    expect(suggestLinks(s)).toEqual({});
+    // Unmarked date fields under one period label get no link, however many there are; marked ones do.
+    const two = ['a', 'b'].map((id) => ({ ...field('Date (from to)', 'date'), id: `p${id}` }));
+    expect(suggestLinks(schemaOf(two))).toEqual({});
+    const marked = [{ ...two[0]!, range: 'start' as const }, { ...two[1]!, range: 'end' as const }];
+    expect(suggestLinks(schemaOf(marked))).toEqual({ pa: { source: 'time.weekStart' }, pb: { source: 'time.weekEnd' } });
   });
 
   it('returns top-level fields only: a group column is linked but gets no value here', () => {

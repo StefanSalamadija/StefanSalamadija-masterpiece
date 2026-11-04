@@ -1,5 +1,5 @@
 import { NotAFormError } from '../errors';
-import { isSignatureLabel } from '../labels';
+import { isRangeLabel, isSignatureLabel } from '../labels';
 import { partText } from '../package';
 import type { Package } from '../package';
 import type { FieldDef, FormSchema, RowGroupDef } from '../types';
@@ -194,12 +194,21 @@ class Detector {
   private addFields(tokens: readonly Token[], label: (t: Token & { t: 'field' }, i: number) => string | undefined): void {
     const labels = tokens.map((t, i) => (t.t === 'field' ? label(t, i) : undefined));
     const named = labels.filter(hasWords).map(labelText);
+    const added = new Map<string, FieldDef[]>();
     tokens.forEach((t, i) => {
       const text = labels[i];
-      if (t.t === 'field') this.addField(t.field, text, hasWords(text) && named.filter((l) => l === labelText(text)).length > 1);
-      else if (t.t === 'table') this.table(t.table, undefined, undefined);
+      if (t.t === 'field') {
+        this.addField(t.field, text, hasWords(text) && named.filter((l) => l === labelText(text)).length > 1);
+        if (hasWords(text)) added.set(labelText(text), [...(added.get(labelText(text)) ?? []), this.fields[this.fields.length - 1]!]);
+      } else if (t.t === 'table') this.table(t.table, undefined, undefined);
       else if (t.t === 'repeat') this.blockRepeat(t.repeat, undefined);
     });
+    // R20: exactly two dates that one period label names here are its first and its last day.
+    for (const [text, defs] of added) {
+      if (defs.length !== 2 || !isRangeLabel(text) || defs.some((d) => d.kind !== 'date')) continue;
+      defs[0]!.range = 'start';
+      defs[1]!.range = 'end';
+    }
   }
 
   /**

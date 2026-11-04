@@ -61,6 +61,12 @@ export interface FieldDef {
    * document order); a field outside a matrix has none. Helpers and the fill screen find a matrix's fields by it.
    */
   block?: string;
+  /**
+   * Word only (R20): the first (`start`) or last (`end`) day of a period, for exactly two date fields that one period
+   * label names in the same cell or line (`Date (from to): [from] - [to]`). Auto-fill links them to the week's Monday
+   * and Sunday. Unset everywhere else.
+   */
+  range?: 'start' | 'end';
   /** `low` for a field whose label or kind was a guess, which the person is asked to check. */
   confidence: 'high' | 'low';
 }
