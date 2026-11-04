@@ -269,7 +269,7 @@ class Detector {
   private rowFields(rows: RowInfo[], i: number, cells: readonly CellInfo[], boxAbove: string | undefined): void {
     for (const c of cells) {
       const ci = rows[i].cells.indexOf(c);
-      this.addFields(c.tokens, (t, ti) => this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove);
+      this.addFields(c.tokens, (t, ti) => this.cellLabel(rows, i, ci, ti, t.field) ?? boxAbove ?? farLabel(rows, i, ci, ti, t.field));
     }
   }
 
@@ -468,7 +468,7 @@ class Detector {
       rows[i].cells.forEach((c, ci) => c.tokens.forEach((t, ti) => {
         if (t.t !== 'field') return;
         const k = columns.length + 1;
-        const text = this.cellLabel(rows, i, ci, ti, t.field);
+        const text = this.cellLabel(rows, i, ci, ti, t.field) ?? farLabel(rows, i, ci, ti, t.field);
         columns.push(makeField(t.field, { id: `g${n}.c${k}`, text, fallback: `Column ${k}`, section: this.section, loc: this.addr.relative(items[0], nodeOf(t.field)) }));
       }));
     }
@@ -599,6 +599,103 @@ function headerAbove(rows: RowInfo[], i: number, grid: number): string | undefin
     } else if (words) {
       return undefined;
     }
+  }
+  return undefined;
+}
+
+/**
+ * The text that names a field in a table cell when nothing in its own cell before it, in the cell before it or in a
+ * header above it does (`cellLabel`), from the layouts of real forms; the first that gives a text wins:
+ * 1. the text further left in its row, past cells with no text and no field (`rowName`): `Demo ropes | ☐ | [field]`;
+ * 2. the title row just above, when the field is the only thing to fill in its row (`titleAbove`): a box for an account
+ *    or pictures under its title;
+ * 3. a header above it past rows of fields and title rows (`headerOverFields`): `Steady` over a column of
+ *    `[field] u/h` cells, `Jottings` over a block that a title row opens;
+ * 4. the caption after the field in its own cell (`captionAfter`): `[field] large`, or `(time of day)` printed under it.
+ *
+ * Each is visible text near the field that names no other field: none passes a cell with a field in its row, and
+ * text that another field follows or that labels a field beside it is that field's. The order keeps `cellLabel`'s:
+ * the row before what is above, and both before what the field's own cell says after it.
+ */
+function farLabel(rows: RowInfo[], i: number, ci: number, ti: number, field: RawField): string | undefined {
+  const cell = rows[i].cells[ci];
+  return rowName(rows, i, ci) ?? titleAbove(rows, i) ?? headerOverFields(rows, i, cell.cell) ?? captionAfter(cell.tokens, ti, field);
+}
+
+/**
+ * The text of the title row just above row `i` (one cell across the table), when row `i` holds one field and nothing
+ * else to fill: the title names that box. A row of several fields under a title row is a block the title only heads.
+ */
+function titleAbove(rows: RowInfo[], i: number): string | undefined {
+  const title = i > 0 ? rows[i - 1].title : undefined;
+  return title !== undefined && rows[i].cells.reduce((n, c) => n + c.fields + c.boxes, 0) === 1 ? title : undefined;
+}
+
+/**
+ * The header above the cell `cell` of row `i`, read as `headerAbove` does, but going on through rows of fields and
+ * title rows:
+ * - a cell there that holds a field is passed, whatever text it has (that text is its own field's: a unit, a caption);
+ * - a cell of text alone is the header, unless it names something of its own row: the next cell after it that is not
+ *   empty holds a field (which takes the text as its label), or it is one of the cells before the row's first field that
+ *   name the row (`Z-1 | Demo shed | [field]`), and is not bold as a header is;
+ * - a title row (one cell across the table, naming the block under it) is passed too. A header found above one must sit
+ *   exactly over the field's cell (the same grid columns), so that it heads the same column of the table.
+ */
+function headerOverFields(rows: RowInfo[], i: number, cell: Cell): string | undefined {
+  let titled = false;
+  const over = (c: CellInfo): string | undefined => (!titled || (c.cell.grid === cell.grid && c.cell.span === cell.span) ? c.text : undefined);
+  for (let r = i - 1; r >= 0; r -= 1) {
+    const info = rows[r];
+    if (info.title !== undefined) {
+      titled = true;
+      continue;
+    }
+    const c = cellAt(info, cell.grid);
+    if (!c) return undefined;
+    const words = hasWords(c.text);
+    if (!info.fields) {
+      if (words) return over(c);
+      if (c.cell.vMerge !== 'continue') return undefined;
+    } else if (c.fields === 0 && c.boxes === 0 && words) {
+      const k = info.cells.indexOf(c);
+      const next = info.cells.slice(k + 1).find((d) => !d.empty);
+      const labelsNext = next !== undefined && (next.fields > 0 || next.boxes > 0);
+      const namesRow = !c.bold && !info.cells.slice(0, k).some((d) => d.fields > 0 || d.boxes > 0);
+      return labelsNext || namesRow ? undefined : over(c);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The text after a field in its own cell, to the cell's end (paragraph ends count as spaces), when that text has
+ * words: `[field] large`, `[field]` over `(time of day)`. Text that another field or box follows is that one's label, so
+ * then there is none. A checkbox's words are found by `inlineLabel`.
+ */
+function captionAfter(tokens: readonly Token[], ti: number, field: RawField): string | undefined {
+  if (isCheckbox(field)) return undefined;
+  const parts: string[] = [];
+  for (const t of tokens.slice(ti + 1)) {
+    if (t.t === 'text') parts.push(t.s);
+    else if (t.t === 'break') parts.push(' ');
+    else if (t.t !== 'object') return undefined;
+  }
+  const text = clean(parts.join(''));
+  return hasWords(text) ? text : undefined;
+}
+
+/**
+ * The text that names the row of the cell `ci` of row `i`: the nearest cell to its left with text, past cells with no
+ * text and no field (empty, or holding only a printed tick box or symbol, which is not a field); a merged cell's
+ * continuation counts as the cell that opens it. A cell with a field on the way stops it, and so does a cell whose text
+ * has no word of two letters or more: a mark (`X`, `-`) or a lone number is no name.
+ */
+function rowName(rows: RowInfo[], i: number, ci: number): string | undefined {
+  for (let k = ci - 1; k >= 0; k -= 1) {
+    const at = rows[i].cells[k];
+    const c = at.cell.vMerge === 'continue' ? mergeOrigin(rows, i, at.cell.grid) : at;
+    if (!c || c.fields > 0) return undefined;
+    if (hasWords(c.text)) return /\p{L}{2}/u.test(c.text) ? c.text : undefined;
   }
   return undefined;
 }

@@ -260,6 +260,101 @@ export function unevenRowsDocx(): Uint8Array {
 }
 
 /**
+ * `TST-15 Demo Far Labels`: FORMTEXT fields in table cells whose label is neither before them in their cell, nor in the
+ * cell before them, nor in a header just above. Each table holds one layout and the cases its rule must leave alone.
+ * - `Demo tour`: the header ` | Seen | Jottings` (the first cell two columns wide); a title row `Demo first round` over
+ *   items `n. | item | printed tick box | [field]`; a title row `Demo second round:` over rows whose item is a field.
+ * - `Demo flows`: the header `Fluid | Gentle | Steady | Brisk` over rows of a fluid and three `[field] u/h` cells.
+ * - `Demo cargo`: `Courier: [field] | Mass | Scale | Crates` over `Buyer: [field] | [field] | [field] | [field]`; then
+ *   `Gate: [field] | Demo lane | [field]` over `Exit: [field] | [field] | [field]`.
+ * - `Demo zones`: the header `Ref | Zone | Looked at`, two rows `Z-1 | Demo shed | [field]`, and a free row of three
+ *   fields.
+ * - `Demo counts`: `Counted: | [field] small | [field] large` and `Opens: | [field] (day) | [field] (time of day)`, the
+ *   caption of each in a paragraph of its own; then `[field] plus [field] |  | ` with nothing else near.
+ * - `Demo boxes`: a title row `Demo account` over one field across the table; a title row `Demo pictures` over two
+ *   rows that each hold one field in their second cell; a title row `Demo twins` over a row of two fields.
+ * - `Demo spans`: the header `Demo part | Demo state` (two columns wide), a title row `Demo block`, and
+ *   `Demo valve | [field] | [field]`.
+ * - a table of one row `X |  | [field]`.
+ */
+export function farLabelsDocx(): Uint8Array {
+  const c = new Controls();
+  const field = (after = '') => ({ content: p(c.formText() + (after ? run(after) : '')) });
+  const captioned = (caption: string) => ({ content: p(c.formText()) + p(run(caption)) });
+  const bold = (text: string, span = 1) => ({ text, bold: true, span });
+
+  const listWidths = [700, 4300, 900, 3738];
+  const checklist = table(listWidths, [
+    row(listWidths, [bold('', 2), bold('Seen'), bold('Jottings')]),
+    titleRow(listWidths, 'Demo first round'),
+    row(listWidths, ['1.', 'Demo shutters: look for gaps', { content: p(tickBox()) }, field()]),
+    row(listWidths, ['2.', 'Demo ropes', { content: p(tickBox()) }, field()]),
+    titleRow(listWidths, 'Demo second round:'),
+    row(listWidths, ['3.', field(), { content: p(tickBox()) }, field()]),
+    row(listWidths, ['4.', field(), { content: p(tickBox()) }, field()]),
+  ]);
+
+  const quarter = [2400, 2400, 2400, 2438];
+  const rates = table(quarter, [
+    row(quarter, [bold('Fluid'), bold('Gentle'), bold('Steady'), bold('Brisk')]),
+    row(quarter, ['Demo fluid A', field(' u/h'), field(' u/h'), field(' u/h')]),
+    row(quarter, ['Demo fluid B', field(' u/h'), field(' u/h'), field(' u/h')]),
+  ]);
+  const labelled = (label: string) => ({ content: p(run(label) + c.formText()) });
+  const cargo = table(quarter, [
+    row(quarter, [labelled('Courier: '), 'Mass', 'Scale', 'Crates']),
+    row(quarter, [labelled('Buyer: '), field(), field(), field()]),
+  ]);
+  const thirds = [3000, 3000, 3638];
+  const gates = table(thirds, [
+    row(thirds, [labelled('Gate: '), 'Demo lane', field()]),
+    row(thirds, [labelled('Exit: '), field(), field()]),
+  ]);
+
+  const areaWidths = [1200, 4000, 4438];
+  const zones = table(areaWidths, [
+    row(areaWidths, [bold('Ref'), bold('Zone'), bold('Looked at')]),
+    row(areaWidths, ['Z-1', 'Demo shed', field()]),
+    row(areaWidths, ['Z-2', 'Demo yard', field()]),
+    row(areaWidths, [field(), field(), field()]),
+  ]);
+
+  const counts = table(thirds, [
+    row(thirds, ['Counted:', field(' small'), field(' large')]),
+    row(thirds, ['Opens:', captioned('(day)'), captioned('(time of day)')]),
+    row(thirds, [{ content: p(c.formText() + run(' plus ') + c.formText()) }, '', '']),
+  ]);
+
+  const halves = [4819, 4819];
+  const boxes = table(halves, [
+    titleRow(halves, 'Demo account'),
+    row(halves, [{ content: p(c.formText()), span: 2 }]),
+    titleRow(halves, 'Demo pictures'),
+    row(halves, ['', field()]),
+    row(halves, ['', field()]),
+    titleRow(halves, 'Demo twins'),
+    row(halves, [field(), field()]),
+  ]);
+
+  const spans = table(thirds, [
+    row(thirds, [bold('Demo part'), bold('Demo state', 2)]),
+    titleRow(thirds, 'Demo block'),
+    row(thirds, ['Demo valve', field(), field()]),
+  ]);
+
+  const markWidths = [800, 800, 8038];
+  const mark = table(markWidths, [row(markWidths, ['X', '', field()])]);
+
+  return wordPackage({
+    kind: 'docx',
+    header: headerBlock(c, { title: 'Demo Far Labels', code: 'TST-15', revision: REVISION }),
+    body: heading('Demo tour') + checklist + p() + heading('Demo flows') + rates + p() + heading('Demo cargo') + cargo + p() + gates + p()
+      + heading('Demo zones') + zones + p() + heading('Demo counts') + counts + p() + heading('Demo boxes') + boxes + p()
+      + heading('Demo spans') + spans + p() + mark + p(),
+  });
+}
+
+/**
  * `TST-07 Demo Field Rows`: tables whose rows already hold a FORMTEXT in each cell to fill.
  * - `Attendees`: a title row, the header `Name | Function / Rank | Signature`, and 4 rows with a FORMTEXT under Name
  *   and under Function / Rank and an empty Signature cell.
