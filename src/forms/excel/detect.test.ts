@@ -103,6 +103,26 @@ describe('detectExcel on the fixtures (the brief\'s tests)', () => {
     expect(s.rowGroups).toEqual([]);
   });
 
+  it('does not take a first item row above blank rows for a sub-header: it looks like the rows under it, not like the header', () => {
+    const sheet = probeSheet('List');
+    sheet.merge('B8:C8', STYLE.header, 'Description').set('D8', 'Qty', STYLE.header).set('E8', 'Remarks', STYLE.header);
+    sheet.merge('B9:C9', STYLE.cell, 'Main pump').blank('D9', STYLE.number).blank('E9', STYLE.cell);
+    for (let r = 10; r <= 13; r += 1) sheet.merge(`B${r}:C${r}`, STYLE.cell).blank(`D${r}`, STYLE.number).blank(`E${r}`, STYLE.cell);
+    const s = detect(sheet.toPackage({ printArea: 'A1:E14', logo: 'A1:A3' }));
+    // Row 9 stays the group's first row, named by its text; no title takes the item's name.
+    expect(s.rowGroups.map((g) => [g.firstRow, g.capacity, g.columns.map((c) => c.label), g.rowLabels?.[0]])).toEqual([[9, 5, ['Qty', 'Remarks'], 'Main pump']]);
+    expect([...s.fields, ...s.rowGroups.flatMap((g) => g.columns)].some((f) => f.label.includes('Main pump'))).toBe(false);
+  });
+
+  it('takes a second title row styled apart from the rows under it (units under a wide title) for a sub-header', () => {
+    const sheet = probeSheet('List');
+    sheet.set('A8', 'Tank', STYLE.header).merge('B8:C8', STYLE.header, 'Sounding').set('D8', 'Remarks', STYLE.header);
+    sheet.blank('A9', STYLE.cell).set('B9', 'cm', STYLE.cell).set('C9', 'm3', STYLE.cell).blank('D9', STYLE.cell);
+    for (let r = 10; r <= 13; r += 1) sheet.blank(`A${r}`, STYLE.cell).blank(`B${r}:C${r}`, STYLE.number).blank(`D${r}`, STYLE.cell);
+    const s = detect(sheet.toPackage({ printArea: 'A1:D14', logo: 'A1:A3' }));
+    expect(s.rowGroups.map((g) => [g.firstRow, g.capacity, g.columns.map((c) => c.label)])).toEqual([[10, 4, ['Tank', 'Sounding cm', 'Sounding m3', 'Remarks']]]);
+  });
+
   it('does not take the first item row for a sub-header when its name fills a wide title', () => {
     const sheet = probeSheet('List');
     sheet.merge('B8:C8', STYLE.header, 'Description').set('D8', 'Spec', STYLE.header).set('E8', 'Qty', STYLE.header);

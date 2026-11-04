@@ -101,7 +101,9 @@ function shownCols(grid: Grid, c1: number, c2: number): number[] {
  * - under every column it has the header's own merge, a sub-title (letters, no formula), or nothing (a title with no
  *   sub-title, such as `Remarks` over an empty cell, keeps its title alone);
  * - the sub-titles of at least one wide header cell cover all its columns;
- * - the cell under each sub-title holds no words, so that a first row of items is never taken for one.
+ * - the cell under each sub-title holds no words, so that a first row of items is never taken for one;
+ * - each sub-title looks like a title: bold under a bold title, or styled apart from the cell under it. A first item
+ *   named above blank rows of the same style is a row of the table.
  */
 function titlesOf(grid: Grid, header: Header, cols: number[]): { titles: Map<number, string>; dataStart: number } {
   const headerKeys = new Set(header.cells.map((o) => o.key));
@@ -126,8 +128,14 @@ function titlesOf(grid: Grid, header: Header, cols: number[]): { titles: Map<num
       const o = grid.origin(r + 1, c);
       return o.row !== r + 1 || !hasLetters(grid.text(o));
     };
+    const looksTitled = (c: number): boolean => {
+      const o = grid.origin(r, c);
+      const top = grid.origin(header.row, c);
+      const below = grid.origin(r + 1, c);
+      return (!!o.cell?.bold && !!top.cell?.bold) || (below.row === r + 1 && o.cell?.styleId !== below.cell?.styleId);
+    };
     const fits = cols.every((c) => underHeader(r, c) || subText(c) || blank(c))
-      && cols.filter(subText).every(headsValues)
+      && cols.filter(subText).every((c) => headsValues(c) && looksTitled(c))
       && header.cells.some((o) => o.c2 > o.col && cols.filter((c) => c >= o.col && c <= o.c2).every(subText));
     if (fits) {
       sub = r;
