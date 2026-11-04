@@ -67,7 +67,7 @@ describe('suggestHelpers', () => {
     expect(h.pickCrew).toEqual(['g1']);
     expect(h.startFromLast).toEqual(['g2']);
     expect(h.jobLog).toEqual([]);
-    // Rank / Function takes the rank; Signature is left empty.
+    // Function / Rank takes the rank; Signature is left empty.
     expect(crewRows(group(rows, 'g1'), [ana, ivo])).toEqual([
       { 'g1.c1': 'Ana Marin', 'g1.c2': 'Chief Officer' },
       { 'g1.c1': 'Ivo Kovac', 'g1.c2': 'Pumpman' },

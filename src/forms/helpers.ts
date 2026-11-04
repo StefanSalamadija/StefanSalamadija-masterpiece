@@ -153,7 +153,7 @@ export function suggestHelpers(schema: FormSchema): Record<HelperKey, string[]> 
 
 /**
  * One row for each person, in the order given (the screen has already chosen who, from `onboardAt`). A Name column gets
- * the full name, a Rank, Function or `Rank / Function` column the rank label (`rankLabel`: the free text for `other`),
+ * the full name, a Rank, Function or `Function / Rank` column the rank label (`rankLabel`: the free text for `other`),
  * and a combined `Name / Rank` column `<full name> / <rank>`. A column that is left empty (a signature) is never
  * written, and neither is any other column.
  */

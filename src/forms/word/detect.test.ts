@@ -234,7 +234,7 @@ describe('detectWord', () => {
         id: 'g1', label: 'Attendees', section: 'Attendees', capacity: 4, growable: true, shape: 'rows', rowLabels: undefined,
         columns: [
           { id: 'g1.c1', kind: 'text', label: 'Name', section: 'Attendees', confidence: 'high', loc: '0/1/1/1' },
-          { id: 'g1.c2', kind: 'text', label: 'Rank / Function', section: 'Attendees', confidence: 'high', loc: '1/1/1/1' },
+          { id: 'g1.c2', kind: 'text', label: 'Function / Rank', section: 'Attendees', confidence: 'high', loc: '1/1/1/1' },
           // An empty cell under a header is a column too; this one asks for a signature, so nothing is written there.
           { id: 'g1.c3', kind: 'text', label: 'Signature', section: 'Attendees', confidence: 'high', leftEmpty: true, loc: '2' },
         ],

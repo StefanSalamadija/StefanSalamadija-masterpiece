@@ -235,8 +235,8 @@ export function shortDatesDocx(): Uint8Array {
 
 /**
  * `TST-07 Demo Field Rows`: tables whose rows already hold a FORMTEXT in each cell to fill.
- * - `Attendees`: a title row, the header `Name | Rank / Function | Signature`, and 4 rows with a FORMTEXT under Name
- *   and under Rank / Function and an empty Signature cell.
+ * - `Attendees`: a title row, the header `Name | Function / Rank | Signature`, and 4 rows with a FORMTEXT under Name
+ *   and under Function / Rank and an empty Signature cell.
  * - `Documents`: the header `No. | Document | Issued | Expires`; a first row whose Expires cell says `N/A` instead of
  *   holding a field; then 3 rows with the number and name of a document and a FORMTEXT date (`dd/MM/yyyy`) under
  *   Issued and under Expires.
@@ -251,7 +251,7 @@ export function fieldRowsDocx(): Uint8Array {
   const crewWidths = [4000, 3000, 2638];
   const attendees = table(crewWidths, [
     titleRow(crewWidths, 'Attendees'),
-    headerRow(crewWidths, ['Name', 'Rank / Function', 'Signature']),
+    headerRow(crewWidths, ['Name', 'Function / Rank', 'Signature']),
     ...Array.from({ length: 4 }, () => row(crewWidths, [field(), field(), ''])),
   ]);
 
