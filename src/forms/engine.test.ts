@@ -145,7 +145,7 @@ describe('formFileName', () => {
   });
 
   it('turns bidi and other invisible format characters into - too, so a name cannot be shown back to front', () => {
-    expect(formFileName({ code: '', title: 'Plan‮xcod.exe​', revision: '' }, DATE, 'docx')).toBe('Plan-xcod.exe- 2026-10-28.docx');
+    expect(formFileName({ code: '', title: 'Plan\u202Excod.exe\u200B', revision: '' }, DATE, 'docx')).toBe('Plan-xcod.exe- 2026-10-28.docx');
   });
 
   it('collapses runs of whitespace and trims', () => {
