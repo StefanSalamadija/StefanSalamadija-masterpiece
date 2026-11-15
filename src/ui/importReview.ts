@@ -112,6 +112,7 @@ const LABELS: Record<TableName, Record<string, string>> = {
   ships: PARTICULARS_LABELS, crew: CREW_LABELS, voyages: VOYAGE_LABELS, certificates: CERTIFICATE_LABELS, clockChanges: CLOCK_LABELS,
   crewDocuments: CREW_DOCUMENT_LABELS, formTemplates: FORM_TEMPLATE_LABELS, formDrafts: FORM_DRAFT_LABELS,
   formLastValues: FORM_LAST_VALUES_LABELS, formPhotos: FORM_PHOTO_LABELS,
+  libraryDocs: { title: 'Title', tags: 'Tags' }, libraryFolders: { name: 'Name' },
 };
 
 /**
@@ -274,6 +275,8 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
       const size = [r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n));
       return size ? `Photo: ${String(r.width)} × ${String(r.height)}` : 'Photo';
     }
+    case 'libraryDocs': return `Library document: ${nameOf(r.title, '(no title)')}`;
+    case 'libraryFolders': return `Library folder: ${nameOf(r.name, '(no name)')}`;
   }
 }
 

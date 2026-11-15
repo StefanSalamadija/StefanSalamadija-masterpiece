@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SHIP_TABLES, TABLE_NAMES } from '../domain/types';
+import { PERSONAL_TABLES, SHIP_TABLES, TABLE_NAMES } from '../domain/types';
 import type { ClockChange, CrewDocument, CrewDraft, CrewMember, ShipProfile, SyncRecord, Tables, Voyage } from '../domain/types';
 import { getDb, openDb } from './schema';
 import { getSettings, guessDeviceName, updateSettings } from './settings';
@@ -27,11 +27,11 @@ afterEach(() => {
 });
 
 describe('database', () => {
-  it('declares schema version 3 with the syncable tables, settings and snapshots', () => {
+  it('declares schema version 4 with the syncable tables, settings and snapshots', () => {
     const db = freshDb();
-    expect(db.verno).toBe(3);
+    expect(db.verno).toBe(4);
     expect(db.tables.map((t) => t.name).sort()).toEqual([
-      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates',
+      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFiles', 'libraryFolders', 'libraryText',
       'settings', 'ships', 'snapshots', 'voyages',
     ]);
     expect(db.crewDocuments.schema.primKey.name).toBe('id');
@@ -46,9 +46,9 @@ describe('database', () => {
     const tables = new Map(db.tables.map((t) => [t.name, t]));
     for (const name of TABLE_NAMES) {
       expect(tables.has(name), name).toBe(true);
-      if (name !== 'ships' && name !== 'formTemplates') expect(tables.get(name)?.schema.idxByName, name).toHaveProperty('shipId');
+      if (!['ships', ...PERSONAL_TABLES].includes(name)) expect(tables.get(name)?.schema.idxByName, name).toHaveProperty('shipId');
     }
-    expect([...SHIP_TABLES]).toEqual(TABLE_NAMES.filter((name) => name !== 'ships' && name !== 'formTemplates'));
+    expect([...SHIP_TABLES]).toEqual(TABLE_NAMES.filter((name) => !['ships', ...PERSONAL_TABLES].includes(name)));
   });
 
   it('keeps the forms library apart from the ships: templates are not indexed by ship', () => {
@@ -261,7 +261,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
     const t = await allTables(db);
     expect(Object.keys(t)).toEqual([...TABLE_NAMES]);
     expect(Object.keys(t).sort()).toEqual([
-      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'ships', 'voyages',
+      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFolders', 'ships', 'voyages',
     ]);
     expect(t.ships.map((r) => r.id)).toEqual([ship.id]);
     expect(t.crew.map((r) => r.id)).toEqual(crew.map((m) => m.id).sort());
@@ -306,7 +306,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
     await db.snapshots.put({ id: 'snap-1', createdAt: '2026-10-25T00:00:00.000Z', reason: 'manual', data: await allTables(db) });
     const incoming: Tables = {
       ships: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-      formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+      formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
       crew: [{ id: 'm-1', createdAt: 'x', updatedAt: 'x', updatedBy: 'x', deleted: true, scope: 'ship', shipId: 'gone', ...draft } as CrewMember],
     };
     await replaceAllTables(db, incoming);

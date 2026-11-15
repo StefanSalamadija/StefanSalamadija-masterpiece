@@ -378,8 +378,8 @@ describe('conflictViews', () => {
   });
 
   it('works on a plan the merge made', () => {
-    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] };
-    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] };
+    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [] };
+    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [] };
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
@@ -388,7 +388,7 @@ describe('conflictViews', () => {
 
 describe("a merge of the contract length, the planned relief, the ship's limit and its crew list columns", () => {
   const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-    formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], ...extra,
+    formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [], ...extra,
   });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');

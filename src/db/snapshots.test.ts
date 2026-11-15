@@ -25,10 +25,10 @@ function at(hour: number) {
 }
 
 /** The counts of the forms tables of a snapshot that has none. */
-const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0 };
+const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0 };
 const emptyTables = (): Tables => ({
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
 });
 
 beforeEach(() => {

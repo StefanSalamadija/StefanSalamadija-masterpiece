@@ -122,7 +122,7 @@ describe('snapshotCountsText', () => {
   const counts = (over: Partial<Record<TableName, number>>): Record<TableName, number> =>
     ({
       ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0,
-      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, ...over,
+      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0, ...over,
     });
 
   it('lists what the snapshot holds, with the right plural', () => {

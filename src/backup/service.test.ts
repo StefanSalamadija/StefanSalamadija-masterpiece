@@ -53,7 +53,7 @@ afterEach(() => {
 
 const emptyTables = (): Tables => ({
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
 });
 
 /** Device A as the tests use it: two ships, and on the first one crew (one of them deleted), a voyage, a certificate and a personal-scope record. */
@@ -573,7 +573,7 @@ describe('prepareImport and applyImport between two devices', () => {
     const snapshots = await listSnapshots(b);
     expect(snapshots[0].reason).toBe('before-import');
     expect(snapshots[0].counts).toEqual({
-      ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0,
+      ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
     });
   });
 
@@ -1120,6 +1120,8 @@ describe('prepareImport rejects what it cannot trust', () => {
     },
     formLastValues: { ...base, id: 'lst-1', shipId: 'ship-1', code: 'TST-01', values: { fields: {}, rows: {} } },
     formPhotos: { ...base, id: 'pho-1', shipId: 'ship-1', draftId: 'drf-1', jpegBase64: '/9j/', width: 1, height: 1 },
+    libraryDocs: { ...base, scope: 'personal', id: 'lib-1', title: 'Manual', sha256: 'ab', tags: [] },
+    libraryFolders: { ...base, scope: 'personal', id: 'fol-1', name: 'Engine' },
   };
 
   /** A correctly sealed file in which one record of `table` carries `patch`; a key set to undefined is left out of the file. */
@@ -1217,5 +1219,54 @@ describe('prepareImport rejects what it cannot trust', () => {
     const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
     await expect(prepareImport(b, text, 'wrong-password')).rejects.toThrow(WrongPasswordError);
     await expect(prepareImport(b, 'not a backup', PW)).rejects.toThrow(NotABackupError);
+  });
+});
+
+describe('the knowledge library in a backup', () => {
+  const libStamp = { createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'x', scope: 'personal' };
+  const lrec = (id: string, extra: object, deleted = false): SyncRecord => ({ id, ...libStamp, deleted, ...extra }) as unknown as SyncRecord;
+  const t: Tables = {
+    ...emptyTables(),
+    ships: [lrec('s1', { scope: 'ship' })],
+    libraryDocs: [lrec('d1', { title: 'A', sha256: 'a', tags: [] }), lrec('d2', { title: 'B', sha256: 'b', tags: [] }, true)],
+    libraryFolders: [lrec('f1', { name: 'Engine' }), lrec('f2', { name: 'Gone' }, true)],
+  };
+
+  it('puts the live documents and folders into every handover, with or without the forms library', () => {
+    for (const includeLibrary of [true, false]) {
+      const h = collectHandover(t, 's1', { includeLibrary });
+      expect(h.libraryDocs.map((r) => r.id), String(includeLibrary)).toEqual(['d1']);
+      expect(h.libraryFolders.map((r) => r.id), String(includeLibrary)).toEqual(['f1']);
+    }
+  });
+
+  it('puts them into a full backup, and leaves the files and the text out', async () => {
+    const db = freshDb();
+    const ship = await createShip(db, 'M/V Ocean Star', 120);
+    const { addDocument } = await import('../db/library');
+    const added = await addDocument(db, {
+      title: 'Pump notes', tags: [], fileName: 'p.pdf', mimeType: 'application/pdf', kind: 'pdf', size: 1, sha256: 's', textStatus: 'indexed',
+      blob: new Blob(['a']), parts: [{ part: 1, label: 'Page 1', text: 'bilge' }],
+    });
+    const { text } = await exportBackup(db, 'full', PW, { shipId: ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    expect(payload.tables.libraryDocs.map((r) => r.id)).toEqual([added.id]);
+    expect(payload.tables).not.toHaveProperty('libraryFiles');
+    expect(payload.tables).not.toHaveProperty('libraryText');
+    const handover = await openBackup((await exportBackup(db, 'handover', PW, { shipId: ship.id, ...FAST })).text, PW);
+    expect(handover.payload.tables.libraryDocs.map((r) => r.id)).toEqual([added.id]);
+  });
+
+  it('still imports a backup made before the library existed', async () => {
+    const a = await deviceA();
+    const { libraryDocs: _d, libraryFolders: _f, ...before } = await allTables(a.db);
+    const header: BackupHeader = { format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-old', deviceName: 'Old phone', exportedAt: '2026-10-20T00:00:00.000Z' };
+    const old = await sealBackup(header, { tables: before } as never, PW, FAST);
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, old, PW), { conflicts: {}, applyDeletions: true });
+    const imported = await allTables(b);
+    expect(imported.libraryDocs).toEqual([]);
+    expect(imported.libraryFolders).toEqual([]);
+    expect(imported.ships).toHaveLength(2);
   });
 });
