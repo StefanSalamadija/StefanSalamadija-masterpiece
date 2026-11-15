@@ -24,6 +24,8 @@ import type { RowEdit, RowEdits } from '../crewImportView';
 import { useLive } from '../useLive';
 
 const FILE_TYPES = '.xlsx,.xls,.csv';
+/** Columns that hold a name: one of them is needed before the file counts as understood. */
+const NAME_COLUMNS: readonly CrewField[] = ['surname', 'givenNames', 'fullName'];
 
 /** What the wizard knows once a file is read. The preview is made from it, so changing any of it makes the preview again. */
 interface Loaded {
@@ -110,6 +112,8 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const [problem, setProblem] = useState<string>();
   /** How many crew are being imported, while that is going on. */
   const [importing, setImporting] = useState<number>();
+  /** "Adjust columns" is open: the user opened it, or it opened because no names were found. */
+  const [adjustOpen, setAdjustOpen] = useState(false);
   const latestRead = useRef(0);
   const lastFixed = useRef<number | undefined>(undefined);
   const leavingFix = useRef(false);
@@ -186,6 +190,7 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
     setCleared(hasEdits(edits));
     setFixing(undefined);
     setProblem(undefined);
+    setAdjustOpen(false);
     setReading(file !== undefined);
     if (!file) return;
     try {
@@ -256,6 +261,11 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const fieldOfColumn = new Map((Object.entries(loaded?.mapping ?? {}) as [string, number][]).map(([field, column]) => [column, field]));
   const header = grid && loaded && headerNumber !== undefined ? grid.rows[loaded.headerRow] : undefined;
   const count = importCount(rows);
+  // The file was understood (a names column, and people under it): then the settings stay folded under "Adjust columns".
+  const understood = !!loaded && NAME_COLUMNS.some((field) => loaded.mapping[field] !== undefined) && rows.length > 0;
+  const found = !loaded || fixRow || rowCount === 0 ? ''
+    : understood ? `Found ${rows.length} crew ${rows.length === 1 ? 'member' : 'members'}. Check the list below and tap Import.`
+    : "Couldn't find a column with names. Choose which column holds the names under Adjust columns.";
   const summary = previewSummary(rows);
 
   // While a row is fixed only its form is shown; the wizard is hidden, not gone, so that it is as it was when the form closes.
@@ -277,6 +287,8 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
 
           {!fixRow && loaded && grid && (
             <>
+              <details class="import-adjust" open={adjustOpen || !understood} onToggle={(e) => setAdjustOpen(e.currentTarget.open)}>
+              <summary>Adjust columns</summary>
               <SelectField
                 label="Sheet" value={String(loaded.sheetIndex)}
                 onChange={(value) => {
@@ -329,11 +341,12 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
                   </div>
                 </>
               )}
+              </details>
             </>
           )}
 
           {/* The one place the wizard says what it is doing or has done. It stays on the page and only its text changes, so that it is announced. */}
-          <p class="live" role="status">{reading ? 'Reading file…' : cleared ? CLEARED_MESSAGE : ''}</p>
+          <p class="live" role="status">{reading ? 'Reading file…' : cleared ? CLEARED_MESSAGE : found}</p>
 
           {!fixRow && header && (
             <>

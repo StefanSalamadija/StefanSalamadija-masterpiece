@@ -105,17 +105,34 @@ function isCapitals(word: string): boolean {
   return /\p{L}/u.test(word) && word === word.toUpperCase();
 }
 
+/** Words that belong to the surname after them: "DE GUZMAN", "DELA CRUZ", "DA SILVA", "VAN DIJK". */
+const SURNAME_PARTICLES = new Set(['de', 'del', 'dela', 'delos', 'delas', 'da', 'dos', 'das', 'di', 'van', 'von', 'mc', 'san', 'santa']);
+/** Two-word particles: "DE LA CRUZ", "DE LOS SANTOS", "VAN DER BERG". */
+const SURNAME_PARTICLE_PAIRS = new Set(['de la', 'de los', 'de las', 'van der', 'van den', 'von der']);
+
 /**
  * Splits a full name into surname and given names. With a comma the surname is what precedes it. Otherwise it is the
- * leading words in capitals (`VAN DER BERG Jan`), or else the last word (`Ivan Petrović`). The spacing inside each part is kept.
+ * leading words in capitals (`VAN DER BERG Jan`), or else the last word (`Ivan Petrović`).
+ * Under a surname-first heading (`surnameFirst`) it is the first word, with any particles before it (`DE LA PRUEBA Ana`). The spacing inside each part is kept.
  */
-export function splitFullName(text: string): { surname: string; givenNames: string } {
+export function splitFullName(text: string, surnameFirst = false): { surname: string; givenNames: string } {
   const name = text.trim();
   const comma = name.indexOf(',');
   if (comma !== -1) return { surname: name.slice(0, comma).trim(), givenNames: name.slice(comma + 1).trim() };
 
   const words = [...name.matchAll(/\S+/g)];
   if (words.length === 0) return { surname: '', givenNames: '' };
+  if (surnameFirst) {
+    // The surname is the first word, with a particle in front of it ("DE LA PRUEBA ANA"), as long as a given name is left.
+    const word = (i: number): string => words[i][0].toLowerCase();
+    const pair = words.length > 1 && SURNAME_PARTICLE_PAIRS.has(`${word(0)} ${word(1)}`);
+    let n = 0;
+    if (pair && words.length > 3) n = 2;
+    else if (SURNAME_PARTICLES.has(word(0)) && words.length > 2) n = 1;
+    const last = words[n];
+    const end = last.index + last[0].length;
+    return { surname: name.slice(0, end), givenNames: name.slice(end).trim() };
+  }
   let leading = 0;
   while (leading < words.length && isCapitals(words[leading][0])) leading++;
   if (leading > 0) {

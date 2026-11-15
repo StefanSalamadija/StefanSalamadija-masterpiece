@@ -10,6 +10,12 @@ import type { CrewSheetRow } from './fixtures/makeCrewXlsx';
 const previewList = (page: Page) => page.getByRole('list', { name: 'Preview' });
 const previewRow = (page: Page, text: string | RegExp) => previewList(page).getByRole('listitem').filter({ hasText: text });
 
+/** Opens "Adjust columns", where the sheet, header row, columns and date format are, when it is folded away. */
+async function adjust(page: Page): Promise<void> {
+  const section = page.locator('details.import-adjust');
+  if (!(await section.evaluate((e) => (e as HTMLDetailsElement).open))) await section.locator('summary').click();
+}
+
 /** Every record of an IndexedDB store as stored, to check what was really written. */
 function stored(page: Page, store: 'crew' | 'ships' | 'snapshots'): Promise<Record<string, any>[]> {
   return page.evaluate(
@@ -189,6 +195,7 @@ test('the header row is checked, and changing it or a column rebuilds the previe
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   await expect(previewList(page).getByRole('listitem')).toHaveCount(3);
 
   for (const bad of ['0', '10', 'four', '2.5', '']) {
@@ -304,6 +311,7 @@ test('a full name column is ignored, with a note, when the surname or the given 
   const note = page.getByText('Full name is ignored because Surname or Given names are mapped.');
   await expect(note).toHaveCount(0);
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('fullName');
   await expect(note).toBeVisible();
   await page.getByLabel('Surname', { exact: true }).selectOption({ label: '— ignore —' });
@@ -322,6 +330,7 @@ test('the import takes a before-import snapshot and saves the mapping, which the
   await freshApp(page); await setupShip(page);
   await addMember(page, { surname: 'HORVAT', givenNames: 'Ana', dateOfBirth: '1977-07-07', passportNo: 'H1', signOn: '2026-01-01' });
   await page.goto('./#/ship/crew/import'); await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   // The user maps the "No." column to the seaman's book number and picks the date format; both are saved with the ship.
   await page.getByLabel('No.', { exact: true }).selectOption({ label: "Seaman's book no." });
   await page.getByLabel('Date format').selectOption({ label: 'Year first (YYYY-MM-DD)' });
@@ -446,6 +455,7 @@ test('fixes and skips stay when only the way the cells are read changes, and go,
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   const cleared = page.getByRole('status').filter({ hasText: 'Your fixes and skips were cleared because the columns changed.' });
   await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();
   await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
@@ -468,13 +478,14 @@ test('fixes and skips stay when only the way the cells are read changes, and go,
   await expect(previewList(page).getByRole('listitem').filter({ hasText: "O'BRIEN" })).toContainText('Error');
   await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();   // the next thing the user does takes the notice away
   await expect(cleared).toHaveCount(0);
-  await expect(page.getByRole('status')).toBeEmpty();
+  await expect(page.getByRole('status')).toHaveText('Found 3 crew members. Check the list below and tap Import.');   // back to what was found
 });
 
 test('a column the user ignored although its header is known stays ignored on the next import', async ({ page }, info) => {
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   await expect(page.getByLabel('Date of birth', { exact: true })).toHaveValue('dateOfBirth');
   await page.getByLabel('Date of birth', { exact: true }).selectOption({ label: '— ignore —' });
   await expect(page.getByRole('button', { name: 'Import 3 crew' })).toBeEnabled();    // the bad date was in the ignored column
@@ -590,6 +601,7 @@ test('a fixed row follows the default sign-on date, since it has none of its own
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
   await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByRole('button', { name: 'Done' }).click();
   await expect(previewRow(page, "O'BRIEN")).toContainText('New');
@@ -606,6 +618,7 @@ test('a sign-on date the user fixed is kept when the default sign-on date change
   const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
   await freshApp(page); await setupShip(page); await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
+  await adjust(page);
   await previewRow(page, "O'BRIEN").getByRole('button', { name: 'Fix' }).click();
   await page.getByLabel('Date of birth').fill('1990-02-28'); await page.getByLabel('Sign-on date').fill('2026-05-05');
   await page.getByRole('button', { name: 'Done' }).click();
@@ -664,6 +677,48 @@ test.describe('while the file is read', () => {
     await expect(page.getByRole('status')).toHaveText('Reading file…');
     release();
     await expect(previewList(page)).toBeVisible();
-    await expect(page.getByRole('status')).toBeEmpty(); // the region stays on the page, and only its text goes
+    // The region stays on the page, and only its text changes: from reading to what was found.
+    await expect(page.getByRole('status')).toHaveText('Found 3 crew members. Check the list below and tap Import.');
   });
+});
+
+// An IMO FAL crew list as kept in Excel: numbered headings that cover two columns. The names and numbers are made up.
+const FAL_ROWS: CrewSheetRow[] = [
+  [null, null, null, null, null, null, 'IMO CREW LIST'],
+  [null, '1. Name of Ship', null, null, '2. Port of Arrival / Departure', null, null, null, '3. Date of Arrival / Departure', null, null, null, 'IMO no.'],
+  [null, null, 'TEST VESSEL', null, null, null, 'SOMEPORT', null, null, null, null, null, '1234567'],
+  [null, '7. No.', '8. Family name, given names', '9.Rank or rating', '10. Nationality and Sex', null, '11. Date and place of birth', null,
+    '12. Passport No. & Expiry date', null, "13. Seaman's Book No. & Expiry date", null, '14. Date & Place of Join', null],
+  [null, 1, 'TESTMAN ALAN BRIAN', 'Master', 'FILIPINO', 'Male', '30.07.1974', 'TESTCITY', 'P1234567A', '04.01.2028', 'A0000001', '22.10.2036', '20.10.2026', 'SINGAPORE'],
+  [null, 2, 'DE TESTA CARLO', 'Chief Officer', 'MONTENEGRIN', 'Male', '11.04.1994', 'KOTOR', 'P7000002', '28.08.2034', '0000002', '23.08.2034', '13.10.2026', 'ESPERANCE'],
+];
+
+test('an IMO FAL crew list imports in one step, settings folded away', async ({ page }, info) => {
+  await freshApp(page); await setupShip(page);
+  const file = info.outputPath('fal.xlsx'); await makeCrewXlsx(file, 'xlsx', FAL_ROWS);
+  await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(page.getByRole('status')).toHaveText('Found 2 crew members. Check the list below and tap Import.');
+  await expect(page.getByLabel('Header row')).toBeHidden();
+  await expect(previewRow(page, 'DE TESTA')).toContainText('CARLO');
+  await expectNoHorizontalScroll(page);
+  await page.getByRole('button', { name: 'Import 2 crew' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+  const crew = await stored(page, 'crew');
+  expect(crew.map((c) => [c.surname, c.givenNames, c.passportNo, c.signOnPort]).sort()).toEqual([
+    ['DE TESTA', 'CARLO', 'P7000002', 'ESPERANCE'], ['TESTMAN', 'ALAN BRIAN', 'P1234567A', 'SINGAPORE'],
+  ]);
+});
+
+test('a file without a names column opens Adjust columns with a plain message', async ({ page }, info) => {
+  await freshApp(page); await setupShip(page);
+  const file = info.outputPath('odd.xlsx'); await makeCrewXlsx(file, 'xlsx', [['Col A', 'Col B'], ['x', 'y']]);
+  await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(page.getByText("Couldn't find a column with names. Choose which column holds the names under Adjust columns.")).toBeVisible();
+  await expect(page.getByLabel('Header row')).toBeVisible();
+  // Choosing the names column leaves the section open while the user is still in it.
+  await page.getByLabel('Col A', { exact: true }).selectOption({ label: 'Full name' });
+  await expect(page.getByRole('status')).toHaveText('Found 1 crew member. Check the list below and tap Import.');
+  await expect(page.getByLabel('Header row')).toBeVisible();
 });
