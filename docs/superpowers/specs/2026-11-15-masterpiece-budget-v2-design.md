@@ -1,7 +1,7 @@
 # Masterpiece — Budget Tracker v2 (Piece 5) Design
 
 Date: 2026-11-15
-Status: draft for user review.
+Status: approved by the user (2026-11-15).
 Base: `2026-10-25-masterpiece-budget-design.md` (approved). **Everything in it still applies** unless this document changes it. This document adds the user's four upgrades and faster entry, and fixes the parts the base left open.
 
 > Privacy: this public document describes structure only. It never includes the user's figures, names or notes. Tests use made-up budgets; the real workbook is used only locally for acceptance.
