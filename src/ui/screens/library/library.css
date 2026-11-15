@@ -11,3 +11,42 @@
 .lib-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; }
 .lib-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .lib-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.lib-part { display: block; min-height: var(--target); padding: 6px 0; color: inherit; overflow-wrap: anywhere; border-top: 1px solid var(--border, transparent); }
+.lib-row mark, .viewer mark { background: #ffd54a; color: #000; border-radius: 2px; }
+
+/* The viewer: a toolbar above a box that scrolls, so the page itself never scrolls sideways (even when zoomed in). */
+.viewer { margin: 0 0 16px; }
+.viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.viewer-bar .btn { min-width: var(--target); padding-inline: 12px; }
+.viewer-page { display: flex; align-items: center; gap: 6px; margin: 0; }
+.viewer-page input { width: 4.5em; min-height: var(--target); text-align: center; }
+.viewer-find input { flex: 1 1 10em; min-width: 0; min-height: var(--target); }
+.viewer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+.viewer-tabs .chip[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.viewer-box { position: relative; max-width: 100%; height: min(75vh, 720px); overflow: auto; background: var(--surface); border-radius: 8px; padding: 8px; box-sizing: border-box; }
+.docx-view, .xlsx-view { overflow-wrap: anywhere; }
+.docx-view table, .xlsx-view table { border-collapse: collapse; margin: 8px 0; }
+.docx-view td, .xlsx-view td { border: 1px solid var(--muted); padding: 4px 8px; vertical-align: top; text-align: left; }
+.docx-view td p { margin: 0; }
+.image-view { display: block; max-width: none; height: auto; margin: 0 auto; }
+.pdf-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; min-width: 100%; }
+.pdf-page { position: relative; flex: none; margin-inline: auto; background: #fff; box-shadow: 0 0 0 1px var(--muted); }
+.pdf-page-body, .pdf-page canvas { display: block; }
+
+/* The text layer of pdf.js (the parts of its pdf_viewer.css that the text layer needs): invisible text laid over the canvas, in place. */
+.textLayer {
+  position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-align: initial; text-size-adjust: none;
+  forced-color-adjust: none; transform-origin: 0 0; z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent { display: contents; }
+.textLayer mark { color: transparent; background: rgb(255 213 74 / 0.55); border-radius: 2px; padding: 0; }
+.textLayer ::selection { background: rgb(0 0 255 / 0.25); color: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }

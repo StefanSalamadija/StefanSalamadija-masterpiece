@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
-import { hasFiles, listDocuments, listFolders, purgeDeleted, saveFolder } from '../../../db/library';
+import { allText, hasFiles, listDocuments, listFolders, purgeDeleted, saveFolder } from '../../../db/library';
 import { importFiles } from '../../../library/importFiles';
+import { queryWords, searchLibrary } from '../../../library/search';
 import type { ImportResult } from '../../../library/importFiles';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Field } from '../../components/Field';
@@ -12,6 +13,7 @@ import {
 import type { SortKey } from '../../libraryView';
 import { useDialogAction } from '../../useDialogAction';
 import { useLive } from '../../useLive';
+import { SearchResults } from './SearchResults';
 import './library.css';
 
 function NewFolderDialog({ onClose }: { onClose: () => void }) {
@@ -27,7 +29,7 @@ function NewFolderDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** The knowledge library: import, folders, sort, recently opened, storage. Search is added by the next step. */
+/** The knowledge library: import, folders, sort, recently opened, storage and search. */
 export function Library() {
   const { db } = useAppState();
   const [folderId, setFolderId] = useState<string>();
@@ -38,6 +40,7 @@ export function Library() {
   const [newFolder, setNewFolder] = useState(false);
   const [storage, setStorage] = useState<string>();
   const [query, setQuery] = useState('');
+  const [term, setTerm] = useState('');
   const busy = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -45,6 +48,18 @@ export function Library() {
     const [docs, folders, withFile] = await Promise.all([listDocuments(db), listFolders(db), hasFiles(db)]);
     return { docs, folders, withFile };
   }, [db]);
+
+  // The search runs 200 ms after the last keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setTerm(query), 200);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const searching = queryWords(term).length > 0 && queryWords(query).length > 0;
+  const hits = useLive(async () => {
+    if (!searching) return [];
+    const [docs, folders, text] = await Promise.all([listDocuments(db), listFolders(db), allText(db)]);
+    return searchLibrary({ docs, folders, text, query: term });
+  }, [db, term, searching]);
 
   // Once, when the library opens: drop the files of what was deleted more than 30 days ago.
   useEffect(() => { purgeDeleted(db, new Date()).catch(reportError); }, [db]);
@@ -102,7 +117,6 @@ export function Library() {
         </ul>
       )}
 
-      {/* The search box is wired to the search results by the next step; until then it only holds the text. */}
       <Field label="Search library" value={query} onInput={setQuery} />
 
       <div class="lib-chips" role="group" aria-label="Folders">
@@ -120,9 +134,11 @@ export function Library() {
         </select>
       </div>
 
-      {data && data.docs.length === 0 && <p class="empty">No documents yet. Import manuals and documents to read and search them offline.</p>}
-      {data && data.docs.length > 0 && docs.length === 0 && <p class="empty">No documents in this folder.</p>}
-      {docs.length > 0 && data && (
+      {searching && data && hits && <SearchResults hits={hits} docs={new Map(data.docs.map((d) => [d.id, d]))} withFile={data.withFile} query={term} />}
+
+      {!searching && data && data.docs.length === 0 && <p class="empty">No documents yet. Import manuals and documents to read and search them offline.</p>}
+      {!searching && data && data.docs.length > 0 && docs.length === 0 && <p class="empty">No documents in this folder.</p>}
+      {!searching && docs.length > 0 && data && (
         <ul class="lib-list" role="list" aria-label="Documents">
           {docs.map((doc) => {
             const flag = statusLabel(doc, data.withFile.has(doc.id));
@@ -137,7 +153,7 @@ export function Library() {
         </ul>
       )}
 
-      {recent.length > 0 && (
+      {!searching && recent.length > 0 && (
         <section class="lib-section" aria-label="Recently opened">
           <h3>Recently opened</h3>
           <ul class="lib-list" role="list">

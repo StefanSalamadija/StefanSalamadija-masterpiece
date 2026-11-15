@@ -3,7 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { useRoute } from '../../../app/router';
 import {
-  deleteDocument, getFile, hasFiles, listFolders, restoreDocument, updateDocument,
+  deleteDocument, hasFiles, listFolders, restoreDocument, updateDocument,
 } from '../../../db/library';
 import type { LibraryDoc as Doc } from '../../../domain/types';
 import { attachChosenFile } from '../../../library/importFiles';
@@ -11,28 +11,8 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Field } from '../../components/Field';
 import { metaText, parseTags, statusLabel } from '../../libraryView';
 import { useLive } from '../../useLive';
+import { Viewer } from './Viewer';
 import './library.css';
-
-/** Gives the file to the person: the share sheet where it takes files, else a download. */
-async function openWith(blob: Blob, doc: Doc): Promise<void> {
-  const file = new File([blob], doc.fileName, { type: doc.mimeType || blob.type });
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], title: doc.title });
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) throw err;
-    }
-    return;
-  }
-  const url = URL.createObjectURL(file);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = doc.fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
 
 function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: boolean; folders: { id: string; name: string }[]; onDeleted: () => void }) {
   const { db } = useAppState();
@@ -91,19 +71,6 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
     }
   }
 
-  async function share(): Promise<void> {
-    try {
-      const blob = await getFile(db, doc.id);
-      if (!blob) {
-        setStatus('File not on this device.');
-        return;
-      }
-      await openWith(blob, doc);
-    } catch (err) {
-      reportError(err);
-    }
-  }
-
   return (
     <>
       <p class="lib-meta">{metaText(doc)}</p>
@@ -123,7 +90,6 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
         </div>
       </form>
       <div class="lib-actions">
-        {hasFile && <button type="button" class="btn btn-outline" onClick={() => void share()}>Open with…</button>}
         {!hasFile && (
           <>
             <input id="doc-attach" ref={attachInput} type="file" class="file-input" onChange={(event) => void chooseAttach(event.currentTarget.files?.[0])} />
@@ -144,7 +110,7 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
   );
 }
 
-/** One document: rename, folder, tags, Open with…, Delete (with Undo), and Attach file when the file is not on this device. */
+/** One document: its viewer, then rename, folder, tags, Delete (with Undo), and Attach file when the file is not on this device. */
 export function LibraryDoc() {
   const { db } = useAppState();
   const id = useRoute().params.id ?? '';
@@ -157,6 +123,11 @@ export function LibraryDoc() {
   useEffect(() => setJustDeleted(false), [id]);
 
   const doc = data?.doc;
+  // Opening a document is what puts it in "Recently opened": once for each time the screen is opened on it.
+  const liveId = doc && !doc.deleted ? doc.id : undefined;
+  useEffect(() => {
+    if (liveId) updateDocument(db, liveId, { openedAt: new Date().toISOString() }).catch(reportError);
+  }, [db, liveId]);
   return (
     <section class="screen">
       <p><a href="#/library">Library</a></p>
@@ -174,6 +145,7 @@ export function LibraryDoc() {
           {problem && <p class="field-error" role="alert">{problem}</p>}
         </div>
       )}
+      {doc && !doc.deleted && data.withFile.has(doc.id) && <Viewer doc={doc} />}
       {doc && !doc.deleted && (
         <Details key={doc.id} doc={doc} hasFile={data.withFile.has(doc.id)} folders={data.folders} onDeleted={() => setJustDeleted(true)} />
       )}

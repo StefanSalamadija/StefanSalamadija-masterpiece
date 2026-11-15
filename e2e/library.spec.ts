@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import * as XLSX from 'xlsx';
 import { makeDocx } from './fixtures/makeDocx';
 import { makePdf } from './fixtures/makePdf';
 
@@ -190,4 +191,117 @@ test('library: attach refuses a file that another document has, and uses a diffe
   await expect(page.getByText('DOCX')).toBeVisible();
   await expect(page.getByText('File not on this device')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open with…' })).toBeVisible();
+});
+
+const BALLAST = [['Introduction and exchange rates'], ['Pumps and valves'], ['The ballast exchange procedure for the tanks']];
+const png = () => ({
+  name: 'Pump room.png', mimeType: 'image/png',
+  buffer: Buffer.from(Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0))),
+});
+const xlsx = (name: string) => ({
+  name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  buffer: (() => {
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['Item', 'Qty'], ['Ballast pump', 2]]), 'Pumps');
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['Gate valve', 7]]), 'Valves');
+    return Buffer.from(new Uint8Array(XLSX.write(book, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer));
+  })(),
+});
+const search = async (page: Page, text: string) => {
+  await page.getByLabel('Search library').fill(text);
+  return page.getByRole('list', { name: 'Search results' });
+};
+
+test('library search: a pdf result shows its page and snippet, and opens the viewer at that page with the words marked', async ({ page }) => {
+  await open(page);
+  await importDocs(page, pdf('Ballast Manual.pdf', BALLAST));
+  await expect(list(page).getByRole('listitem')).toHaveCount(1);
+  const results = await search(page, 'BALLAST exch');
+  const hit = results.getByRole('listitem').filter({ hasText: 'Ballast Manual' });
+  await expect(hit).toContainText('Page 3');
+  // "ballast" is in the title, so a page matches on the other words: pages 1 and 3 both have "exchange".
+  await expect(hit.getByRole('link', { name: /Page 3/ }).locator('mark').first()).toHaveText('ballast');
+  await hit.getByRole('link', { name: /Page 3/ }).click();
+  await expect(page.getByLabel('Go to page')).toHaveValue('3');
+  await expect(page.getByText('/ 3', { exact: true })).toBeVisible();
+  await expect(page.locator('.pdf-page[data-page="3"] .textLayer mark').first()).toHaveText('ballast');
+  await expect(page.locator('.pdf-page[data-page="3"] canvas')).toBeVisible();
+  // Find: next match across pages (page 3 -> page 1, wrapping), then back.
+  await page.getByLabel('Find in document').fill('exchange');
+  await page.getByRole('button', { name: 'Next match' }).click();
+  await expect(page.getByLabel('Go to page')).toHaveValue('1');
+  await expect(page.locator('.pdf-page[data-page="1"] .textLayer mark').first()).toHaveText('exchange');
+  await page.getByRole('button', { name: 'Previous match' }).click();
+  await expect(page.getByLabel('Go to page')).toHaveValue('3');
+  // Go to page, next and previous page, zoom.
+  await page.getByLabel('Go to page').fill('2');
+  await page.getByLabel('Go to page').press('Enter');
+  await expect(page.locator('.pdf-page[data-page="2"] canvas')).toBeVisible();
+  await page.getByRole('button', { name: 'Next page' }).click();
+  await expect(page.getByLabel('Go to page')).toHaveValue('3');
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await page.getByRole('button', { name: 'Fit width' }).click();
+  await expect(page.getByRole('button', { name: 'Open with…' })).toBeVisible();
+});
+
+test('library search: tapping the title opens page 1, and opening sets Recently opened', async ({ page }) => {
+  await open(page);
+  await importDocs(page, pdf('Ballast Manual.pdf', BALLAST));
+  const results = await search(page, 'ballast');
+  await results.getByRole('link', { name: 'Ballast Manual' }).click();
+  await expect(page.getByLabel('Go to page')).toHaveValue('1');
+  await page.goto('./#/library');
+  await expect(page.getByRole('region', { name: 'Recently opened' })).toContainText('Ballast Manual');
+});
+
+test('library search: a docx result opens with the word marked', async ({ page }) => {
+  await open(page);
+  await importDocs(page, docx('Safety Plan.docx'));
+  const results = await search(page, 'FOX');
+  await expect(results).toContainText('Document');
+  await results.getByRole('link', { name: /Document/ }).click();
+  await expect(page.locator('.docx-view mark').first()).toHaveText('fox');
+  await expect(page.locator('.docx-view')).toContainText('Second paragraph of the safety plan.');
+});
+
+test('library search: an xlsx result opens on the sheet tab with the word marked', async ({ page }) => {
+  await open(page);
+  await importDocs(page, xlsx('Stores.xlsx'));
+  const results = await search(page, 'gate');
+  await expect(results).toContainText('Sheet Valves');
+  await results.getByRole('link', { name: /Sheet Valves/ }).click();
+  await expect(page.getByRole('tab', { name: 'Valves' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.xlsx-view td mark').first()).toHaveText('Gate');
+  await page.getByRole('tab', { name: 'Pumps' }).click();
+  await expect(page.locator('.xlsx-view')).toContainText('Ballast pump');
+});
+
+test('library search: a meta-only match on an image is found by its tag, and the image is shown', async ({ page }) => {
+  await open(page);
+  await importDocs(page, png());
+  await list(page).getByRole('link', { name: /Pump room/ }).click();
+  await page.getByLabel('Tags').fill('purifier, gauge');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved' })).toBeVisible();
+  await expect(page.locator('img.image-view')).toBeVisible();
+  await page.goto('./#/library');
+  const results = await search(page, 'GAUGE');
+  const hit = results.getByRole('listitem').filter({ hasText: 'Pump room' });
+  await expect(hit).toContainText('Matches the title');
+  await search(page, 'nonexistentword');
+  await expect(page.getByText('No documents match.')).toBeVisible();
+});
+
+test('library search: the pdf viewer has no sideways scroll at 360 px', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await open(page);
+  await importDocs(page, pdf('Ballast Manual.pdf', BALLAST));
+  const results = await search(page, 'ballast exchange');
+  await results.getByRole('link', { name: /Page 3/ }).click();
+  await expect(page.locator('.pdf-page[data-page="3"] canvas')).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  const widest = await page.locator('.pdf-page canvas').evaluateAll((els) => Math.max(...els.map((e) => e.getBoundingClientRect().right)));
+  expect(widest).toBeLessThanOrEqual(360);
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expectNoHorizontalScroll(page);
 });
