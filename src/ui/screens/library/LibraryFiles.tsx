@@ -1,11 +1,14 @@
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { describeError, reportError } from '../../../app/errors';
 import { shareOrDownload } from '../../../backup/share';
-import { getFile, listDocuments, listFolders } from '../../../db/library';
+import { getFile, hasFiles, listDocuments, listFolders } from '../../../db/library';
 import { takeSnapshot } from '../../../db/snapshots';
-import { importLibraryPart, LIBRARY_PART_BYTES, packLibrary, readLibraryPart } from '../../../library/mplib';
-import type { LibraryPart } from '../../../library/mplib';
+import type { LibraryDoc, LibraryFolder } from '../../../domain/types';
+import {
+  checkLibraryHeader, importLibraryPart, LIBRARY_HEADER_BYTES, LIBRARY_PART_BYTES, packLibraryPart, PartialImportError, planLibraryParts, readLibraryPart,
+} from '../../../library/mplib';
+import type { LibraryPlan } from '../../../library/mplib';
 import { Field } from '../../components/Field';
 import { PasswordDialog } from '../../components/PasswordDialog';
 
@@ -26,7 +29,10 @@ function partBytes(): number {
 export function LibraryFiles() {
   const { db } = useAppState();
   const [exporting, setExporting] = useState(false);
-  const [parts, setParts] = useState<LibraryPart[]>([]);
+  /** An export being saved: the plan and the password, kept only until the last part is saved or the screen is left. Parts are made one at a time, when saved. */
+  const session = useRef<{ plan: LibraryPlan; password: string; docs: LibraryDoc[]; folders: LibraryFolder[] } | undefined>(undefined);
+  const [partCount, setPartCount] = useState(0);
+  const [making, setMaking] = useState(false);
   const [saved, setSaved] = useState<Set<number>>(new Set());
   const [status, setStatus] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -37,31 +43,40 @@ export function LibraryFiles() {
   const snapshotted = useRef(false);
   const exportButton = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => () => { session.current = undefined; }, []);
 
   async function exportParts(pw: string): Promise<void> {
-    const docs = await listDocuments(db);
-    const withFiles = new Map<string, Blob>();
-    for (const doc of docs) {
-      const blob = await getFile(db, doc.id);
-      if (blob) withFiles.set(doc.id, blob);
-    }
-    if (withFiles.size === 0) throw new Error('There are no library files on this device to export.');
-    const made = await packLibrary({ docs, folders: await listFolders(db), files: withFiles }, pw, { now: new Date(), partBytes: partBytes() });
-    setParts(made);
+    const [docs, have, folders] = await Promise.all([listDocuments(db), hasFiles(db), listFolders(db)]);
+    const plan = planLibraryParts(docs, have, { partBytes: partBytes() });
+    if (!docs.some((d) => have.has(d.id))) throw new Error('There are no library files on this device to export.');
+    session.current = { plan, password: pw, docs, folders };
+    setPartCount(plan.parts.length);
     setSaved(new Set());
-    setStatus(`Library ready in ${made.length} ${made.length === 1 ? 'part' : 'parts'}. Save each one.`);
+    setStatus(`Library ready in ${plan.parts.length} ${plan.parts.length === 1 ? 'part' : 'parts'}. Save each one.`);
     setExporting(false);
   }
 
   async function savePart(index: number): Promise<void> {
-    const part = parts[index]!;
+    const current = session.current;
+    if (!current || making) return;
+    setMaking(true);
     try {
-      const outcome = await shareOrDownload(part.fileName, new Blob([part.bytes as Uint8Array<ArrayBuffer>]));
+      // Only this part is made, and it is let go of once it is handed over.
+      const part = await packLibraryPart(current.plan, index + 1, { docs: current.docs, folders: current.folders, getFile: (id) => getFile(db, id) }, current.password, { now: new Date() });
+      const outcome = await shareOrDownload(part.fileName, part.blob);
       if (outcome === 'cancelled') return;
-      setSaved((prev) => new Set(prev).add(index));
-      setStatus(`Part ${index + 1} of ${parts.length} saved.`);
+      const next = new Set(saved).add(index);
+      setSaved(next);
+      setStatus(`Part ${index + 1} of ${partCount} saved.`);
+      if (next.size === partCount) {
+        session.current = undefined;
+        setPartCount(0);
+        setStatus(`All ${partCount} parts saved.`);
+      }
     } catch (err) {
       reportError(err);
+    } finally {
+      setMaking(false);
     }
   }
 
@@ -77,9 +92,13 @@ export function LibraryFiles() {
       for (const file of files) {
         let part;
         try {
+          // The first bytes say whether this is a library file at all, before the rest is read.
+          checkLibraryHeader(new Uint8Array(await file.slice(0, LIBRARY_HEADER_BYTES).arrayBuffer()));
           part = await readLibraryPart(new Uint8Array(await file.arrayBuffer()), password);
         } catch (err) {
-          setProblem(`${file.name}: ${describeError(err).message}`);
+          const message = describeError(err).message;
+          // Parts imported before this one stay imported: do not say that nothing changed.
+          setProblem(`${file.name}: ${lines.length > 0 ? message.replace(' Nothing was changed.', '') + ' Parts imported before it stay imported.' : message}`);
           break;
         }
         if (!snapshotted.current) {
@@ -93,6 +112,11 @@ export function LibraryFiles() {
       setStatus(lines.length > 0 ? 'Library import finished.' : '');
     } catch (err) {
       setStatus('');
+      if (err instanceof PartialImportError) {
+        const { added, attached, skipped } = err.counts;
+        lines.push(`Stopped part: ${added} added, ${attached} attached, ${skipped} already here before it failed. Import the file again to finish it.`);
+        setReport([...lines]);
+      }
       reportError(err);
     } finally {
       setImporting(false);
@@ -109,12 +133,12 @@ export function LibraryFiles() {
         <div class="form-actions">
           <button ref={exportButton} type="button" class="btn btn-primary" onClick={() => { setStatus(''); setExporting(true); }}>Export library</button>
         </div>
-        {parts.length > 0 && (
+        {partCount > 0 && (
           <ul class="plain-list" aria-label="Parts to save">
-            {parts.map((part, i) => (
-              <li key={part.fileName}>
-                <button type="button" class="btn btn-outline" onClick={() => void savePart(i)}>
-                  {saved.has(i) ? `Save part ${i + 1} of ${parts.length} again` : `Save part ${i + 1} of ${parts.length}`}
+            {Array.from({ length: partCount }, (_, i) => (
+              <li key={i}>
+                <button type="button" class="btn btn-outline" disabled={making} onClick={() => void savePart(i)}>
+                  {saved.has(i) ? `Save part ${i + 1} of ${partCount} again` : `Save part ${i + 1} of ${partCount}`}
                 </button>
               </li>
             ))}

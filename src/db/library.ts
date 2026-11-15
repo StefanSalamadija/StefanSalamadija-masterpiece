@@ -65,6 +65,16 @@ export function putImportedDocument(db: MasterpieceDB, doc: LibraryDoc, blob: Bl
   );
 }
 
+/** Stores a folder from a library file as it was made (its own id and times). */
+export function putImportedFolder(db: MasterpieceDB, folder: LibraryFolder): Promise<void> {
+  return guardWrite(async () => { await db.libraryFolders.put(folder); });
+}
+
+/** Stores a document record from a library file as it was made, without its file. */
+export function putImportedMetadata(db: MasterpieceDB, doc: LibraryDoc): Promise<void> {
+  return guardWrite(async () => { await db.libraryDocs.put(doc); });
+}
+
 /** The documents that are live (the default) or the recently deleted ones, newest first (by when added, or deleted). */
 export async function listDocuments(db: MasterpieceDB, opts: { deleted?: boolean } = {}): Promise<LibraryDoc[]> {
   const wanted = opts.deleted === true;
@@ -157,7 +167,9 @@ export function purgeDocument(db: MasterpieceDB, id: string, now: Date): Promise
  * Gives a document that has no file here (its record came from another device) its file, and the text and facts read
  * from it (its size, and the file name, type and kind when given). The text rows it had are replaced.
  */
-export function attachFile(db: MasterpieceDB, id: string, blob: Blob, extracted: Extracted): Promise<void> {
+export function attachFile(
+  db: MasterpieceDB, id: string, blob: Blob, extracted: Extracted, meta?: { title: string; tags: string[]; folderId?: string },
+): Promise<void> {
   const { parts, sha256, pageCount, textStatus, textError, fileName, mimeType, kind } = extracted;
   return guardWrite(() =>
     db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText, db.settings], async () => {
@@ -166,7 +178,10 @@ export function attachFile(db: MasterpieceDB, id: string, blob: Blob, extracted:
       await db.libraryFiles.put({ docId: id, blob });
       await db.libraryText.where('docId').equals(id).delete();
       await db.libraryText.bulkAdd(textRows(id, parts));
-      const { pageCount: _p, textError: _e, ...rest } = doc;
+      const { pageCount: _p, textError: _e, ...kept } = doc;
+      // With `meta` (newer details from a library file) the title, tags and folder change in the same transaction.
+      const { folderId: _f, ...unfiled } = kept;
+      const rest = meta ? { ...unfiled, title: meta.title, tags: meta.tags, ...(meta.folderId !== undefined ? { folderId: meta.folderId } : {}) } : kept;
       await db.libraryDocs.put({
         ...rest, sha256, textStatus, size: blob.size, ...(fileName !== undefined ? { fileName } : {}),
         ...(mimeType !== undefined ? { mimeType } : {}), ...(kind !== undefined ? { kind } : {}), ...(pageCount !== undefined ? { pageCount } : {}), ...(textError !== undefined ? { textError } : {}),

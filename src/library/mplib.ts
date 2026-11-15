@@ -3,7 +3,7 @@ import { BackupError, NewerVersionError, WrongPasswordError } from '../backup/en
 import {
   DEFAULT_ITERATIONS, IV_BYTES, SALT_BYTES, TAG_BYTES, deriveKey, fromBase64, isBase64, isValidIterations, toBase64,
 } from '../backup/crypto';
-import { attachFile, findBySha, putImportedDocument } from '../db/library';
+import { attachFile, findBySha, putImportedDocument, putImportedFolder, putImportedMetadata } from '../db/library';
 import type { MasterpieceDB } from '../db/schema';
 import type { LibraryDoc, LibraryFolder } from '../domain/types';
 import { extract, sha256Hex } from './extract';
@@ -28,10 +28,12 @@ export class LibraryDamagedError extends BackupError {
   constructor() { super("The file is damaged and can't be read. Nothing was changed.", 'LibraryDamagedError'); }
 }
 
-export interface LibraryPart { fileName: string; bytes: Uint8Array }
+export interface LibraryPart { fileName: string; blob: Blob }
 export interface ReadPart {
   exportId: string; part: number; parts: number; docs: LibraryDoc[]; folders: LibraryFolder[]; files: Map<string, Uint8Array>;
 }
+/** Which documents go in which part (`parts[n - 1]` holds the ids of part n). Made without reading any file. */
+export interface LibraryPlan { exportId: string; parts: string[][] }
 
 interface Header { format: string; version: number; exportId: string; part: number; parts: number; salt: string; iv: string; iterations: number }
 interface Manifest { docs: LibraryDoc[]; folders: LibraryFolder[] }
@@ -40,65 +42,68 @@ function partFileName(now: Date, part: number, parts: number): string {
   return `Masterpiece-library-${now.toISOString().slice(0, 10)}-part-${part}-of-${parts}.mplib`;
 }
 
-/** Whole documents per part: a part is filled until the next document would take it over `limit` (a document alone may exceed it). */
-function groupDocs(docs: LibraryDoc[], files: Map<string, Blob>, limit: number): LibraryDoc[][] {
-  const groups: LibraryDoc[][] = [];
-  let current: LibraryDoc[] = [];
+/**
+ * Splits the live documents that have a file (`withFile`) into parts of whole documents: a part is filled until the next
+ * document would take it over `partBytes` (a document alone may exceed it). Nothing is read; the sizes are the records'.
+ */
+export function planLibraryParts(docs: LibraryDoc[], withFile: Set<string>, opts: { partBytes?: number } = {}): LibraryPlan {
+  const limit = opts.partBytes ?? LIBRARY_PART_BYTES;
+  const parts: string[][] = [];
+  let current: string[] = [];
   let size = 0;
   for (const doc of docs) {
-    const bytes = files.get(doc.id)?.size ?? 0;
-    if (current.length > 0 && size + bytes > limit) {
-      groups.push(current);
+    if (doc.deleted || !withFile.has(doc.id)) continue;
+    if (current.length > 0 && size + doc.size > limit) {
+      parts.push(current);
       current = [];
       size = 0;
     }
-    current.push(doc);
-    size += bytes;
+    current.push(doc.id);
+    size += doc.size;
   }
-  if (current.length > 0 || groups.length === 0) groups.push(current);
-  return groups;
+  if (current.length > 0 || parts.length === 0) parts.push(current);
+  return { exportId: crypto.randomUUID(), parts };
 }
 
-async function sealPart(
-  docs: LibraryDoc[], folders: LibraryFolder[], files: Map<string, Blob>, password: string,
-  meta: { exportId: string; part: number; parts: number; iterations: number },
-): Promise<Uint8Array> {
+/** The zip of one part. Its own function, so the file copies are gone before the encryption starts. */
+async function zipPart(docs: LibraryDoc[], folders: LibraryFolder[], getFile: (id: string) => Promise<Blob | undefined>): Promise<Uint8Array> {
   const entries: Record<string, Uint8Array | [Uint8Array, { level: 0 }]> = {
     'manifest.json': strToU8(JSON.stringify({ docs, folders } satisfies Manifest)),
   };
-  for (const doc of docs) entries[`files/${doc.id}`] = [new Uint8Array(await files.get(doc.id)!.arrayBuffer()), { level: 0 }];
-  const plain = zipSync(entries, { level: 0 });
+  for (const doc of docs) {
+    const blob = await getFile(doc.id);
+    if (!blob) throw new Error(`The file of ${doc.title} is missing.`);
+    entries[`files/${doc.id}`] = [new Uint8Array(await blob.arrayBuffer()), { level: 0 }];
+  }
+  return zipSync(entries, { level: 0 });
+}
+
+/**
+ * Makes part `n` (from 1) of `plan`: reads only that part's files, and returns the part as a Blob. The caller makes the parts
+ * one at a time, so only the one being saved is in memory.
+ */
+export async function packLibraryPart(
+  plan: LibraryPlan, n: number,
+  input: { docs: LibraryDoc[]; folders: LibraryFolder[]; getFile: (id: string) => Promise<Blob | undefined> },
+  password: string, opts: { now: Date; iterations?: number },
+): Promise<LibraryPart> {
+  const iterations = opts.iterations ?? DEFAULT_ITERATIONS;
+  if (!isValidIterations(iterations)) throw new RangeError('iterations is out of range');
+  const ids = plan.parts[n - 1];
+  if (!ids) throw new RangeError('There is no such part.');
+  const byId = new Map(input.docs.map((d) => [d.id, d]));
+  const docs = ids.map((id) => byId.get(id)!);
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const header = strToU8(JSON.stringify({
-    format: FORMAT, version: 1, exportId: meta.exportId, part: meta.part, parts: meta.parts,
-    salt: toBase64(salt), iv: toBase64(iv), iterations: meta.iterations,
+    format: FORMAT, version: 1, exportId: plan.exportId, part: n, parts: plan.parts.length,
+    salt: toBase64(salt), iv: toBase64(iv), iterations,
   }));
-  const key = await deriveKey(password, salt, meta.iterations);
-  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: header as Uint8Array<ArrayBuffer> }, key, plain as Uint8Array<ArrayBuffer>));
-  const out = new Uint8Array(header.length + 1 + sealed.length);
-  out.set(header, 0);
-  out[header.length] = NEWLINE;
-  out.set(sealed, header.length + 1);
-  return out;
-}
-
-/** The live documents that have a file, in as many parts as their sizes need. Each part has the folders. */
-export async function packLibrary(
-  input: { docs: LibraryDoc[]; folders: LibraryFolder[]; files: Map<string, Blob> }, password: string,
-  opts: { now: Date; partBytes?: number; iterations?: number },
-): Promise<LibraryPart[]> {
-  const iterations = opts.iterations ?? DEFAULT_ITERATIONS;
-  if (!isValidIterations(iterations)) throw new RangeError('iterations is out of range');
-  const docs = input.docs.filter((d) => !d.deleted && input.files.has(d.id));
-  const groups = groupDocs(docs, input.files, opts.partBytes ?? LIBRARY_PART_BYTES);
-  const exportId = crypto.randomUUID();
-  const parts: LibraryPart[] = [];
-  for (const [i, group] of groups.entries()) {
-    const bytes = await sealPart(group, input.folders, input.files, password, { exportId, part: i + 1, parts: groups.length, iterations });
-    parts.push({ fileName: partFileName(opts.now, i + 1, groups.length), bytes });
-  }
-  return parts;
+  const key = await deriveKey(password, salt, iterations);
+  const sealed = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: header as Uint8Array<ArrayBuffer> }, key, (await zipPart(docs, input.folders, input.getFile)) as Uint8Array<ArrayBuffer>,
+  );
+  return { fileName: partFileName(opts.now, n, plan.parts.length), blob: new Blob([header as Uint8Array<ArrayBuffer>, '\n', sealed]) };
 }
 
 function isCount(value: unknown): value is number {
@@ -106,7 +111,7 @@ function isCount(value: unknown): value is number {
 }
 
 /** The header of a library file, checked before any key is derived. */
-function parseHeader(bytes: Uint8Array): { header: Header; headerBytes: Uint8Array; bodyStart: number } {
+function parseHeader(bytes: Uint8Array, headOnly = false): { header: Header; headerBytes: Uint8Array; bodyStart: number } {
   const end = bytes.subarray(0, MAX_HEADER_BYTES).indexOf(NEWLINE);
   if (end < 0) throw new NotALibraryFileError();
   const headerBytes = bytes.subarray(0, end);
@@ -123,9 +128,15 @@ function parseHeader(bytes: Uint8Array): { header: Header; headerBytes: Uint8Arr
     && typeof h.salt === 'string' && isBase64(h.salt) && fromBase64(h.salt).length === SALT_BYTES
     && typeof h.iv === 'string' && isBase64(h.iv) && fromBase64(h.iv).length === IV_BYTES && isValidIterations(h.iterations);
   if (!valid) throw new NotALibraryFileError();
-  if (bytes.length - end - 1 < TAG_BYTES) throw new LibraryDamagedError();
+  if (!headOnly && bytes.length - end - 1 < TAG_BYTES) throw new LibraryDamagedError();
   return { header: h as unknown as Header, headerBytes, bodyStart: end + 1 };
 }
+
+/** Checks the first bytes of a file (`MAX_HEADER_BYTES` are enough) before the rest is read: throws if it is not a part of a library. */
+export function checkLibraryHeader(head: Uint8Array): void {
+  parseHeader(head, true);
+}
+export const LIBRARY_HEADER_BYTES = MAX_HEADER_BYTES;
 
 /** Opens one part. Throws `NotALibraryFileError` for another kind of file, `WrongPasswordError` for a wrong password or an altered part. */
 export async function readLibraryPart(bytes: Uint8Array, password: string): Promise<ReadPart> {
@@ -169,53 +180,68 @@ function withNewerMetadata(existing: LibraryDoc, incoming: LibraryDoc): LibraryD
   };
 }
 
+/** A part that failed half way: what it had done by then, for the report. The documents done stay, and importing again does the rest. */
+export class PartialImportError extends Error {
+  constructor(readonly counts: { added: number; attached: number; skipped: number }, cause: unknown) {
+    super(cause instanceof Error && cause.message !== '' ? cause.message : 'The import stopped.', { cause });
+    this.name = 'PartialImportError';
+  }
+}
+
 /**
- * Merges one part into the library: folders by id (the newer wins), documents by id and then by the hash of a live document.
- * A new document is added with its file; a known one with no file gets it; one that has its file is skipped. The text of every
- * file that is added is read here, on this device.
+ * Merges one part into the library: folders by id (the newer `updatedAt` wins, a deletion included), documents by id and
+ * then by the hash of a live document. A new document is added with its file; a known one with no file gets it; one that has
+ * its file is skipped. A deleted document comes back only when the incoming record is newer than its deletion. The text of
+ * every file that is added is read here, on this device. If a document fails, `PartialImportError` says what was done.
  */
 export async function importLibraryPart(
   db: MasterpieceDB, part: ReadPart, progress: (text: string) => void,
 ): Promise<{ added: number; attached: number; skipped: number }> {
-  for (const folder of part.folders) {
-    const have = await db.libraryFolders.get(folder.id);
-    if (!have || (!have.deleted && newer(folder.updatedAt, have.updatedAt))) await db.libraryFolders.put(folder);
-  }
   const result = { added: 0, attached: 0, skipped: 0 };
-  for (const doc of part.docs) {
-    const bytes = part.files.get(doc.id)!;
-    const byId = await db.libraryDocs.get(doc.id);
-    const known = byId ?? (await findBySha(db, doc.sha256));
-    if (known?.deleted) {
-      result.skipped += 1;
-      continue;
+  try {
+    for (const folder of part.folders) {
+      const have = await db.libraryFolders.get(folder.id);
+      if (!have || newer(folder.updatedAt, have.updatedAt)) await putImportedFolder(db, folder);
     }
-    const hasFile = known !== undefined && (await db.libraryFiles.get(known.id)) !== undefined;
-    if (known && hasFile) {
-      if (byId && newer(doc.updatedAt, known.updatedAt)) await db.libraryDocs.put(withNewerMetadata(known, doc));
-      result.skipped += 1;
-      continue;
+    for (const doc of part.docs) {
+      const bytes = part.files.get(doc.id)!;
+      const byId = await db.libraryDocs.get(doc.id);
+      const known = byId ?? (await findBySha(db, doc.sha256));
+      const revive = known?.deleted === true && newer(doc.updatedAt, known.updatedAt);
+      if (known?.deleted && !revive) {
+        result.skipped += 1;
+        continue;
+      }
+      const hasFile = known !== undefined && !revive && (await db.libraryFiles.get(known.id)) !== undefined;
+      if (known && hasFile) {
+        if (byId && newer(doc.updatedAt, known.updatedAt)) await putImportedMetadata(db, withNewerMetadata(known, doc));
+        result.skipped += 1;
+        continue;
+      }
+      progress(`Indexing ${doc.title}`);
+      const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      const read = await extract(doc.kind, data, (done, total) => progress(`Indexing ${doc.title}: page ${done} of ${total}`));
+      const parts = read.parts.map((p) => ({ ...p, text: normaliseText(p.text) }));
+      const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: doc.mimeType });
+      const sha256 = await sha256Hex(data);
+      if (!known || revive) {
+        const { pageCount: _p, textError: _e, deletedAt: _d, ...rest } = doc;
+        await putImportedDocument(db, {
+          ...rest, sha256, size: bytes.byteLength, textStatus: read.textStatus,
+          ...(read.pageCount !== undefined ? { pageCount: read.pageCount } : {}), ...(read.textError !== undefined ? { textError: read.textError } : {}),
+        }, blob, parts);
+        result.added += 1;
+        continue;
+      }
+      const meta = byId && newer(doc.updatedAt, known.updatedAt) ? { title: doc.title, tags: doc.tags, folderId: doc.folderId } : undefined;
+      await attachFile(db, known.id, blob, {
+        sha256, pageCount: read.pageCount, textStatus: read.textStatus, textError: read.textError, parts,
+        fileName: doc.fileName, mimeType: doc.mimeType, kind: doc.kind,
+      }, meta);
+      result.attached += 1;
     }
-    progress(`Indexing ${doc.title}`);
-    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    const read = await extract(doc.kind, data, (done, total) => progress(`Indexing ${doc.title}: page ${done} of ${total}`));
-    const parts = read.parts.map((p) => ({ ...p, text: normaliseText(p.text) }));
-    const blob = new Blob([bytes as Uint8Array<ArrayBuffer>], { type: doc.mimeType });
-    if (!known) {
-      const { pageCount: _p, textError: _e, ...rest } = doc;
-      await putImportedDocument(db, {
-        ...rest, sha256: await sha256Hex(data), size: bytes.byteLength, textStatus: read.textStatus,
-        ...(read.pageCount !== undefined ? { pageCount: read.pageCount } : {}), ...(read.textError !== undefined ? { textError: read.textError } : {}),
-      }, blob, parts);
-      result.added += 1;
-      continue;
-    }
-    if (byId && newer(doc.updatedAt, known.updatedAt)) await db.libraryDocs.put(withNewerMetadata(known, doc));
-    await attachFile(db, known.id, blob, {
-      sha256: await sha256Hex(data), pageCount: read.pageCount, textStatus: read.textStatus, textError: read.textError, parts,
-      fileName: doc.fileName, mimeType: doc.mimeType, kind: doc.kind,
-    });
-    result.attached += 1;
+  } catch (err) {
+    throw new PartialImportError(result, err);
   }
   return result;
 }

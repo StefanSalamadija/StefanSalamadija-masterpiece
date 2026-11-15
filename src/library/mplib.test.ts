@@ -4,7 +4,10 @@ import { addDocument, allText, getFile, hasFiles, listDocuments, listFolders, sa
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
 import { sha256Hex } from './extract';
-import { importLibraryPart, NotALibraryFileError, packLibrary, readLibraryPart } from './mplib';
+import {
+  importLibraryPart, LibraryDamagedError, NotALibraryFileError, packLibraryPart, PartialImportError, planLibraryParts, readLibraryPart,
+} from './mplib';
+import { BackupError } from '../backup/envelope';
 
 const freshDb = () => openDb('mplib-' + crypto.randomUUID());
 const PASSWORD = 'correct horse';
@@ -27,11 +30,17 @@ async function seed(db: MasterpieceDB, names: string[]): Promise<void> {
   }
 }
 
-async function packAll(db: MasterpieceDB, partBytes?: number) {
+/** Every part of the library, made one after another the way the screen does. */
+async function packAll(db: MasterpieceDB, partBytes?: number, withFile?: Set<string>) {
   const docs = await listDocuments(db);
-  const files = new Map<string, Blob>();
-  for (const d of docs) files.set(d.id, (await getFile(db, d.id))!);
-  return packLibrary({ docs, folders: await listFolders(db), files }, PASSWORD, { now: NOW, partBytes, ...FAST });
+  const plan = planLibraryParts(docs, withFile ?? new Set(docs.map((d) => d.id)), { partBytes });
+  const folders = await listFolders(db);
+  const out: { fileName: string; bytes: Uint8Array }[] = [];
+  for (let n = 1; n <= plan.parts.length; n++) {
+    const part = await packLibraryPart(plan, n, { docs, folders, getFile: (id) => getFile(db, id) }, PASSWORD, { now: NOW, ...FAST });
+    out.push({ fileName: part.fileName, bytes: new Uint8Array(await part.blob.arrayBuffer()) });
+  }
+  return out;
 }
 
 describe('mplib', () => {
@@ -127,8 +136,124 @@ describe('mplib', () => {
     const db = await freshDb();
     await seed(db, ['One', 'Two']);
     const docs = await listDocuments(db);
-    const files = new Map([[docs[0]!.id, (await getFile(db, docs[0]!.id))!]]);
-    const parts = await packLibrary({ docs, folders: [], files }, PASSWORD, { now: NOW, ...FAST });
+    const parts = await packAll(db, undefined, new Set([docs[0]!.id]));
     expect((await readLibraryPart(parts[0]!.bytes, PASSWORD)).docs).toHaveLength(1);
+  });
+
+  it('plans whole documents per part without reading a file', async () => {
+    const db = await freshDb();
+    await seed(db, ['One', 'Two', 'Three']);
+    const docs = await listDocuments(db);
+    const ids = new Set(docs.map((d) => d.id));
+    expect(planLibraryParts(docs, ids, { partBytes: 2500 }).parts.map((p) => p.length).sort()).toEqual([1, 2]);
+    expect(planLibraryParts(docs, ids, { partBytes: 1 }).parts).toHaveLength(3);
+    expect(planLibraryParts(docs, ids).parts).toHaveLength(1);
+  });
+
+  it('a deleted document comes back only when the incoming record is newer than its deletion', async () => {
+    const db = await freshDb();
+    await seed(db, ['One']);
+    const [part] = await packAll(db);
+    const r = await readLibraryPart(part!.bytes, PASSWORD);
+    const incoming = r.docs[0]!;
+    const older = await freshDb();
+    await older.libraryDocs.put({ ...incoming, deleted: true, deletedAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z' });
+    expect(await importLibraryPart(older, r, vi.fn())).toEqual({ added: 0, attached: 0, skipped: 1 });
+    expect(await listDocuments(older)).toHaveLength(0);
+    expect((await hasFiles(older)).size).toBe(0);
+    const newerDb = await freshDb();
+    await newerDb.libraryDocs.put({ ...incoming, deleted: true, deletedAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' });
+    expect(await importLibraryPart(newerDb, r, vi.fn())).toEqual({ added: 1, attached: 0, skipped: 0 });
+    const [doc] = await listDocuments(newerDb);
+    expect(doc).toMatchObject({ id: incoming.id, deleted: false });
+    expect(doc!.deletedAt).toBeUndefined();
+    expect((await hasFiles(newerDb)).has(incoming.id)).toBe(true);
+  });
+
+  it('a folder follows the newer updatedAt, a deletion included', async () => {
+    const db = await freshDb();
+    const folder = await saveFolder(db, 'Engine room');
+    await seed(db, ['One']);
+    const [part] = await packAll(db);
+    const r = await readLibraryPart(part!.bytes, PASSWORD);
+    const target = await freshDb();
+    await target.libraryFolders.put({ ...folder, deleted: true, updatedAt: '2099-01-01T00:00:00.000Z' });
+    await importLibraryPart(target, r, vi.fn());
+    expect(await listFolders(target)).toHaveLength(0);
+    await target.libraryFolders.put({ ...folder, deleted: true, updatedAt: '2000-01-01T00:00:00.000Z' });
+    await importLibraryPart(target, r, vi.fn());
+    expect((await listFolders(target)).map((f) => f.name)).toEqual(['Engine room']);
+  });
+
+  it('a part that fails half way reports what it did, and importing it again completes', async () => {
+    const db = await freshDb();
+    await seed(db, ['One', 'Two', 'Three']);
+    const [part] = await packAll(db);
+    const r = await readLibraryPart(part!.bytes, PASSWORD);
+    const target = await freshDb();
+    const put = target.libraryFiles.put.bind(target.libraryFiles);
+    let calls = 0;
+    const spy = vi.spyOn(target.libraryFiles, 'put').mockImplementation(((...args: Parameters<typeof put>) => {
+      calls += 1;
+      return calls === 2 ? Promise.reject(new Error('disk exploded')) : put(...args);
+    }) as never);
+    const failure = await importLibraryPart(target, r, vi.fn()).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(PartialImportError);
+    expect((failure as PartialImportError).counts).toEqual({ added: 1, attached: 0, skipped: 0 });
+    expect((failure as Error).message).toBe('disk exploded');
+    expect(await listDocuments(target)).toHaveLength(1);
+    expect((await hasFiles(target)).size).toBe(1);
+    spy.mockRestore();
+    expect(await importLibraryPart(target, r, vi.fn())).toEqual({ added: 2, attached: 0, skipped: 1 });
+    expect((await hasFiles(target)).size).toBe(3);
+  });
+
+  describe('a header that is not right', () => {
+    async function validPart(): Promise<{ header: Record<string, unknown>; body: Uint8Array }> {
+      const db = await freshDb();
+      await seed(db, ['One']);
+      const [part] = await packAll(db);
+      const nl = part!.bytes.indexOf(10);
+      return { header: JSON.parse(new TextDecoder().decode(part!.bytes.slice(0, nl))), body: part!.bytes.slice(nl + 1) };
+    }
+    const file = (header: string, body: Uint8Array) => {
+      const head = new TextEncoder().encode(header + '\n');
+      const out = new Uint8Array(head.length + body.length);
+      out.set(head);
+      out.set(body, head.length);
+      return out;
+    };
+
+    it.each([
+      ['iterations too low', { iterations: 10 }],
+      ['iterations too high', { iterations: 99_000_000 }],
+      ['part after parts', { part: 3, parts: 2 }],
+      ['part 0', { part: 0 }],
+      ['no exportId', { exportId: undefined }],
+      ['salt of the wrong size', { salt: 'AAAA' }],
+    ])('%s is not a library file', async (_name, change) => {
+      const { header, body } = await validPart();
+      await expect(readLibraryPart(file(JSON.stringify({ ...header, ...change }), body), PASSWORD)).rejects.toBeInstanceOf(NotALibraryFileError);
+    });
+
+    it('version 2 is refused with its own message, not opened', async () => {
+      const { header, body } = await validPart();
+      const err = await readLibraryPart(file(JSON.stringify({ ...header, version: 2 }), body), PASSWORD).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BackupError);
+      expect(err).not.toBeInstanceOf(WrongPasswordError);
+    });
+
+    it('no newline, or a header over 1 KB, is not a library file', async () => {
+      const { header, body } = await validPart();
+      const json = JSON.stringify(header);
+      await expect(readLibraryPart(new TextEncoder().encode(json), PASSWORD)).rejects.toBeInstanceOf(NotALibraryFileError);
+      await expect(readLibraryPart(file(json + ' '.repeat(1100), body), PASSWORD)).rejects.toBeInstanceOf(NotALibraryFileError);
+    });
+
+    it('a body that is cut short is damaged', async () => {
+      const { header, body } = await validPart();
+      await expect(readLibraryPart(file(JSON.stringify(header), body.slice(0, 5)), PASSWORD)).rejects.toBeInstanceOf(LibraryDamagedError);
+      await expect(readLibraryPart(file(JSON.stringify(header), body.slice(0, body.length - 100)), PASSWORD)).rejects.toBeInstanceOf(WrongPasswordError);
+    });
   });
 });
