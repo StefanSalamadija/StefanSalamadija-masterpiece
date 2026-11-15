@@ -121,6 +121,23 @@ export function purgeDeleted(db: MasterpieceDB, now: Date): Promise<number> {
 }
 
 /**
+ * "Delete now": drops a deleted document's file and text at once, and dates its deletion beyond the retention period so
+ * that it no longer shows in "recently deleted". The tombstone stays, so the deletion still reaches other devices.
+ */
+export function purgeDocument(db: MasterpieceDB, id: string, now: Date): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText, db.settings], async () => {
+      const doc = await db.libraryDocs.get(id);
+      if (!doc?.deleted) throw new Error(`There is no recently deleted library document with id ${id}.`);
+      await db.libraryFiles.delete(id);
+      await db.libraryText.where('docId').equals(id).delete();
+      const expired = new Date(now.getTime() - (RETENTION_DAYS + 1) * DAY_MS).toISOString();
+      await db.libraryDocs.put({ ...doc, deletedAt: expired, ...(await stampNow(db)) });
+    }),
+  );
+}
+
+/**
  * Gives a document that has no file here (its record came from another device) its file, and the text and facts read
  * from it. The text rows it had are replaced.
  */

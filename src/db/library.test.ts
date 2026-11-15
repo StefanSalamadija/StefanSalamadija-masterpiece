@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { allTables } from './records';
 import {
   addDocument, allText, attachFile, deleteDocument, deleteFolder, findBySha, getFile, hasFiles, listDocuments, listFolders, purgeDeleted,
-  restoreDocument, saveFolder, updateDocument,
+  purgeDocument, restoreDocument, saveFolder, updateDocument,
 } from './library';
 import type { NewDocument } from './library';
 import { openDb } from './schema';
@@ -164,5 +164,24 @@ describe('what is local only', () => {
     expect(tables.libraryDocs).toHaveLength(1);
     expect(tables).not.toHaveProperty('libraryFiles');
     expect(tables).not.toHaveProperty('libraryText');
+  });
+});
+
+describe('purgeDocument', () => {
+  it('drops the file and text now and dates the deletion past the retention period', async () => {
+    const db = await freshDb();
+    const added = await addDocument(db, doc());
+    await deleteDocument(db, added.id, new Date());
+    await purgeDocument(db, added.id, new Date());
+    expect(await getFile(db, added.id)).toBeUndefined();
+    expect(await allText(db)).toEqual([]);
+    const [gone] = await listDocuments(db, { deleted: true });
+    expect(Date.parse(gone.deletedAt!)).toBeLessThan(Date.now() - 30 * DAY);
+  });
+
+  it('refuses a live document', async () => {
+    const db = await freshDb();
+    const added = await addDocument(db, doc());
+    await expect(purgeDocument(db, added.id, new Date())).rejects.toThrow();
   });
 });

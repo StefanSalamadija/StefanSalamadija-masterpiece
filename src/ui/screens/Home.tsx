@@ -134,6 +134,14 @@ export function Home() {
           </a>
         </li>
       </ul>
+      <ul class="alert-list no-print" role="list" aria-label="Library">
+        <li class="card alert-row">
+          <a class="alert-link" href="#/library">
+            <span class="alert-title">Library</span>
+            <span class="alert-detail">Your manuals and documents, searchable offline</span>
+          </a>
+        </li>
+      </ul>
     </section>
   );
 }

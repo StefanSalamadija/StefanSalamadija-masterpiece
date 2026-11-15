@@ -61,6 +61,11 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/tools/sdt': lazyScreen(() => import('../ui/screens/tools').then((m) => m.Sdt)),
   '/tools/volume-mass': lazyScreen(() => import('../ui/screens/tools').then((m) => m.VolumeMass)),
   '/tools/:group': lazyScreen(() => import('../ui/screens/tools').then((m) => m.ToolGroup)),
+  // The library is one chunk, loaded on demand, so that reading and indexing documents stay out of the main chunk.
+  '/library': lazyScreen(() => import('../ui/screens/library').then((m) => m.Library)),
+  '/library/deleted': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryDeleted)),
+  '/library/files': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryFiles)),
+  '/library/doc/:id': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryDoc)),
   '/profiles': Profiles,
   '/settings': Settings,
   '/settings/import': ImportBackup,

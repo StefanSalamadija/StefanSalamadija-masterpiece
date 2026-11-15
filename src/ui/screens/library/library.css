@@ -1,0 +1,13 @@
+.lib-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.lib-chips .chip { cursor: pointer; font-family: inherit; }
+.lib-tools { display: grid; gap: 0 12px; grid-template-columns: 1fr; }
+.lib-list { display: flex; flex-direction: column; gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.lib-row { display: flex; flex-direction: column; gap: 4px; }
+.lib-link { min-height: var(--target); display: flex; align-items: center; font-weight: 600; color: inherit; overflow-wrap: anywhere; }
+.lib-meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.lib-flag { font-size: 13px; font-weight: 600; color: var(--warning, var(--muted)); }
+.lib-section { margin-top: 24px; }
+.lib-section h3 { margin: 0 0 8px; font-size: 16px; }
+.lib-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; }
+.lib-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.lib-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }

@@ -140,6 +140,7 @@ describe('snapshotCountsText', () => {
     expect(snapshotCountsText(counts({ ships: 1, formTemplates: 3, formDrafts: 2, formLastValues: 4, formPhotos: 5 })))
       .toBe('1 ship · 3 forms · 2 form drafts · 5 photos');
     expect(snapshotCountsText(counts({ formTemplates: 1, formDrafts: 1, formPhotos: 1 }))).toBe('1 form · 1 form draft · 1 photo');
+    expect(snapshotCountsText(counts({ libraryDocs: 1, libraryFolders: 2 }))).toBe('1 library document · 2 library folders');
   });
 
   it('leaves out what it does not hold', () => {
