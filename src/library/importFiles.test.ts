@@ -100,4 +100,13 @@ describe('attachChosenFile', () => {
     expect((await attachChosenFile(db, doc, docx, attachHooks(true))).status).toBe('attached');
     expect(await db.libraryDocs.get(doc.id)).toMatchObject({ kind: 'docx', fileName: 'plan.docx', size: 3 });
   });
+
+  it('keeps the known type when the chosen file has none', async () => {
+    const db = await freshDb();
+    const doc = await missing(db, 'a.pdf', [[LONG]]);
+    await attachChosenFile(db, doc, pdfFile('a.pdf', [[LONG]]), attachHooks(true));
+    expect((await db.libraryDocs.get(doc.id))?.mimeType).toBe('application/pdf');
+    await attachChosenFile(db, doc, new File([new Uint8Array([9])], 'b.bin'), attachHooks(true));
+    expect((await db.libraryDocs.get(doc.id))?.mimeType).toBe('application/pdf');
+  });
 });

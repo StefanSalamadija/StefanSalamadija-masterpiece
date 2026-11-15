@@ -156,3 +156,38 @@ test('library: a document whose file is missing can have its file attached, with
   await expect(page.getByLabel('Attach file')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Open with…' })).toBeVisible();
 });
+
+const clearFiles = (page: Page) => page.evaluate(() => new Promise<void>((resolve, reject) => {
+  const open = indexedDB.open('masterpiece');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const db = open.result;
+    const tx = db.transaction('libraryFiles', 'readwrite');
+    tx.objectStore('libraryFiles').clear();
+    tx.oncomplete = () => { db.close(); resolve(); };
+  };
+}));
+
+test('library: attach refuses a file that another document has, and uses a different file after asking', async ({ page }) => {
+  await open(page);
+  await importDocs(page, pdf('Manual.pdf', [[LONG]]), pdf('Second.pdf', [[LONG + ' second']]));
+  await expect(list(page).getByRole('listitem')).toHaveCount(2);
+  await clearFiles(page);
+  await page.reload();
+  await list(page).getByRole('link', { name: /Manual/ }).click();
+  const attach = page.getByLabel('Attach file');
+  // The bytes of Second.pdf, which is a live document: refused, and Manual still has no file.
+  await attach.setInputFiles(pdf('x.pdf', [[LONG + ' second']]));
+  await expect(page.getByRole('status').filter({ hasText: 'Already in the library as Second.' })).toBeVisible();
+  await expect(page.getByText('File not on this device')).toBeVisible();
+  await expect(attach).toBeAttached();
+  // A file that is new to the library but not Manual's own: asks first.
+  await attach.setInputFiles(docx('Plan.docx'));
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('This is a different file. Use it anyway?');
+  await dialog.getByRole('button', { name: 'Use it anyway' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'File attached.' })).toBeVisible();
+  await expect(page.getByText('DOCX')).toBeVisible();
+  await expect(page.getByText('File not on this device')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open with…' })).toBeVisible();
+});

@@ -43,6 +43,10 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
   const [status, setStatus] = useState('');
   const [different, setDifferent] = useState<{ answer: (use: boolean) => void }>();
   const attachInput = useRef<HTMLInputElement>(null);
+  // Leaving the screen with the question open answers it No, so that the import does not wait for ever.
+  const pending = useRef(different);
+  pending.current = different;
+  useEffect(() => () => pending.current?.answer(false), []);
   const flag = statusLabel(doc, hasFile);
 
   async function save(event: Event): Promise<void> {

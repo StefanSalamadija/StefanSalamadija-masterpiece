@@ -80,7 +80,7 @@ export async function attachChosenFile(db: MasterpieceDB, doc: LibraryDoc, file:
   hooks.progress(`Indexing ${doc.title}`);
   const read = await extract(kind, data, (done, total) => hooks.progress(`Indexing ${doc.title}: page ${done} of ${total}`));
   await attachFile(db, doc.id, file, {
-    sha256, fileName: file.name, mimeType: file.type, kind, pageCount: read.pageCount, textStatus: read.textStatus,
+    sha256, fileName: file.name, ...(file.type ? { mimeType: file.type } : {}), kind, pageCount: read.pageCount, textStatus: read.textStatus,
     textError: read.textError, parts: read.parts.map((p) => ({ ...p, text: normaliseText(p.text) })),
   });
   return { status: 'attached' };
