@@ -3,7 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { useRoute } from '../../../app/router';
 import { formatOffset, shipOffsetAt, toShipLocal } from '../../../domain/shipTime';
 import { parseDecimal } from '../../../domain/numbers';
-import { convertFrom, formatUnit, fromBase, parseUnitInput, toBase } from '../../../domain/units/convert';
+import { beaufortRange, convertFrom, formatUnit, fromBase, parseUnitInput, toBase } from '../../../domain/units/convert';
 import { etaOf, formatDuration, parseDuration, solveSdt, solveVolumeMass } from '../../../domain/units/solve';
 import { GROUPS, unitById, unitsOf, type GroupDef, type QuantityId, type UnitDef } from '../../../domain/units/table';
 import './tools.css';
@@ -90,6 +90,8 @@ function BackLink() {
 
 /** One unit's row: its label, an input, and a Copy button. */
 function UnitRow({ unit, value, error, onInput }: { unit: UnitDef; value: string; error?: string; onInput: (text: string) => void }) {
+  // A Beaufort force is a band, not a speed: its knot range is shown with it.
+  const band = unit.kind === 'beaufort' && !error && /^\d+$/.test(value.trim()) ? beaufortRange(Number(value.trim())) : undefined;
   const inputId = `unit-input-${unit.id}`;
   const errorId = `${inputId}-error`;
   return (
@@ -113,6 +115,7 @@ function UnitRow({ unit, value, error, onInput }: { unit: UnitDef; value: string
         />
         <CopyButton text={value} label={unit.label} />
       </div>
+      {band && <p class="tool-note">{band}</p>}
       {error && <p id={errorId} class="field-error" role="alert">{error}</p>}
     </div>
   );

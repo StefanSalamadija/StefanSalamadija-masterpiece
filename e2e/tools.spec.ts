@@ -92,3 +92,12 @@ test('tools: speed · distance · time gives the time and the ETA, across a plan
   await expect(page.getByTestId('eta')).toHaveCount(0);
   await expectNoHorizontalScroll(page);
 });
+
+test('tools: Beaufort shows its knot band, from a speed or a force', async ({ page }) => {
+  await freshApp(page); await setupShip(page); await page.goto('./#/tools/physical');
+  await row(page, 'kn').fill('30');
+  await expect(row(page, 'bf')).toHaveValue('7');
+  await expect(page.getByText('Force 7: 28–33 kn')).toBeVisible();
+  await row(page, 'bf').fill('6');
+  await expect(page.getByText('Force 6: 22–27 kn')).toBeVisible();
+});

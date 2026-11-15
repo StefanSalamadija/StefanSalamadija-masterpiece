@@ -36,10 +36,21 @@ describe('speed, distance, time', () => {
       change('c', '2026-11-15T12:00:00.000Z', 60, true),
     ];
     const eta = etaOf(new Date('2026-11-15T00:00:00Z'), 30, changes);
-    expect(eta.utc).toBe('2026-11-16T06:00');
-    expect(eta.offsetMinutes).toBe(120);
-    expect(eta.shipLocal).toBe('2026-11-16T08:00');
-    expect(eta.changesBefore.map((c) => c.id)).toEqual(['b']);
+    expect(eta!.utc).toBe('2026-11-16T06:00');
+    expect(eta!.offsetMinutes).toBe(120);
+    expect(eta!.shipLocal).toBe('2026-11-16T08:00');
+    expect(eta!.changesBefore.map((c) => c.id)).toEqual(['b']);
+  });
+});
+
+describe('ETA edge cases (review I3)', () => {
+  it('gives no ETA beyond the dates a clock can hold', () => {
+    expect(etaOf(new Date('2026-11-15T00:00:00Z'), 99_999_999_999, [])).toBeUndefined();
+  });
+  it('leaves out a change to the offset already in force', () => {
+    const eta = etaOf(new Date('2026-11-15T00:00:00Z'), 30, [change('a', '2026-11-15T12:00:00.000Z', 180)]);
+    expect(eta?.offsetMinutes).toBe(180);
+    expect(eta?.changesBefore).toEqual([]);
   });
 });
 

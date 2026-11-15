@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertFrom, fromBase, parseUnitInput, toBase } from './convert';
+import { beaufortRange, convertFrom, fromBase, parseUnitInput, toBase } from './convert';
 import { GROUPS, UNITS, unitById, unitsOf } from './table';
 
 const close = (a: number, b: number, rel = 1e-9) => expect(Math.abs(a - b)).toBeLessThanOrEqual(Math.abs(b) * rel + 1e-12);
@@ -65,5 +65,11 @@ describe('unit conversions', () => {
 
   it('every group quantity has units', () => {
     for (const g of GROUPS) for (const q of g.quantities) expect(unitsOf(q.id).length).toBeGreaterThan(1);
+  });
+
+  it('gives the knot range of a Beaufort force (review I2)', () => {
+    expect(beaufortRange(0)).toBe('Force 0: under 1 kn');
+    expect(beaufortRange(6)).toBe('Force 6: 22–27 kn');
+    expect(beaufortRange(12)).toBe('Force 12: 64 kn and over');
   });
 });

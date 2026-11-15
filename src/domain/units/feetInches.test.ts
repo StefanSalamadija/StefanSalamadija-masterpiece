@@ -12,6 +12,11 @@ describe('feet and inches', () => {
     expect(parseFeetInches(`0' 11¾"`)).toBeCloseTo(11.75 * 0.0254, 12);
     expect(parseFeetInches(`32' 6¼"`)).toBeCloseTo((32 * 12 + 6.25) * 0.0254, 12);
   });
+  it('reads a lone number with an inch mark as inches (review I1)', () => {
+    expect(parseFeetInches(`6¼"`)).toBeCloseTo(6.25 * 0.0254, 12);
+    expect(parseFeetInches(`326"`)).toBeCloseTo(326 * 0.0254, 12);
+    expect(parseFeetInches('¾')).toBeCloseTo(0.75 * 0.0254, 12);
+  });
   it('refuses inches of 12 or more and junk', () => {
     expect(parseFeetInches(`5' 12"`)).toBe('invalid');
     expect(parseFeetInches('abc')).toBe('invalid');

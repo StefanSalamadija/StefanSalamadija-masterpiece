@@ -83,6 +83,13 @@ export function fromBase(unit: UnitDef, base: number): number {
   }
 }
 
+/** The knot band of a Beaufort force, e.g. `Force 6: 22–27 kn`. */
+export function beaufortRange(force: number): string {
+  if (force <= 0) return 'Force 0: under 1 kn';
+  if (force >= 12) return 'Force 12: 64 kn and over';
+  return `Force ${force}: ${BEAUFORT_LOW_KN[force]}–${BEAUFORT_LOW_KN[force + 1] - 1} kn`;
+}
+
 /** Reads what was typed in a unit's row. A sign is read, so that a negative value is refused by its range, not as "not a number". */
 export function parseUnitInput(unit: UnitDef, text: string): number | undefined | 'invalid' {
   if (unit.kind === 'ftin') return parseFeetInches(text); // carried in metres

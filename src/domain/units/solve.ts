@@ -57,13 +57,21 @@ export function solveSdt(v: { speedKn?: number; distanceNm?: number; hours?: num
 
 export interface Eta { eta: Date; shipLocal: string; offsetMinutes: number; utc: string; changesBefore: ClockChange[] }
 
-/** Arrival `hours` after `now` (to the minute), in ship's time as it will be then, and the clock changes due on the way. */
-export function etaOf(now: Date, hours: number, changes: ClockChange[]): Eta {
-  const eta = new Date(Math.round((now.getTime() + hours * 3_600_000) / MS_PER_MINUTE) * MS_PER_MINUTE);
+/** The latest instant a JavaScript date can hold. */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * Arrival `hours` after `now` (to the minute), in ship's time as it will be then, and the clock changes due on the
+ * way (a change to the offset already in force is left out). Undefined when the arrival is beyond any date.
+ */
+export function etaOf(now: Date, hours: number, changes: ClockChange[]): Eta | undefined {
+  const ms = Math.round((now.getTime() + hours * 3_600_000) / MS_PER_MINUTE) * MS_PER_MINUTE;
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_DATE_MS) return undefined;
+  const eta = new Date(ms);
   const offsetMinutes = shipOffsetAt(changes, eta);
   const changesBefore = liveChanges(changes).filter((c) => {
     const at = Date.parse(c.effectiveAt);
-    return at > now.getTime() && at <= eta.getTime();
+    return at > now.getTime() && at <= eta.getTime() && shipOffsetAt(changes, new Date(at - 1)) !== c.toOffsetMinutes;
   });
   return { eta, offsetMinutes, shipLocal: toShipLocal(eta, offsetMinutes).dateTime, utc: eta.toISOString().slice(0, 16), changesBefore };
 }
