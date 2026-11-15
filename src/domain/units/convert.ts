@@ -1,4 +1,5 @@
 import { parseDecimal } from '../numbers';
+import { formatFeetInches, parseFeetInches } from './feetInches';
 import { unitById, unitsOf, type UnitDef } from './table';
 
 const KNOT = 1852 / 3600;
@@ -84,18 +85,14 @@ export function fromBase(unit: UnitDef, base: number): number {
 
 /** Reads what was typed in a unit's row. A sign is read, so that a negative value is refused by its range, not as "not a number". */
 export function parseUnitInput(unit: UnitDef, text: string): number | undefined | 'invalid' {
-  if (unit.kind === 'ftin') {
-    // Placeholder until feet + inches parsing is wired in: decimal feet, carried in metres.
-    const feet = parseDecimal(text, { signed: true });
-    return typeof feet === 'number' ? feet * 0.3048 : feet;
-  }
+  if (unit.kind === 'ftin') return parseFeetInches(text); // carried in metres
   return parseDecimal(text, { signed: true });
 }
 
 /** The value as shown in its row: the unit's decimals, never `-0`. */
 export function formatUnit(unit: UnitDef, value: number): string {
   if (unit.kind === 'beaufort') return String(value);
-  if (unit.kind === 'ftin') return (value / 0.3048).toFixed(2);
+  if (unit.kind === 'ftin') return formatFeetInches(value);
   const text = value.toFixed(unit.decimals);
   return /^-0(\.0+)?$/.test(text) ? text.slice(1) : text;
 }
