@@ -1,7 +1,7 @@
 # Masterpiece — Converters (Piece 3) Design
 
 Date: 2026-11-15
-Status: Draft for user review.
+Status: Approved design (user), 2026-11-15.
 
 ## 1. Intent
 
@@ -101,7 +101,7 @@ Status: Draft for user review.
     - NM = 1852 m;
     - cable = 185.2 m (0.1 NM);
     - fathom = 1.8288 m;
-    - shackle = 27.432 m (15 fathoms).
+    - shackle = 27.5 m (metric shackle, user decision).
   - **Mass:**
     - lb = 0.45359237 kg;
     - LT = 2240 lb = 1016.0469088 kg;
