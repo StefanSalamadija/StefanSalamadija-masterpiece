@@ -14,3 +14,4 @@
 .tool-pick { display: flex; gap: 8px; }
 .tool-pick select { flex: none; width: auto; max-width: 45%; }
 .tool-eta { margin-top: 16px; font-weight: 600; }
+.tool-label { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }

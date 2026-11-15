@@ -42,6 +42,10 @@ Masterpiece fills in your company's own SMS forms (permits, checklists, logs, dr
 
 The forms library, your drafts and their photos stay on your devices. Nothing is sent anywhere, and the forms are included in your backups and in a handover file unless you untick **Include forms library**.
 
+## Tools
+
+Home → **Tools**: unit converters (length and drafts in ft + in, mass and volume, density and stowage factor, speed, temperature, pressure, power), volume ↔ mass, and speed · distance · time with the ETA in ship's time. Type a value in any row and every other unit updates. Everything works offline.
+
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.

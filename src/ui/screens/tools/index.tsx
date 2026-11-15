@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useAppState } from '../../../app/AppState';
 import { useRoute } from '../../../app/router';
-import { convertFrom } from '../../../domain/units/convert';
-import { GROUPS, unitsOf, type GroupDef, type QuantityId, type UnitDef } from '../../../domain/units/table';
+import { formatOffset, shipOffsetAt, toShipLocal } from '../../../domain/shipTime';
+import { parseDecimal } from '../../../domain/numbers';
+import { convertFrom, formatUnit, fromBase, parseUnitInput, toBase } from '../../../domain/units/convert';
+import { etaOf, formatDuration, parseDuration, solveSdt, solveVolumeMass } from '../../../domain/units/solve';
+import { GROUPS, unitById, unitsOf, type GroupDef, type QuantityId, type UnitDef } from '../../../domain/units/table';
 import './tools.css';
 
 /** The last group and quantity used, a per-device convenience: never in the database or a backup. */
@@ -183,12 +187,188 @@ export function ToolGroup() {
   return <GroupScreen key={group.id} group={group} />;
 }
 
-/** `/tools/volume-mass` (built in the next step). */
-export function VolumeMass() {
-  return <section class="screen"><BackLink /><h2>Volume ↔ mass</h2></section>;
+const NOT_A_NUMBER = 'Not a number';
+const ABOVE_ZERO = 'Must be above 0';
+
+/** One row of a three-way calculator: it reads its text (in its chosen unit) as a base value, and shows a base value back. */
+interface SolverRow<Id extends string> {
+  id: Id;
+  label: string;
+  units?: UnitDef[];
+  defaultUnit?: string;
+  inputMode: 'decimal' | 'text';
+  read: (text: string, unit: UnitDef | undefined) => number | undefined | string;
+  show: (base: number, unit: UnitDef | undefined) => string;
 }
 
-/** `/tools/sdt` (built in the next step). */
+type Read = { value?: number; error?: string };
+
+/**
+ * Three rows where any two are typed and the third is worked out: the two edited last are the inputs. Until two
+ * have been typed, `defaultCalc` is the one worked out (or, if that was typed, the first row not typed).
+ */
+function useSolver<Id extends string>(rows: SolverRow<Id>[], defaultCalc: Id, solve: (inputs: Partial<Record<Id, number>>, calc: Id) => number | 'invalid') {
+  const [texts, setTexts] = useState<Partial<Record<Id, string>>>({});
+  const [order, setOrder] = useState<Id[]>([]);
+  const [unitIds, setUnitIds] = useState<Partial<Record<Id, string>>>(() =>
+    Object.fromEntries(rows.filter((r) => r.defaultUnit).map((r) => [r.id, r.defaultUnit])) as Partial<Record<Id, string>>);
+  const inputs = order.slice(-2);
+  const candidates = rows.map((r) => r.id).filter((id) => !inputs.includes(id));
+  const calc = candidates.includes(defaultCalc) ? defaultCalc : candidates[0];
+  const unitOf = (row: SolverRow<Id>) => (row.units ? unitById(unitIds[row.id] ?? row.units[0].id) : undefined);
+
+  const reads = {} as Record<Id, Read>;
+  for (const row of rows) {
+    if (row.id === calc) continue;
+    const r = row.read(texts[row.id] ?? '', unitOf(row));
+    reads[row.id] = typeof r === 'number' ? { value: r } : { error: r };
+  }
+  const base = Object.fromEntries(rows.filter((r) => r.id !== calc && reads[r.id].value !== undefined).map((r) => [r.id, reads[r.id].value])) as Partial<Record<Id, number>>;
+  const anyError = rows.some((r) => r.id !== calc && reads[r.id].error);
+  const solved = anyError ? 'invalid' : solve(base, calc);
+  const calcRow = rows.find((r) => r.id === calc)!;
+  const calcText = solved === 'invalid' ? '' : calcRow.show(solved, unitOf(calcRow));
+
+  return {
+    calc,
+    solved: solved === 'invalid' ? undefined : solved,
+    base,
+    unitOf,
+    textOf: (row: SolverRow<Id>) => (row.id === calc ? calcText : (texts[row.id] ?? '')),
+    errorOf: (row: SolverRow<Id>) => (row.id === calc ? undefined : reads[row.id].error),
+    edit: (id: Id, text: string) => {
+      setTexts((t) => ({ ...t, [id]: text }));
+      setOrder((o) => [...o.filter((x) => x !== id), id]);
+    },
+    // A calculated row's value moves with its unit; a typed one is kept as typed, in the new unit.
+    setUnit: (id: Id, unitId: string) => setUnitIds((u) => ({ ...u, [id]: unitId })),
+    clear: () => { setTexts({}); setOrder([]); },
+  };
+}
+
+function SolverRows<Id extends string>({ rows, solver }: { rows: SolverRow<Id>[]; solver: ReturnType<typeof useSolver<Id>> }) {
+  return (
+    <div class="tool-rows">
+      {rows.map((row) => {
+        const inputId = `solver-${row.id}`;
+        const errorId = `${inputId}-error`;
+        const isCalc = row.id === solver.calc;
+        const error = solver.errorOf(row);
+        const unit = solver.unitOf(row);
+        const text = solver.textOf(row);
+        return (
+          <div key={row.id} class={`field tool-row${isCalc ? ' tool-calculated' : ''}`}>
+            <div class="tool-label">
+              <label for={inputId}>{row.label}</label>
+              {isCalc && <span class="tool-symbol">calculated</span>}
+            </div>
+            <div class="tool-input">
+              <input
+                id={inputId}
+                type="text"
+                inputMode={row.inputMode}
+                autoComplete="off"
+                spellcheck={false}
+                value={text}
+                aria-invalid={error ? 'true' : undefined}
+                aria-describedby={error ? errorId : undefined}
+                onInput={(e) => solver.edit(row.id, (e.currentTarget as HTMLInputElement).value)}
+              />
+              {row.units && unit && (
+                <select aria-label={`${row.label} unit`} value={unit.id} onChange={(e) => solver.setUnit(row.id, (e.currentTarget as HTMLSelectElement).value)}>
+                  {row.units.map((u) => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                </select>
+              )}
+              <CopyButton text={text} label={row.label} />
+            </div>
+            {error && <p id={errorId} class="field-error" role="alert">{error}</p>}
+          </div>
+        );
+      })}
+      <p class="tool-actions">
+        <button type="button" class="btn btn-outline" onClick={solver.clear}>Clear</button>
+      </p>
+    </div>
+  );
+}
+
+/** Reads a positive amount in `unit` as its base value. */
+function readPositive(text: string, unit: UnitDef | undefined): number | undefined | string {
+  const value = parseUnitInput(unit!, text);
+  if (value === undefined) return undefined;
+  if (value === 'invalid') return NOT_A_NUMBER;
+  const base = toBase(unit!, value);
+  return base === 'invalid' ? ABOVE_ZERO : base > 0 ? base : ABOVE_ZERO;
+}
+
+type VmId = 'volume' | 'density' | 'mass';
+const VM_ROWS: SolverRow<VmId>[] = [
+  { id: 'volume', label: 'Volume', units: unitsOf('volume'), defaultUnit: 'm3', inputMode: 'decimal', read: readPositive, show: (b, u) => formatUnit(u!, fromBase(u!, b)) },
+  { id: 'density', label: 'Density', units: unitsOf('density'), defaultUnit: 'tm3', inputMode: 'decimal', read: readPositive, show: (b, u) => formatUnit(u!, fromBase(u!, b)) },
+  { id: 'mass', label: 'Mass', units: unitsOf('mass'), defaultUnit: 't', inputMode: 'decimal', read: readPositive, show: (b, u) => formatUnit(u!, fromBase(u!, b)) },
+];
+
+/** `/tools/volume-mass`: volume × density = mass, any one worked out from the other two. No temperature correction. */
+export function VolumeMass() {
+  const solver = useSolver(VM_ROWS, 'mass', (v, calc) => solveVolumeMass({ volumeM3: v.volume, densityKgM3: v.density, massKg: v.mass }, calc));
+  return (
+    <section class="screen">
+      <BackLink />
+      <h2>Volume ↔ mass</h2>
+      <p class="tool-note">Type any two; the third is worked out. No temperature correction.</p>
+      <SolverRows rows={VM_ROWS} solver={solver} />
+    </section>
+  );
+}
+
+type SdtId = 'speed' | 'distance' | 'time';
+function readPositiveNumber(text: string): number | undefined | string {
+  const value = parseDecimal(text, { signed: true });
+  if (value === undefined) return undefined;
+  if (value === 'invalid') return NOT_A_NUMBER;
+  return value > 0 ? value : ABOVE_ZERO;
+}
+const SDT_ROWS: SolverRow<SdtId>[] = [
+  { id: 'speed', label: 'Speed (kn)', inputMode: 'decimal', read: readPositiveNumber, show: (b) => b.toFixed(1) },
+  { id: 'distance', label: 'Distance (NM)', inputMode: 'decimal', read: readPositiveNumber, show: (b) => b.toFixed(1) },
+  {
+    id: 'time', label: 'Time', inputMode: 'text', show: (b) => formatDuration(b),
+    read: (text) => {
+      const hours = parseDuration(text);
+      return hours === 'invalid' ? (parseDecimal(text) === 0 ? ABOVE_ZERO : 'Enter h:mm, hours, or 1d 4h 30m') : hours;
+    },
+  },
+];
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** `YYYY-MM-DDTHH:mm` as `25 Oct 18:00`. */
+function dayTime(dateTime: string): string {
+  return `${Number(dateTime.slice(8, 10))} ${MONTHS[Number(dateTime.slice(5, 7)) - 1]} ${dateTime.slice(11, 16)}`;
+}
+
+/** `/tools/sdt`: any two of speed, distance and time give the third, and the ETA from now in ship's time. */
 export function Sdt() {
-  return <section class="screen"><BackLink /><h2>Speed · distance · time</h2></section>;
+  const { nowUtc, clockChanges } = useAppState();
+  const solver = useSolver(SDT_ROWS, 'time', (v, calc) => solveSdt({ speedKn: v.speed, distanceNm: v.distance, hours: v.time }, calc));
+  const hours = solver.calc === 'time' ? solver.solved : solver.solved !== undefined ? solver.base.time : undefined;
+  const eta = hours !== undefined ? etaOf(nowUtc, hours, clockChanges) : undefined;
+  const utcText = eta ? (eta.utc.slice(0, 10) === eta.shipLocal.slice(0, 10) ? eta.utc.slice(11, 16) : dayTime(eta.utc)) : '';
+  return (
+    <section class="screen">
+      <BackLink />
+      <h2>Speed · distance · time</h2>
+      <p class="tool-note">Type any two; the third is worked out. Time as h:mm, hours, or 1d 4h 30m.</p>
+      <SolverRows rows={SDT_ROWS} solver={solver} />
+      {eta && (
+        <>
+          <p class="tool-eta" data-testid="eta">{`ETA ${dayTime(eta.shipLocal)} SMT (${formatOffset(eta.offsetMinutes)}) · ${utcText} UTC`}</p>
+          {eta.changesBefore.map((c) => {
+            const at = new Date(c.effectiveAt);
+            const before = shipOffsetAt(clockChanges, new Date(at.getTime() - 1));
+            return <p key={c.id} class="tool-note">{`Clock change before arrival: ${formatOffset(c.toOffsetMinutes)} from ${dayTime(toShipLocal(at, before).dateTime)}`}</p>;
+          })}
+        </>
+      )}
+    </section>
+  );
 }
