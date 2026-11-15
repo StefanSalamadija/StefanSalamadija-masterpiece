@@ -1,7 +1,7 @@
 # Masterpiece: Knowledge Library (Piece 4) Design
 
 Date: 2026-11-15
-Status: draft for user review.
+Status: draft for user review. A builder check was done; its questions are answered below and marked *(builder check)*.
 
 ## 1. Intent
 
@@ -41,12 +41,12 @@ Success means:
    - rename, move and delete (soft delete);
    - sort by title, date added or last opened;
    - a "Recently opened" list.
-6. **Backups:**
-   - The backup and handover screens get an **Include library documents** tick, off by default, showing the library
-     size.
-   - If including the library would push the file over the backup limit, the export is refused with a plain message
-     naming the size and the largest documents.
-   - Without the tick, a backup carries the titles, folders and tags only, not the files.
+6. **Backups (user decision: separate library files):**
+   - Normal backups and handovers carry the library's titles, folders and tags only, never the files, so they stay small.
+   - **Export library** makes encrypted library file(s) of their own. When the library is big, it is split into parts of
+     about 100 MB each.
+   - **Import library** reads any number of those parts, in any order, on any device. A relief gets the handover file
+     plus the library file(s).
 
 ## 3. Non-goals
 
@@ -56,7 +56,6 @@ Success means:
 - Editing documents.
 - Old .doc and .xls files: these are stored and opened with the device only, with no text and no viewer.
 - Sync between devices other than by backup.
-- Splitting a large library across several backup files. This can come later if needed.
 
 ## 4. Anti-goals
 
@@ -86,7 +85,12 @@ Success means:
   - one file up to 100 MB;
   - storage usage is shown on the library screen using `navigator.storage.estimate()`;
   - the existing storage-full handling applies.
-- **Privacy:** documents never leave the device except in the user's encrypted backup, and only when the tick is on.
+- **Offline:** the pdf.js worker (`.mjs`), standard fonts (`.pfb`) and character maps (`.bcmap`) are added to the
+  Workbox precache patterns, about 3 MB in all, downloaded once. The Workbox per-file size limit is raised to cover the
+  worker, if needed. *(builder check)*
+- **Storage persistence:** the app already asks for persistent storage and warns when it is refused. The library screen
+  repeats that warning. There is no total cap beyond the device's quota. *(builder check)*
+- **Privacy:** documents leave the device only in the user's encrypted library files.
 
 ## 6. Approaches
 
@@ -109,6 +113,10 @@ Success means:
   - `addedAt`, `openedAt?`;
   - the base record fields (timestamps and `deleted`).
 - **`libraryFiles`:** `{ docId, blob }`. The file is kept apart from the record, so that lists never load file bytes.
+- **Missing file:** a document whose `libraryFiles` row is missing shows "File not on this device", which is shown and
+  never stored. This happens after a normal backup is restored without its library file, and the document can then be
+  found only by title and tags. **Attach file** asks for the file; its `sha256` must match, otherwise "This is a
+  different file. Use it anyway?". Attaching indexes the file. *(builder check)*
 - **`libraryText`:** `{ id, docId, part: number, label: string, text: string }`, one row per PDF page, Excel sheet, or
   the whole Word document. The text is stored normalised for search, and the snippet comes from that same text.
 - **`libraryFolders`:** `{ id, scope: 'personal', name }`, plus the base fields.
@@ -128,6 +136,8 @@ Success means:
 ### 7.3 Search
 
 - **The query:** split into normalised words (lowercase, no diacritics). Words shorter than 2 characters are dropped.
+- **Word match:** a word matches anywhere inside a word of the text ("inspect" finds "inspection"). Search scans the
+  stored text in full; there is no word index and no quoted-phrase search. *(builder check)*
 - **A match:** a document matches if every word appears either in its title, tags and folder name, or within one part
   (page or sheet) of its text.
 - **Ranking:**
@@ -155,18 +165,36 @@ Success means:
   - storage use;
   - "Recently opened".
 - **Document details:** rename, folder, tags, Open with…, and Delete.
+  - **Open with…** uses the share sheet with the file (`navigator.share` with files) where the device supports it, and
+    otherwise downloads the file. *(builder check)*
+  - **Delete** is soft. Deleted documents stay in **Recently deleted** (with Restore, and Delete now) for 30 days. On
+    the first library open after that, their files and text are removed; the record stays as a tombstone for the merge.
+    *(builder check)*
 - **Viewer:** as in §2.4.
   - PDF pages render on demand, about 2 pages either side of the one shown.
   - Highlights come from the pdf.js text layer.
 
-### 7.5 Backups
+### 7.5 Backups and library files
 
-- With the tick, full backups and handovers include `libraryDocs`, `libraryFolders` and the files as base64. The
-  `libraryText` table is not included: it is rebuilt on import.
-- Without the tick, only `libraryDocs` and `libraryFolders` are included. The documents then show "File not on this
-  device", with **Import file** to re-attach the file by choosing it again. The file is matched by its `sha256`.
-- Before writing the file, the export estimates its size: about 1.37 × the bytes, from base64 plus encryption. If that
-  is over `MAX_BACKUP_FILE_BYTES`, it refuses with the library size and the 3 largest documents.
+- **Normal backups and handovers** carry `libraryDocs` and `libraryFolders`, tombstones included, through the existing
+  merge. A document that changed on both sides follows the newer `updatedAt`, as other records do. They carry neither
+  `libraryFiles` nor `libraryText`.
+- **Library file format (`.mplib`):**
+  - It starts with a small JSON header: format version, part `n` of `m`, export id, salt, IV and iteration count.
+  - The rest is AES-GCM ciphertext of a zip, stored without compression (PDFs are already compressed). The zip holds
+    `manifest.json` (the part's documents and all folders) and one entry per file.
+  - The key comes from the user's password with the same PBKDF2 settings as backups.
+  - Documents are packed whole into parts of up to 100 MB; one file is at most 100 MB, so it always fits.
+  - The file name is `Masterpiece-library-YYYY-MM-DD-part-n-of-m.mplib`.
+- **Import library:**
+  - The user picks one or more parts and enters the password.
+  - Each part is read on its own: its folders and documents are merged by `id`, then by `sha256`, and its files are
+    attached where missing.
+  - A snapshot is taken before the first part, as for other imports.
+  - The text index is rebuilt for each attached file, with progress, in the same way as import (§7.2).
+  - A missing part leaves its documents as "File not on this device" until it is imported.
+- **Memory:** each part is built and encrypted on its own, so at most about 2 × 100 MB is held at once. Base64 strings
+  are never used for files.
 
 ### 7.6 Testing
 
@@ -183,7 +211,10 @@ Success means:
   - import a .docx and an .xlsx and find words in them;
   - a scanned PDF is labelled;
   - delete and undo;
-  - a backup with and without the tick;
+  - export the library as several parts (with a lowered part size in the test) and import them on a fresh app,
+    in reverse order;
+  - a normal backup carries titles but no files;
+  - Recently deleted, then purged after 30 days, using the clock;
   - offline after the first open;
   - 360 px with no horizontal scroll.
 
