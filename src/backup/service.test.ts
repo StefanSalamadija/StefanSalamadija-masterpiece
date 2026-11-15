@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPhoto, closeDraft, openDraft, saveTemplate } from '../db/forms';
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
-import { addEntry, createBudgetRecord, ensureBudgetSetup, listCategories, undoEntry, updateEntry } from '../db/budget';
+import { addEntry, createBudgetRecord, ensureBudgetSetup, listCategories, undoEntry, updateBudgetRecord, updateEntry } from '../db/budget';
 import { allTables, createRecord, softDelete, updateRecord } from '../db/records';
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
@@ -1234,6 +1234,18 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['the budget settings have another key', 'budgetSettings', { key: 'device' }],
     ['the budget settings have no rotation', 'budgetSettings', { rotation: undefined }],
     ['the budget settings have a horizon that is not a choice', 'budgetSettings', { horizon: 18 }],
+    ['a month has a category target that is not whole cents', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: 12.5, inherited: false } } }],
+    ['a month has a category target that is text', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: '1250', inherited: false } } }],
+    ['a month has a pot target amount that is not whole cents', 'budgetMonths', { potTargets: { needs: { kind: 'amount', value: 100.5, inherited: false } } }],
+    ['a month has a pot target over 100%', 'budgetMonths', { potTargets: { needs: { kind: 'pct', value: 120, inherited: false } } }],
+    ['a month has a pot target of another kind', 'budgetMonths', { potTargets: { needs: { kind: 'share', value: 10, inherited: false } } }],
+    ['a month has a target for a pot that is not one', 'budgetMonths', { potTargets: { fun: { kind: 'pct', value: 10, inherited: false } } }],
+    ['the budget settings have a favourite that is not whole cents', 'budgetSettings', { favourites: [{ name: 'Coffee', amount: 3.2, categoryId: 'bc-1' }] }],
+    ['the budget settings have fixed spending that is not whole cents', 'budgetSettings', { fixedSpend: { wants: 10000.01 } }],
+    ['the budget settings have a salary that is not whole cents', 'budgetSettings', {
+      rotation: { salaryFrom: [{ ym: '2026-01', amount: 4500.5 }], periods: [], patternOn: 8, patternOff: 4, paidNextMonth: false, paidAtHomePct: 0 },
+    }],
+    ['a scenario has a change that is not whole cents', 'budgetScenarios', { changes: [{ kind: 'salary', fromYm: '2027-01', amount: 4500.5 }] }],
   ] as [string, TableName, object][])('throws DamagedFileError when %s', async (_label, table, patch) => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith(table, patch), PW)).rejects.toThrow(DamagedFileError);
@@ -1253,6 +1265,17 @@ describe('prepareImport rejects what it cannot trust', () => {
       await expect(prepareImport(b, await fileWith(table, { revision: '01 / 01.06.2026' }), PW), table).resolves.toBeDefined();
       await expect(prepareImport(b, await fileWith(table, { revision: undefined }), PW), table).resolves.toBeDefined();
     }
+  });
+
+  it('takes nested budget amounts in whole cents, and a pot target as a fractional percentage', async () => {
+    const b = freshDb();
+    await expect(prepareImport(b, await fileWith('budgetMonths', {
+      potTargets: { needs: { kind: 'pct', value: 52.5, inherited: false }, wants: { kind: 'amount', value: 30000, inherited: true } },
+      categoryTargets: { 'bc-1': { amount: 25000, inherited: false } },
+    }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('budgetSettings', {
+      favourites: [{ name: 'Coffee', amount: 320, categoryId: 'bc-1' }], fixedSpend: { wants: 10000 },
+    }), PW)).resolves.toBeDefined();
   });
 
   it('does not ask for a shipId on a ship', async () => {
@@ -1349,6 +1372,27 @@ describe('the budget in a backup', () => {
     await ensureBudgetSetup(b);
     expect(await b.budgetCategories.count()).toBe(DEFAULT_CATEGORIES.length);
     expect(await b.budgetSettings.count()).toBe(1);
+  });
+
+  it('merges into one set when two devices each set the budget up before they first exchanged', async () => {
+    const a = await deviceA();
+    await ensureBudgetSetup(a.db);
+    const b = freshDb();
+    at('2026-10-26T08:00:00.000Z');
+    await ensureBudgetSetup(b);
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.items.filter((i) => i.table.startsWith('budget'))).toEqual([]);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect(await b.budgetCategories.count()).toBe(DEFAULT_CATEGORIES.length);
+    expect(await b.budgetSettings.count()).toBe(1);
+    // Once they have exchanged, an edit of a default on one device comes in as an update on the other.
+    at('2026-10-26T09:00:00.000Z');
+    const [first] = await listCategories(a.db);
+    await updateBudgetRecord(a.db, 'budgetCategories', first.id, { name: 'Rent' });
+    at('2026-10-26T09:30:00.000Z');
+    const edited = await prepareImport(b, (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text, PW);
+    expect(edited.plan.items.map((i) => [i.table, i.id, i.kind])).toEqual([['budgetCategories', first.id, 'update']]);
   });
 
   it('never goes into a handover, with or without the forms library', async () => {

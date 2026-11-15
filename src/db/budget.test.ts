@@ -50,8 +50,23 @@ describe('ensureBudgetSetup', () => {
     expect(settings.assumptions).not.toHaveProperty('yearlyReturnPct');
     expect(settings.assumptions).not.toHaveProperty('inflationPct');
     expect(settings).not.toHaveProperty('bufferCents');
-    expect(settings.updatedBy).toBe((await getSettings(db)).deviceId);
+    // Seeded with the same id and stamp on every device (see the two-device test below).
+    expect(settings).toMatchObject({ id: 'budget-settings', updatedBy: 'seed', createdAt: '1970-01-01T00:00:00.000Z' });
     db.close();
+  });
+
+  it('gives the defaults the same ids on every device, so two devices that each seeded merge into one set', async () => {
+    const [a, b] = [freshDb(), freshDb()];
+    await ensureBudgetSetup(a);
+    vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+    await ensureBudgetSetup(b);
+    const [mine, theirs] = [await allTables(a), await allTables(b)];
+    expect(theirs.budgetCategories).toEqual(mine.budgetCategories);
+    expect(theirs.budgetSettings).toEqual(mine.budgetSettings);
+    expect(mine.budgetCategories.map((c) => c.id)).toContain('budget-cat:wants:cafes-restaurants');
+    expect(mine.budgetCategories.map((c) => c.id)).toContain('budget-cat:needs:children-s-needs');
+    a.close();
+    b.close();
   });
 
   it('is idempotent: run again, or twice at once, it adds nothing', async () => {
@@ -148,6 +163,25 @@ describe('the other budget tables', () => {
     await deleteBudgetRecord(db, 'budgetDebts', debt.id);
     expect(await listBudget(db, 'budgetDebts')).toEqual([]);
     expect((await db.budgetDebts.get(debt.id))?.deleted).toBe(true);
+    db.close();
+  });
+
+  it('refuses nested money that is not whole cents, and takes a pot target as a fractional percentage', async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    const month = (over: object) => ({ ym: '2026-11', potTargets: {}, categoryTargets: {}, ...over });
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ categoryTargets: { c1: { amount: 12.5, inherited: false } } }))).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'amount', value: 0.5, inherited: false } } }))).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 101, inherited: false } } }))).rejects.toThrow();
+    const saved = await createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 52.5, inherited: false } } }));
+    await expect(updateBudgetRecord(db, 'budgetMonths', saved.id, { plannedIncome: 4500.5 })).rejects.toThrow();
+    await expect(updateBudgetSettings(db, { favourites: [{ name: 'Coffee', amount: 3.2, categoryId: 'c1' }] })).rejects.toThrow();
+    await expect(updateBudgetSettings(db, { fixedSpend: { wants: 100.01 } })).rejects.toThrow();
+    const { rotation } = await getBudgetSettings(db);
+    await expect(updateBudgetSettings(db, { rotation: { ...rotation, salaryFrom: [{ ym: '2026-01', amount: 4500.5 }] } })).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetScenarios', { name: 'Raise', changes: [{ kind: 'salary', fromYm: '2027-01', amount: 0.5 }] })).rejects.toThrow();
+    expect(await db.budgetMonths.count()).toBe(1);
+    expect((await getBudgetSettings(db)).favourites).toEqual([]);
     db.close();
   });
 

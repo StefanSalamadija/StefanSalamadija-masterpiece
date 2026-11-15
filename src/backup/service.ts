@@ -10,6 +10,7 @@ import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { BUDGET_TABLES, TABLE_NAMES } from '../domain/types';
 import type { BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
+import { budgetMoneyOk, isCents } from '../budget/validate';
 import { isBase64 } from './crypto';
 import {
   BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, StaleReviewError, openBackup, sealBackup, validatePassword,
@@ -122,20 +123,21 @@ const HORIZONS: ReadonlySet<unknown> = new Set([12, 24, 36, 60]);
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
-/** Money in whole cents, as the budget keeps it. */
-function isCents(value: unknown): boolean {
-  return Number.isSafeInteger(value);
-}
-
 function isYm(value: unknown): boolean {
   return typeof value === 'string' && YM.test(value);
 }
 
 /**
  * What a budget record needs, beyond being personal: the fields the budget's sums read without checking again. Every
- * amount is whole cents and every month `YYYY-MM`.
+ * amount is whole cents, nested ones too (a month's targets, the settings' favourites, fixed spending and salaries, a
+ * scenario's changes: see `budgetMoneyOk`), and every month `YYYY-MM`.
  */
 function hasBudgetFields(name: BudgetTableName, r: Record<string, unknown>): boolean {
+  return budgetMoneyOk(r) && hasBudgetShape(name, r);
+}
+
+/** The fields each budget table must have, of the right kind. */
+function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): boolean {
   switch (name) {
     case 'budgetCategories':
       return POT_IDS.has(r.pot) && typeof r.name === 'string' && typeof r.order === 'number' && typeof r.hidden === 'boolean' && isOptionalText(r.group);

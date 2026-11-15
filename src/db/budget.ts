@@ -1,5 +1,6 @@
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import { addMonths } from '../budget/months';
+import { budgetMoneyOk } from '../budget/validate';
 import type {
   BaseRecord, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
   BudgetRecurring, BudgetScenario, BudgetSettings, BudgetTableName, Ym,
@@ -12,8 +13,9 @@ import { guardWrite } from './storage';
 /*
  * The budget's data: one personal record per category, entry, month plan, template, fund, fund record, debt, goal,
  * asset, correction and scenario, and one settings record. Every write goes through `createRecord` / `updateRecord` /
- * `softDelete`, so records are stamped by this device and never hard-deleted. Money is checked to be whole cents
- * before anything is stored.
+ * `softDelete`, so records are stamped by this device and never hard-deleted. Money, nested amounts included, is
+ * checked to be whole cents before anything is stored. The seeded defaults are the one exception to fresh ids: see
+ * `ensureBudgetSetup`.
  */
 
 /** The record kept in each budget table. */
@@ -26,18 +28,13 @@ export interface BudgetRecordOf {
 export type BudgetFields<T extends BudgetTableName> = Omit<BudgetRecordOf[T], keyof BaseRecord>;
 
 const SETTINGS_KEY = 'budget';
-/** The fields that hold money, in any budget table. Each one must be whole cents. */
-const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'plannedIncome', 'bufferCents'] as const;
+/** The id of the one settings record, the same on every device. */
+export const SETTINGS_ID = 'budget-settings';
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
-/** Refuses money that is not whole cents: amounts are never stored as floats. */
+/** Refuses money that is not whole cents, nested amounts included: amounts are never stored as floats. */
 function assertCents(fields: object): void {
-  const values = fields as Record<string, unknown>;
-  for (const key of MONEY_FIELDS) {
-    if (key in values && values[key] !== undefined && !Number.isSafeInteger(values[key])) {
-      throw new Error(`${key} must be a whole number of cents, not ${String(values[key])}.`);
-    }
-  }
+  if (!budgetMoneyOk(fields as Record<string, unknown>)) throw new Error('A budget amount must be a whole number of cents.');
 }
 
 function assertEntry(fields: Partial<BudgetEntry>): void {
@@ -95,32 +92,53 @@ function defaultSettings(): BudgetFields<'budgetSettings'> {
   };
 }
 
+/** `Cafés & restaurants` → `cafes-restaurants`: a category name as a stable piece of an id. */
+function slug(name: string): string {
+  return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/** The id of a default category, the same on every device: `budget-cat:<pot>:<slug of its name>`. */
+export function defaultCategoryId(category: { pot: string; name: string }): string {
+  return `budget-cat:${category.pot}:${slug(category.name)}`;
+}
+
 /**
- * Sets the budget up the first time it is opened: the default categories and the default settings. Once there is a
- * settings record (made here, or brought by a backup from another device, even one since deleted) it does nothing, so
- * it never brings back a category the user deleted. Categories are seeded only into an empty category table. It runs
- * in one transaction, so two calls at once still seed once.
+ * The stamp of a seeded default. It is the same on every device, so two devices that each seed before their first
+ * exchange hold byte-identical defaults, which the merge sees as one record (no change, no conflict). Being at the
+ * epoch, an untouched default also counts as unchanged since any exchange, so a later edit of it on the other device
+ * comes in as an update.
+ */
+const SEED_STAMP = {
+  createdAt: '1970-01-01T00:00:00.000Z', updatedAt: '1970-01-01T00:00:00.000Z', updatedBy: 'seed', deleted: false, scope: 'personal' as const,
+};
+
+/**
+ * Sets the budget up the first time it is opened: the default categories and the default settings, with fixed ids and
+ * stamps (see `SEED_STAMP`). Once there is a settings record (made here, or brought by a backup from another device,
+ * even one since deleted) it does nothing, so it never brings back a category the user deleted. Categories are seeded
+ * only into an empty category table. It runs in one transaction, so two calls at once still seed once.
  */
 export function ensureBudgetSetup(db: MasterpieceDB): Promise<void> {
   return guardWrite(() =>
-    // `settings` is in the scope because `createRecord` reads the device id from it.
-    db.transaction('rw', [db.budgetCategories, db.budgetSettings, db.settings], async () => {
+    db.transaction('rw', [db.budgetCategories, db.budgetSettings], async () => {
       if ((await db.budgetSettings.where('key').equals(SETTINGS_KEY).count()) > 0) return;
       if ((await db.budgetCategories.count()) === 0) {
-        for (const [order, category] of DEFAULT_CATEGORIES.entries()) {
-          await createBudgetRecord(db, 'budgetCategories', { ...category, order, hidden: false });
-        }
+        await db.budgetCategories.bulkAdd(DEFAULT_CATEGORIES.map((category, order) => ({
+          ...category, order, hidden: false, id: defaultCategoryId(category), ...SEED_STAMP,
+        })));
       }
-      await createBudgetRecord(db, 'budgetSettings', defaultSettings());
+      await db.budgetSettings.add({ ...defaultSettings(), id: SETTINGS_ID, ...SEED_STAMP });
     }),
   );
 }
 
 /**
- * The budget settings. There is one record; should two devices each have made one before they first exchanged a
- * backup, the oldest live one is used, so that every device reads the same. Refuses when the budget is not set up.
+ * The budget settings: the one record with `SETTINGS_ID`, while it is live; else the oldest other live record with the
+ * settings key, so that every device reads the same. Refuses when the budget is not set up.
  */
 export async function getBudgetSettings(db: MasterpieceDB): Promise<BudgetSettings> {
+  const seeded = await db.budgetSettings.get(SETTINGS_ID);
+  if (seeded && !seeded.deleted) return seeded;
   const all = await db.budgetSettings.where('key').equals(SETTINGS_KEY).filter((s) => !s.deleted).toArray();
   all.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   if (all.length === 0) throw new Error('The budget is not set up yet (see ensureBudgetSetup).');
