@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CrewDraft, Snapshot, Tables } from '../domain/types';
 import { TABLE_NAMES } from '../domain/types';
 import { allTables, createRecord, softDelete } from './records';
+import { addDocument } from './library';
 import { MasterpieceDB, openDb } from './schema';
 import { getSettings, updateSettings } from './settings';
 import { createShip } from './ships';
@@ -25,10 +26,10 @@ function at(hour: number) {
 }
 
 /** The counts of the forms tables of a snapshot that has none. */
-const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0 };
+const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0 };
 const emptyTables = (): Tables => ({
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
 });
 
 beforeEach(() => {
@@ -469,5 +470,30 @@ describe('a snapshot you can roll back to', () => {
     await restoreSnapshot(v2, (await listSnapshots(v2))[0].id);
     expect(await allTables(v2)).toEqual(before);
     v2.close();
+  });
+});
+
+describe('restoring a snapshot and the library', () => {
+  it('keeps a document added after the snapshot while its file is on this device', async () => {
+    const db = freshDb();
+    await takeSnapshot(db, 'manual', 'Before');
+    const [snap] = await db.snapshots.toArray();
+    const added = await addDocument(db, {
+      title: 'Pump notes', tags: [], fileName: 'p.pdf', mimeType: 'application/pdf', kind: 'pdf', size: 3, sha256: 's', textStatus: 'indexed',
+      blob: new Blob(['abc']), parts: [{ part: 1, label: 'Page 1', text: 'bilge' }],
+    });
+    await restoreSnapshot(db, snap.id);
+    expect((await db.libraryDocs.toArray()).map((d) => d.id)).toEqual([added.id]);
+    expect(await db.libraryFiles.count()).toBe(1);
+    expect(await db.libraryText.count()).toBe(1);
+  });
+  it('does not keep a record that has no file here', async () => {
+    const db = freshDb();
+    await takeSnapshot(db, 'manual', 'Before');
+    const [snap] = await db.snapshots.toArray();
+    await db.libraryDocs.put({ id: 'far', scope: 'personal', title: 'T', tags: [], fileName: 'f', mimeType: '', kind: 'pdf', size: 1, sha256: 'x',
+      textStatus: 'indexed', addedAt: '2026-01-01', deleted: false, createdAt: '2026-01-01', updatedAt: '2026-01-01', updatedBy: 'd' });
+    await restoreSnapshot(db, snap.id);
+    expect(await db.libraryDocs.count()).toBe(0);
   });
 });

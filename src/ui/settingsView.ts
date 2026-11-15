@@ -60,6 +60,8 @@ const COUNT_WORDS: readonly (readonly [TableName, string, string])[] = [
   ['formTemplates', 'form', 'forms'],
   ['formDrafts', 'form draft', 'form drafts'],
   ['formPhotos', 'photo', 'photos'],
+  ['libraryDocs', 'library document', 'library documents'],
+  ['libraryFolders', 'library folder', 'library folders'],
 ];
 
 /** "1 ship · 12 crew · 30 certificates": what a snapshot holds, leaving out what it does not. Deleted records are counted too. */

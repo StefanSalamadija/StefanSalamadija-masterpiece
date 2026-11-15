@@ -49,7 +49,7 @@ export function fromBase64(text: string): Uint8Array<ArrayBuffer> {
 }
 
 /** The password is used exactly as typed: UTF-8, no Unicode normalisation. */
-async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<CryptoKey> {
+export async function deriveKey(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number): Promise<CryptoKey> {
   const { subtle } = globalThis.crypto;
   const material = await subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
   return subtle.deriveKey(

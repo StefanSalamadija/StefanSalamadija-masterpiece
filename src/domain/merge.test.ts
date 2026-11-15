@@ -28,7 +28,7 @@ function cert(id: string, updatedAt: string, patch: Partial<Certificate> = {}): 
 
 const EMPTY: Tables = {
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [],
+  formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
 };
 const T = (crew: SyncRecord[]): Tables => ({ ...EMPTY, crew });
 

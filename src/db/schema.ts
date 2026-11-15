@@ -2,7 +2,7 @@ import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type {
-  Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, Settings, ShipProfile, Snapshot,
+  Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, LibraryDoc, LibraryFileRow, LibraryFolder, LibraryOpenedRow, LibraryTextRow, Settings, ShipProfile, Snapshot,
   SyncRecord, TableName, Voyage,
 } from '../domain/types';
 import { connectionWatch } from './connection';
@@ -29,6 +29,12 @@ export class MasterpieceDB extends Dexie {
   declare formDrafts: Table<FormDraft, string>;
   declare formLastValues: Table<FormLastValues, string>;
   declare formPhotos: Table<FormPhoto, string>;
+  declare libraryDocs: Table<LibraryDoc, string>;
+  declare libraryFolders: Table<LibraryFolder, string>;
+  /** Local only: never in a snapshot or a backup. */
+  declare libraryFiles: Table<LibraryFileRow, string>;
+  declare libraryText: Table<LibraryTextRow, string>;
+  declare libraryOpened: Table<LibraryOpenedRow, string>;
   declare settings: Table<Settings, 'device'>;
   declare snapshots: Table<Snapshot, string>;
 
@@ -54,6 +60,16 @@ export class MasterpieceDB extends Dexie {
       formDrafts: 'id, shipId, templateId',
       formLastValues: 'id, shipId, code',
       formPhotos: 'id, shipId, draftId',
+    }).upgrade(async (tx) => {
+      await snapshotInUpgrade(tx);
+    });
+    // Knowledge library: the documents and folders sync (personal); the files and their text stay on this device.
+    this.version(4).stores({
+      libraryDocs: 'id, folderId, sha256',
+      libraryFolders: 'id',
+      libraryFiles: 'docId',
+      libraryText: 'id, docId',
+      libraryOpened: 'docId',
     }).upgrade(async (tx) => {
       await snapshotInUpgrade(tx);
     });

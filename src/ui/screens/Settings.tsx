@@ -63,6 +63,7 @@ function BackupSection() {
       <div class="form-actions">
         <button ref={fullButton} type="button" class="btn btn-primary" onClick={() => open('full')}>Export full backup</button>
         <a class="btn btn-outline" href="#/settings/import">Import backup</a>
+        <a class="btn btn-outline" href="#/library/files">Library files</a>
       </div>
       <div class="inline-form">
         <div class="field">

@@ -85,19 +85,40 @@ export interface FormDraft extends BaseRecord {
 export interface FormLastValues extends BaseRecord { shipId: string; code: string; values: DraftValues; revision?: string }
 /** A photo taken for a draft, as JPEG in standard base64. A deleted photo keeps no image: its `jpegBase64` is `''`. */
 export interface FormPhoto extends BaseRecord { shipId: string; draftId: string; jpegBase64: string; width: number; height: number }
+export type LibraryKind = 'pdf' | 'docx' | 'xlsx' | 'image' | 'other';
+/** How a library document's text was read: `no-text` is a file with nothing to read (a scan), `not-supported` a kind that is not read. */
+export type TextStatus = 'indexed' | 'no-text' | 'failed' | 'not-supported';
+/**
+ * A document in the personal knowledge library. The record is small and syncs (`scope: 'personal'`); the file itself
+ * (`LibraryFileRow`) and its searchable text (`LibraryTextRow`) stay on this device and are in no backup. A deleted
+ * document is kept as a tombstone with `deletedAt`; its file and text go when the 30 days of "recently deleted" are over.
+ */
+export interface LibraryDoc extends BaseRecord { scope: 'personal'; title: string; folderId?: string; tags: string[]; fileName: string;
+  mimeType: string; kind: LibraryKind; size: number; sha256: string; pageCount?: number; textStatus: TextStatus; textError?: string;
+  addedAt: string; deletedAt?: string }
+export interface LibraryFolder extends BaseRecord { scope: 'personal'; name: string }
+/** One searchable part of a document (a page, a sheet), as text that is already normalised. Local only. */
+export interface LibraryTextRow { id: string; docId: string; part: number; label: string; text: string }
+/** When a document was last opened on this device. Local only: it is not synced, so opening a document never conflicts. */
+export interface LibraryOpenedRow { docId: string; openedAt: string }
+/** A document's file. Local only. */
+export interface LibraryFileRow { docId: string; blob: Blob }
 export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange
-  | FormTemplate | FormDraft | FormLastValues | FormPhoto;
+  | FormTemplate | FormDraft | FormLastValues | FormPhoto | LibraryDoc | LibraryFolder;
 export type TableName = 'ships' | 'crew' | 'voyages' | 'certificates' | 'clockChanges' | 'crewDocuments'
-  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos';
+  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos' | 'libraryDocs' | 'libraryFolders';
 /** Every syncable table. A table added later goes last: it is the order of the snapshot, and an old backup file may lack it. */
 export const TABLE_NAMES: readonly TableName[] = [
   'ships', 'crew', 'voyages', 'certificates', 'clockChanges', 'crewDocuments', 'formTemplates', 'formDrafts', 'formLastValues', 'formPhotos',
+  'libraryDocs', 'libraryFolders',
 ];
-/** A table whose records belong to a ship by their `shipId`: every syncable table but the ships and the forms library. */
-export type ShipTableName = Exclude<TableName, 'ships' | 'formTemplates'>;
+/** The syncable tables that belong to the person, not to a ship: the forms library and the knowledge library. */
+export const PERSONAL_TABLES: readonly TableName[] = ['formTemplates', 'libraryDocs', 'libraryFolders'];
+/** A table whose records belong to a ship by their `shipId`: every syncable table but the ships and the personal ones. */
+export type ShipTableName = Exclude<TableName, 'ships' | 'formTemplates' | 'libraryDocs' | 'libraryFolders'>;
 /** The tables of `ShipTableName`, in `TABLE_NAMES` order. Each is indexed by `shipId`. */
 export const SHIP_TABLES: readonly ShipTableName[] = TABLE_NAMES.filter(
-  (name): name is ShipTableName => name !== 'ships' && name !== 'formTemplates',
+  (name): name is ShipTableName => name !== 'ships' && !PERSONAL_TABLES.includes(name),
 );
 export type Tables = Record<TableName, SyncRecord[]>;
 export interface PinHash { salt: string; hash: string; iterations: number }

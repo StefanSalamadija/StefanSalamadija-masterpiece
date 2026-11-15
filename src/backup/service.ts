@@ -31,7 +31,11 @@ export function collectHandover(t: Tables, shipId: string, opts: { includeLibrar
     r.scope === 'ship' && (name === 'ships' ? r.id === shipId : (r as { shipId?: string }).shipId === shipId);
   const out = {} as Tables;
   for (const name of TABLE_NAMES) out[name] = t[name].filter((r) => belongs(name, r));
-  if (opts.includeLibrary && out.ships.length > 0) out.formTemplates = t.formTemplates.filter((r) => r.scope === 'personal' && !r.deleted);
+  if (out.ships.length > 0) {
+    // The knowledge library's records (not its files) always go: they are small, and a relief wants the same documents listed.
+    for (const name of ['libraryDocs', 'libraryFolders'] as const) out[name] = t[name].filter((r) => r.scope === 'personal' && !r.deleted);
+    if (opts.includeLibrary) out.formTemplates = t.formTemplates.filter((r) => r.scope === 'personal' && !r.deleted);
+  }
   return out;
 }
 
@@ -120,6 +124,8 @@ function isBase64Text(value: unknown): boolean {
 function hasOwnFields(name: TableName, r: Record<string, unknown>): boolean {
   if (name === 'ships') return isObject(r.particulars);
   // The library is personal and belongs to no ship. Its file is what every filled form is made from.
+  if (name === 'libraryDocs') return r.scope === 'personal' && typeof r.title === 'string' && typeof r.sha256 === 'string' && Array.isArray(r.tags);
+  if (name === 'libraryFolders') return r.scope === 'personal' && typeof r.name === 'string';
   if (name === 'formTemplates') {
     return r.scope === 'personal' && typeof r.code === 'string' && isBase64Text(r.fileBase64) && isObject(r.schema) && isObject(r.setup);
   }

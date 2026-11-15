@@ -73,11 +73,16 @@ async function keepActiveShipLive(db: MasterpieceDB): Promise<void> {
  */
 export function restoreSnapshot(db: MasterpieceDB, id: string): Promise<void> {
   return guardWrite(() =>
-    db.transaction('rw', [...syncTables(db), db.snapshots, db.settings], async () => {
+    db.transaction('rw', [...syncTables(db), db.snapshots, db.settings, db.libraryFiles], async () => {
       const target = await db.snapshots.get(id);
       if (!target) throw new Error(`Snapshot not found: ${id}`);
       await takeSnapshot(db, 'manual', 'Before restore');
-      await replaceAllTables(db, target.data);
+      // A library document added since the snapshot stays while its file is on this device: dropping the record would
+      // hide a file and its text that still take up room and that nothing could free.
+      const inSnapshot = new Set((target.data.libraryDocs ?? []).map((d) => d.id));
+      const withFile = new Set(await db.libraryFiles.toCollection().primaryKeys());
+      const kept = await db.libraryDocs.filter((d) => withFile.has(d.id) && !inSnapshot.has(d.id)).toArray();
+      await replaceAllTables(db, { ...target.data, libraryDocs: [...(target.data.libraryDocs ?? []), ...kept] });
       await keepActiveShipLive(db);
     }),
   );

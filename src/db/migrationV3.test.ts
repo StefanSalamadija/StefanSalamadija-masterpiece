@@ -88,7 +88,7 @@ describe('upgrading a version-2 database to version 3', () => {
     expect(snapshots[0]).toMatchObject({ reason: 'before-update', createdAt: '2026-10-28T09:00:00.000Z' });
     expect(snapshots[0].counts).toEqual({
       ships: 1, crew: 1, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 1,
-      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0,
+      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
     });
     const stored = (await v3.snapshots.get(snapshots[0].id)) as Snapshot;
     expect(Object.keys(stored.data)).toEqual([...TABLE_NAMES]);
@@ -105,7 +105,7 @@ describe('upgrading a version-2 database to version 3', () => {
     expect(tables.crewDocuments).toEqual([document]);
     expect(tables).toMatchObject({ voyages: [], certificates: [], clockChanges: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [] });
     expect((await getSettings(v3)).deviceId).toBe('dev-1');
-    expect(v3.backendDB().version).toBe(30); // installed: version 3 of the app, as IndexedDB counts it
+    expect(v3.backendDB().version).toBe(40); // installed: version 3 of the app, as IndexedDB counts it
     v3.close();
   });
 
@@ -148,7 +148,7 @@ describe('upgrading a version-2 database to version 3', () => {
   it('opens a fresh database at version 3 without a snapshot', async () => {
     const v3 = openDb('fresh-' + crypto.randomUUID());
     expect(await listSnapshots(v3)).toEqual([]);
-    expect(v3.backendDB().version).toBe(30);
+    expect(v3.backendDB().version).toBe(40);
     v3.close();
   });
 
@@ -162,7 +162,7 @@ describe('upgrading a version-2 database to version 3', () => {
     const snapshots = await listSnapshots(v3);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].counts).toMatchObject({ ships: 1, crewDocuments: 0, formTemplates: 0 });
-    expect(v3.backendDB().version).toBe(30);
+    expect(v3.backendDB().version).toBe(40);
     v3.close();
   });
 });
@@ -202,7 +202,7 @@ describe('an upgrade to version 3 that fails', () => {
 
     const v3 = openDb(name);
     await v3.open();
-    expect(v3.backendDB().version).toBe(30);
+    expect(v3.backendDB().version).toBe(40);
     const snapshots = await listSnapshots(v3);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].counts).toMatchObject({ ships: 1, crew: 1, crewDocuments: 1 });
