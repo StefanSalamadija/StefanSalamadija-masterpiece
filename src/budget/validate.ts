@@ -6,7 +6,7 @@
 
 const POT_IDS: ReadonlySet<string> = new Set(['needs', 'savings', 'wants', 'debts', 'emergency']);
 /** The top-level fields that hold money, in any budget table. */
-const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'plannedIncome', 'bufferCents'] as const;
+const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'bufferCents'] as const;
 /** The money fields of a scenario change. */
 const CHANGE_MONEY_FIELDS = ['amount', 'monthly', 'lump'] as const;
 
@@ -24,19 +24,16 @@ function optionalCents(fields: Record<string, unknown>, key: string): boolean {
   return fields[key] === undefined || isCents(fields[key]);
 }
 
-/** How a target was set: for its month only, or from its month on. */
-const ORIGINS: ReadonlySet<unknown> = new Set(['this', 'fromOn']);
-
-/** A category's target: whole cents, or `null` for one removed on purpose. */
-function isCategoryTarget(value: unknown): boolean {
-  return isObject(value) && (value.amount === null || isCents(value.amount)) && ORIGINS.has(value.origin);
-}
-
 /** A pot's target: a percentage of income (0 to 100, fractions allowed) or an amount in whole cents. */
 function isPotTarget(value: unknown): boolean {
-  if (!isObject(value) || !ORIGINS.has(value.origin)) return false;
+  if (!isObject(value)) return false;
   if (value.kind === 'pct') return typeof value.value === 'number' && Number.isFinite(value.value) && value.value >= 0 && value.value <= 100;
   return value.kind === 'amount' && isCents(value.value);
+}
+
+/** A month's edit of one value: `fromOn` and `thisOnly`, each absent, `null` (no value) or a valid value, and nothing else. */
+function isPlanEdit(value: unknown, valid: (v: unknown) => boolean): boolean {
+  return isObject(value) && Object.entries(value).every(([key, v]) => (key === 'fromOn' || key === 'thisOnly') && (v === undefined || v === null || valid(v)));
 }
 
 /**
@@ -47,13 +44,14 @@ function isPotTarget(value: unknown): boolean {
  */
 export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
   if (!MONEY_FIELDS.every((key) => optionalCents(fields, key))) return false;
-  const { potTargets, categoryTargets, favourites, fixedSpend, rotation, changes } = fields;
+  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes } = fields;
+  if (plannedIncome !== undefined && !isPlanEdit(plannedIncome, isCents)) return false;
   if (potTargets !== undefined
-    && !(isObject(potTargets) && Object.entries(potTargets).every(([pot, target]) => POT_IDS.has(pot) && (target === undefined || isPotTarget(target))))) {
+    && !(isObject(potTargets) && Object.entries(potTargets).every(([pot, edit]) => POT_IDS.has(pot) && (edit === undefined || isPlanEdit(edit, isPotTarget))))) {
     return false;
   }
   if (categoryTargets !== undefined
-    && !(isObject(categoryTargets) && Object.values(categoryTargets).every(isCategoryTarget))) {
+    && !(isObject(categoryTargets) && Object.values(categoryTargets).every((edit) => isPlanEdit(edit, isCents)))) {
     return false;
   }
   if (favourites !== undefined && !(Array.isArray(favourites) && favourites.every((f) => isObject(f) && isCents(f.amount)))) return false;

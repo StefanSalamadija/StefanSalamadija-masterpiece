@@ -197,6 +197,12 @@ function setupText(setup: Values): string {
   return `${filled} filled for you · ${leftEmpty} left empty`;
 }
 
+/** A month's planned income edit: "€4,500.00 from this month on · €4,000.00 this month only". */
+function plannedIncomeText(edit: Values): string {
+  const part = (v: unknown, when: string) => (v === undefined ? undefined : `${Number.isSafeInteger(v) ? formatMoney(v as number) : 'none'} ${when}`);
+  return [part(edit.fromOn, 'from this month on'), part(edit.thisOnly, 'this month only')].filter(Boolean).join(' · ') || EMPTY_VALUE;
+}
+
 function show(key: string, value: unknown): string {
   if (value === undefined || value === null || value === '') return EMPTY_VALUE;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -213,6 +219,7 @@ function show(key: string, value: unknown): string {
   }
   if (key === 'crewListColumns' && Array.isArray(value)) return columnsText(value);
   if (key === 'crewImportMapping' && isObject(value) && isObject(value.byHeader)) return `${Object.keys(value.byHeader).length} mapped columns`;
+  if (key === 'plannedIncome' && isObject(value)) return plannedIncomeText(value);
   if (key === 'values' && isObject(value)) return valuesText(value);
   if (key === 'setup' && isObject(value)) return setupText(value);
   return plainText(JSON.stringify(value), MAX_VALUE);

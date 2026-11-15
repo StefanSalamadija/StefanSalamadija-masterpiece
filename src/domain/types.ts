@@ -133,20 +133,21 @@ export interface BudgetEntry extends BaseRecord { scope: 'personal'; kind: 'expe
   importKey?: string;
   /** Marked as a one-off: left out of the averages. */
   oneOff?: boolean }
+/** A pot's target: a % of planned income, or an amount in cents. */
+export interface PotTarget { kind: 'pct' | 'amount'; value: number }
 /**
- * How a target was set in its month: for that month only (`'this'`), or from that month on (`'fromOn'`), which later
- * months without a target of their own inherit until a later "from this month on" edit.
+ * What a month says about one value of its plan (planned income, a pot target, a category target):
+ *  - `fromOn`: set "from this month on". Later months use it, up to the next month with a `fromOn` of its own;
+ *  - `thisOnly`: set "for this month only". It overrides the value for this month alone and passes on to no other.
+ * Either may be absent (nothing said), or `null`: no value, on purpose (a target removed), which applies the same way.
  */
-export type TargetOrigin = 'this' | 'fromOn';
-export interface PotTarget { kind: 'pct' | 'amount'; value: number; origin: TargetOrigin }
-/** A category's monthly target; `amount: null` is a target removed on purpose (no target), which also passes on. */
-export interface CategoryTarget { amount: Cents | null; origin: TargetOrigin }
+export interface PlanEdit<V> { fromOn?: V | null; thisOnly?: V | null }
 /**
- * A month's plan. It holds only the targets edited in this month; a target it does not hold is inherited from the
- * latest earlier "from this month on" edit (see `effectiveMonth`).
+ * A month's plan. It holds only what was edited in this month; anything else comes from the latest earlier
+ * "from this month on" edit (see `effectiveMonth`).
  */
-export interface BudgetMonth extends BaseRecord { scope: 'personal'; ym: Ym; plannedIncome?: Cents; potTargets: Partial<Record<PotId, PotTarget>>;
-  categoryTargets: Record<string, CategoryTarget>; notes?: string }
+export interface BudgetMonth extends BaseRecord { scope: 'personal'; ym: Ym; plannedIncome?: PlanEdit<Cents>;
+  potTargets: Partial<Record<PotId, PlanEdit<PotTarget>>>; categoryTargets: Record<string, PlanEdit<Cents>>; notes?: string }
 /** A template that repeats every month on `day`, from `startYm` to `endYm` (or until the debt `untilDebtId` is paid off). */
 export interface BudgetRecurring extends BaseRecord { scope: 'personal'; name: string; amount: Cents; categoryId?: string; incomeSource?: IncomeSource;
   day: number; startYm: Ym; endYm?: Ym; untilDebtId?: string }

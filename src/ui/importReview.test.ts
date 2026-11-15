@@ -635,4 +635,11 @@ describe('the budget in the review', () => {
       { label: 'Note', local: 'Coffee', incoming: 'Coffee and cake' },
     ]);
   });
+
+  it('shows a month\'s planned income as money, with how it was set', () => {
+    const month = (plannedIncome: object) => rec({ scope: 'personal', ym: '2026-11', potTargets: {}, categoryTargets: {}, plannedIncome });
+    expect(changedFields('budgetMonths', month({ fromOn: 450000 }), month({ fromOn: 450000, thisOnly: null }))).toEqual([
+      { label: 'Planned income', local: '€4,500.00 from this month on', incoming: '€4,500.00 from this month on · none this month only' },
+    ]);
+  });
 });

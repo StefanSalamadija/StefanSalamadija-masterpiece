@@ -1234,14 +1234,16 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['the budget settings have another key', 'budgetSettings', { key: 'device' }],
     ['the budget settings have no rotation', 'budgetSettings', { rotation: undefined }],
     ['the budget settings have a horizon that is not a choice', 'budgetSettings', { horizon: 18 }],
-    ['a month has a category target that is not whole cents', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: 12.5, origin: 'this' } } }],
-    ['a month has a category target that is text', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: '1250', origin: 'this' } } }],
-    ['a month has a pot target amount that is not whole cents', 'budgetMonths', { potTargets: { needs: { kind: 'amount', value: 100.5, origin: 'this' } } }],
-    ['a month has a pot target over 100%', 'budgetMonths', { potTargets: { needs: { kind: 'pct', value: 120, origin: 'this' } } }],
-    ['a month has a pot target of another kind', 'budgetMonths', { potTargets: { needs: { kind: 'share', value: 10, origin: 'this' } } }],
+    ['a month has a category target that is not whole cents', 'budgetMonths', { categoryTargets: { 'bc-1': { thisOnly: 12.5 } } }],
+    ['a month has a category target that is text', 'budgetMonths', { categoryTargets: { 'bc-1': { thisOnly: '1250' } } }],
+    ['a month has a pot target amount that is not whole cents', 'budgetMonths', { potTargets: { needs: { thisOnly: { kind: 'amount', value: 100.5 } } } }],
+    ['a month has a pot target over 100%', 'budgetMonths', { potTargets: { needs: { thisOnly: { kind: 'pct', value: 120 } } } }],
+    ['a month has a pot target of another kind', 'budgetMonths', { potTargets: { needs: { thisOnly: { kind: 'share', value: 10 } } } }],
+    ['a month has planned income that is a bare amount', 'budgetMonths', { plannedIncome: 450000 }],
+    ['a month has planned income that is not whole cents', 'budgetMonths', { plannedIncome: { fromOn: 4500.5 } }],
     ['a month has a pot target that does not say how it was set', 'budgetMonths', { potTargets: { needs: { kind: 'pct', value: 10, inherited: false } } }],
-    ['a month has a category target with an origin that is not one', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: 100, origin: 'later' } } }],
-    ['a month has a target for a pot that is not one', 'budgetMonths', { potTargets: { fun: { kind: 'pct', value: 10, origin: 'this' } } }],
+    ['a month has a category target that is not an edit', 'budgetMonths', { categoryTargets: { 'bc-1': { amount: 100, origin: 'later' } } }],
+    ['a month has a target for a pot that is not one', 'budgetMonths', { potTargets: { fun: { thisOnly: { kind: 'pct', value: 10 } } } }],
     ['the budget settings have a favourite that is not whole cents', 'budgetSettings', { favourites: [{ name: 'Coffee', amount: 3.2, categoryId: 'bc-1' }] }],
     ['the budget settings have fixed spending that is not whole cents', 'budgetSettings', { fixedSpend: { wants: 10000.01 } }],
     ['the budget settings have a salary that is not whole cents', 'budgetSettings', {
@@ -1272,8 +1274,8 @@ describe('prepareImport rejects what it cannot trust', () => {
   it('takes nested budget amounts in whole cents, and a pot target as a fractional percentage', async () => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith('budgetMonths', {
-      potTargets: { needs: { kind: 'pct', value: 52.5, origin: 'this' }, wants: { kind: 'amount', value: 30000, origin: 'fromOn' } },
-      categoryTargets: { 'bc-1': { amount: 25000, origin: 'this' }, 'bc-2': { amount: null, origin: 'fromOn' } },
+      potTargets: { needs: { thisOnly: { kind: 'pct', value: 52.5 } }, wants: { fromOn: { kind: 'amount', value: 30000 } } },
+      categoryTargets: { 'bc-1': { thisOnly: 25000 }, 'bc-2': { fromOn: null } }, plannedIncome: { fromOn: 450000, thisOnly: null },
     }), PW)).resolves.toBeDefined();
     await expect(prepareImport(b, await fileWith('budgetSettings', {
       favourites: [{ name: 'Coffee', amount: 320, categoryId: 'bc-1' }], fixedSpend: { wants: 10000 },
