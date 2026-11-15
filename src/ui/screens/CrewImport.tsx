@@ -263,6 +263,9 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
   const count = importCount(rows);
   // The file was understood (a names column, and people under it): then the settings stay folded under "Adjust columns".
   const understood = !!loaded && NAME_COLUMNS.some((field) => loaded.mapping[field] !== undefined) && rows.length > 0;
+  const found = !loaded || fixRow || rowCount === 0 ? ''
+    : understood ? `Found ${rows.length} crew ${rows.length === 1 ? 'member' : 'members'}. Check the list below and tap Import.`
+    : "Couldn't find a column with names. Choose which column holds the names under Adjust columns.";
   const summary = previewSummary(rows);
 
   // While a row is fixed only its form is shown; the wizard is hidden, not gone, so that it is as it was when the form closes.
@@ -284,12 +287,6 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
 
           {!fixRow && loaded && grid && (
             <>
-              {understood && (
-                <p class="import-found">{`Found ${rows.length} crew ${rows.length === 1 ? 'member' : 'members'}. Check the list below and tap Import.`}</p>
-              )}
-              {!understood && rowCount > 0 && (
-                <p class="import-found">Couldn't find a column with names. Choose which column holds the names under Adjust columns.</p>
-              )}
               <details class="import-adjust" open={adjustOpen || !understood} onToggle={(e) => setAdjustOpen(e.currentTarget.open)}>
               <summary>Adjust columns</summary>
               <SelectField
@@ -349,7 +346,7 @@ function ImportWizard({ ship }: { ship: ShipProfile }) {
           )}
 
           {/* The one place the wizard says what it is doing or has done. It stays on the page and only its text changes, so that it is announced. */}
-          <p class="live" role="status">{reading ? 'Reading file…' : cleared ? CLEARED_MESSAGE : ''}</p>
+          <p class="live" role="status">{reading ? 'Reading file…' : cleared ? CLEARED_MESSAGE : found}</p>
 
           {!fixRow && header && (
             <>

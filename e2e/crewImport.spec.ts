@@ -478,7 +478,7 @@ test('fixes and skips stay when only the way the cells are read changes, and go,
   await expect(previewList(page).getByRole('listitem').filter({ hasText: "O'BRIEN" })).toContainText('Error');
   await previewRow(page, 'ŠAŠIĆ').getByLabel('Skip').check();   // the next thing the user does takes the notice away
   await expect(cleared).toHaveCount(0);
-  await expect(page.getByRole('status')).toBeEmpty();
+  await expect(page.getByRole('status')).toHaveText('Found 3 crew members. Check the list below and tap Import.');   // back to what was found
 });
 
 test('a column the user ignored although its header is known stays ignored on the next import', async ({ page }, info) => {
@@ -677,7 +677,8 @@ test.describe('while the file is read', () => {
     await expect(page.getByRole('status')).toHaveText('Reading file…');
     release();
     await expect(previewList(page)).toBeVisible();
-    await expect(page.getByRole('status')).toBeEmpty(); // the region stays on the page, and only its text goes
+    // The region stays on the page, and only its text changes: from reading to what was found.
+    await expect(page.getByRole('status')).toHaveText('Found 3 crew members. Check the list below and tap Import.');
   });
 });
 
@@ -697,7 +698,7 @@ test('an IMO FAL crew list imports in one step, settings folded away', async ({ 
   const file = info.outputPath('fal.xlsx'); await makeCrewXlsx(file, 'xlsx', FAL_ROWS);
   await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
-  await expect(page.getByText('Found 2 crew members. Check the list below and tap Import.')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Found 2 crew members. Check the list below and tap Import.');
   await expect(page.getByLabel('Header row')).toBeHidden();
   await expect(previewRow(page, 'DE TESTA')).toContainText('CARLO');
   await expectNoHorizontalScroll(page);
@@ -715,5 +716,9 @@ test('a file without a names column opens Adjust columns with a plain message', 
   await page.goto('./#/ship/crew/import');
   await page.getByLabel('Crew list file').setInputFiles(file);
   await expect(page.getByText("Couldn't find a column with names. Choose which column holds the names under Adjust columns.")).toBeVisible();
+  await expect(page.getByLabel('Header row')).toBeVisible();
+  // Choosing the names column leaves the section open while the user is still in it.
+  await page.getByLabel('Col A', { exact: true }).selectOption({ label: 'Full name' });
+  await expect(page.getByRole('status')).toHaveText('Found 1 crew member. Check the list below and tap Import.');
   await expect(page.getByLabel('Header row')).toBeVisible();
 });

@@ -22,7 +22,8 @@ export function guessMapping(header: Cell[] | undefined): ColumnMapping {
     if (field === undefined || mapping[field] !== undefined) return;
     mapping[field] = column;
     const second = pairedField(cell);
-    if (second !== undefined && mapping[second] === undefined && column + 1 < Math.max(cells.length, column + 2) && blank(cells[column + 1])) {
+    // The next column may lie past the header's last cell: a paired heading in the last column ("14. Date & Place of Join").
+    if (second !== undefined && mapping[second] === undefined && blank(cells[column + 1])) {
       mapping[second] = column + 1;
       taken.add(column + 1);
     }
@@ -49,8 +50,12 @@ export function applySavedMapping(header: Cell[] | undefined, saved: CrewImportM
   const byHeader: Record<string, unknown> = saved?.byHeader ?? {};
   const ignored = new Set<unknown>(Array.isArray(saved?.ignored) ? saved.ignored : []);
   const taken = new Set<CrewField>();
-  (header ?? []).forEach((cell, column) => {
-    if (ignored.has(normaliseHeader(cell))) unmap(mapping, column);
+  const cells = header ?? [];
+  cells.forEach((cell, column) => {
+    if (!ignored.has(normaliseHeader(cell))) return;
+    unmap(mapping, column);
+    // The blank column a paired heading covers has no text of its own to be saved by: it goes with its heading.
+    if (pairedField(cell) !== undefined && blank(cells[column + 1])) unmap(mapping, column + 1);
   });
   (header ?? []).forEach((cell, column) => {
     const key = normaliseHeader(cell);

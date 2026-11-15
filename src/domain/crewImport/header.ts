@@ -69,7 +69,9 @@ const MIN_HEADER_MATCHES = 3;
 
 const SYNONYM_FIELD = new Map<string, CrewField>();
 for (const field of Object.keys(HEADER_SYNONYMS) as CrewField[]) for (const synonym of HEADER_SYNONYMS[field]) SYNONYM_FIELD.set(synonym, field);
-const PREFIX_SYNONYMS = [...SYNONYM_FIELD.keys()].filter(s => s.length >= MIN_PREFIX_LENGTH).sort((a, b) => b.length - a.length);
+/** Short words that are also the start of unrelated headings ("Post code", "Duty free"): matched exactly only. */
+const EXACT_ONLY = new Set(['post', 'duty']);
+const PREFIX_SYNONYMS = [...SYNONYM_FIELD.keys()].filter(s => s.length >= MIN_PREFIX_LENGTH && !EXACT_ONLY.has(s)).sort((a, b) => b.length - a.length);
 
 /**
  * The crew field a column header stands for. An exact synonym wins; otherwise the longest synonym of at least 4

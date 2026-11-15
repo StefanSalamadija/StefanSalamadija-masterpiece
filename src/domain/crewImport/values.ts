@@ -105,8 +105,10 @@ function isCapitals(word: string): boolean {
   return /\p{L}/u.test(word) && word === word.toUpperCase();
 }
 
-/** Words that belong to the surname that follows them: "De Guzman", "dela Cruz", "van der Berg". */
-const SURNAME_PARTICLES = new Set(['de', 'del', 'dela', 'delos', 'delas', 'da', 'dos', 'das', 'di', 'du', 'la', 'le', 'van', 'von', 'der', 'den', 'mc', 'san', 'santa']);
+/** Words that belong to the surname after them: "DE GUZMAN", "DELA CRUZ", "DA SILVA", "VAN DIJK". */
+const SURNAME_PARTICLES = new Set(['de', 'del', 'dela', 'delos', 'delas', 'da', 'dos', 'das', 'di', 'van', 'von', 'mc', 'san', 'santa']);
+/** Two-word particles: "DE LA CRUZ", "DE LOS SANTOS", "VAN DER BERG". */
+const SURNAME_PARTICLE_PAIRS = new Set(['de la', 'de los', 'de las', 'van der', 'van den', 'von der']);
 
 /**
  * Splits a full name into surname and given names. With a comma the surname is what precedes it. Otherwise it is the
@@ -121,10 +123,13 @@ export function splitFullName(text: string, surnameFirst = false): { surname: st
   const words = [...name.matchAll(/\S+/g)];
   if (words.length === 0) return { surname: '', givenNames: '' };
   if (surnameFirst) {
-    // The surname is the first word, with the particles in front of it ("DE LA PRUEBA ANA").
+    // The surname is the first word, with a particle in front of it ("DE LA PRUEBA ANA"), as long as a given name is left.
+    const word = (i: number): string => words[i][0].toLowerCase();
+    const pair = words.length > 1 && SURNAME_PARTICLE_PAIRS.has(`${word(0)} ${word(1)}`);
     let n = 0;
-    while (n < words.length - 1 && SURNAME_PARTICLES.has(words[n][0].toLowerCase())) n++;
-    const last = words[Math.min(n, words.length - 1)];
+    if (pair && words.length > 3) n = 2;
+    else if (SURNAME_PARTICLES.has(word(0)) && words.length > 2) n = 1;
+    const last = words[n];
     const end = last.index + last[0].length;
     return { surname: name.slice(0, end), givenNames: name.slice(end).trim() };
   }

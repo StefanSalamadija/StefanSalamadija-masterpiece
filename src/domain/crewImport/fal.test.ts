@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { detectHeaderRow, matchHeader, normaliseHeader } from './header';
-import { guessMapping } from './mapping';
+import { applySavedMapping, guessMapping, toSavedMapping } from './mapping';
 import { buildPreview } from './preview';
 import type { Cell } from './readSpreadsheet';
 import { splitFullName } from './values';
@@ -45,6 +45,18 @@ describe('IMO FAL crew list', () => {
     expect(guessMapping(['Date and place of birth', 'Rank', 'Name'])).toEqual({ dateOfBirth: 0, rank: 1, fullName: 2 });
   });
 
+  it('matches short heading words exactly only (review)', () => {
+    expect(matchHeader('Post code')).toBeUndefined();
+    expect(matchHeader('Duty free')).toBeUndefined();
+    expect(matchHeader('Post')).toBe('rank');
+  });
+
+  it('keeps the second column of an ignored paired heading ignored (review)', () => {
+    const head: Cell[] = ['Name', 'Rank', 'Date and place of birth', null];
+    const saved = toSavedMapping(head, { fullName: 0, rank: 1 }, 'day-first');
+    expect(applySavedMapping(head, saved)).toEqual({ fullName: 0, rank: 1 });
+  });
+
   it('knows more heading words of home-made lists', () => {
     expect(guessMapping(['Crew name', 'Duty', 'Nat.', 'Pass. No', 'Date of join', 'Place of join'])).toEqual({
       fullName: 0, rank: 1, nationality: 2, passportNo: 3, signOnDate: 4, signOnPort: 5,
@@ -58,6 +70,13 @@ describe('IMO FAL crew list', () => {
     expect(splitFullName('Testova Ana', true)).toEqual({ surname: 'Testova', givenNames: 'Ana' });
     expect(splitFullName('Testova, Ana Maria', true)).toEqual({ surname: 'Testova', givenNames: 'Ana Maria' });
     expect(splitFullName('SOLO', true)).toEqual({ surname: 'SOLO', givenNames: '' });
+    // Only real particles, never the last word (review): Vietnamese and Chinese names stay as written.
+    expect(splitFullName('LE VAN THANH', true)).toEqual({ surname: 'LE', givenNames: 'VAN THANH' });
+    expect(splitFullName('LE THI HOA', true)).toEqual({ surname: 'LE', givenNames: 'THI HOA' });
+    expect(splitFullName('DU WEI', true)).toEqual({ surname: 'DU', givenNames: 'WEI' });
+    expect(splitFullName('DE LOS SANTOS JUAN', true)).toEqual({ surname: 'DE LOS SANTOS', givenNames: 'JUAN' });
+    expect(splitFullName('DA SILVA JOAO', true)).toEqual({ surname: 'DA SILVA', givenNames: 'JOAO' });
+    expect(splitFullName('DE TESTA', true)).toEqual({ surname: 'DE', givenNames: 'TESTA' });
     // Other headings keep the rule they had.
     expect(splitFullName('TESTMAN Alan')).toEqual({ surname: 'TESTMAN', givenNames: 'Alan' });
   });

@@ -26,8 +26,8 @@ the surname.
 
 1. **Numbered headings.** A leading `N.`, `N)`, `N:` or `N -` (one or two digits) is removed before a heading is
    matched.
-   - So the saved-mapping key of such a heading changes. A saved mapping for a numbered heading never matched before,
-     so nothing is lost.
+   - So the saved-mapping key of such a heading changes. Columns mapped by hand under the old keys are lost once, but
+     the guess now covers numbered headings, so the file is still read.
 2. **Paired headings** (exact normalised texts):
 
    | Heading | First column | Next column |
@@ -39,10 +39,12 @@ the surname.
    | `dateplaceofjoin`, `dateandplaceofjoin`, `dateplaceofjoining`, `dateandplaceofjoining` | sign-on date | sign-on port |
 
    - The next column takes the second field only when its heading is blank and the field has no column yet.
+   - When a paired heading is ignored by the user, its blank next column is ignored with it, since it has no heading text
+     to be saved by.
    - A paired heading counts as one recognised heading when the header row is found.
 3. **More heading words** for home-made lists:
    - `crewname`, `surnameandname`, `surnamename` (full name);
-   - `duty`, `post` (rank);
+   - `duty`, `post` (rank). These match exactly only, so "Post code" and "Duty free" don't become rank;
    - `nat` (nationality);
    - `passno` (passport no.);
    - `dateofjoin` (sign-on date);
@@ -51,7 +53,10 @@ the surname.
    - When the full-name column's heading puts the family name first (`familynamegivennames`, `surnameandgivennames`,
      `surnameandname`, `surnamename`), a name with no comma splits after its first word.
    - If the name starts with a particle (DE, DEL, DELA, DELOS, DELAS, DA, DOS, DAS, DI, DU, LA, LE, VAN, VON, MC,
-     SAN, SANTA, plus DE LA and VAN DER as two-word particles), the particle and the word after it are the surname.
+     SAN, SANTA; or DE LA, DE LOS, DE LAS, VAN DER, VAN DEN, VON DER), the particle and the word after it are the
+     surname.
+   - A particle is used only when at least one given name is left over. LE, LA and DU are not particles, so
+     Vietnamese and Chinese names such as LE VAN THANH keep LE as the surname.
    - Commas keep their meaning, and other headings keep today's rule.
 5. **One-step screen.**
    - When the mapping has a name column and the preview has at least one person, the screen shows "Found N crew members.
