@@ -57,6 +57,9 @@ const cloneAfter = (last: Element, count: number): Element[] => {
   return clones;
 };
 
+/** A speed guard: 1 s here, more on the shared build servers, whose speed varies from run to run. */
+const TIME_LIMIT_MS = process.env.CI ? 3000 : 1000;
+
 describe('detectWord', () => {
   it('finds the fields, groups, ticks and controls of the fixtures (the brief\'s test)', () => {
     const s = detectWord(readPackage(toolboxTalkDocx()), 'docx', 'toolbox.docx');
@@ -542,7 +545,7 @@ describe('detectWord', () => {
     const pkg = readPackage(bytes);
     const started = performance.now();
     const s = detectWord(pkg, 'docx', 'big.docx');
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(TIME_LIMIT_MS);
     expect(s.fields).toHaveLength(6 * 26);
     expect(s.rowGroups).toHaveLength(6);
   });
@@ -555,7 +558,7 @@ describe('detectWord', () => {
     const bytes = wordPackage({ kind: 'docx', header: headerBlock(c, { title: 'Long lists', code: 'TST-90', revision: '0' }), body });
     const start = performance.now();
     const s = detect(bytes);
-    expect(performance.now() - start).toBeLessThan(1000);
+    expect(performance.now() - start).toBeLessThan(TIME_LIMIT_MS);
     expect(s.rowGroups.map((g) => [g.capacity, g.columns.length])).toEqual([[600, 3]]);
     expect(s.fields).toHaveLength(1200);
   });
