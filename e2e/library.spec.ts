@@ -51,12 +51,12 @@ test('library: importing the same pdf again asks, and Cancel adds nothing', asyn
   await expect(list(page).getByRole('listitem')).toHaveCount(1);
   await importDocs(page, { ...file, name: 'Copy.pdf' });
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('Already in the library as Manual');
+  await expect(dialog).toContainText('Already in the library as Manual. Import again?');
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(list(page).getByRole('listitem')).toHaveCount(1);
   await importDocs(page, { ...file, name: 'Copy.pdf' });
-  await page.getByRole('dialog').getByRole('button', { name: 'Add again' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Import again' }).click();
   await expect(list(page).getByRole('listitem')).toHaveCount(2);
 });
 

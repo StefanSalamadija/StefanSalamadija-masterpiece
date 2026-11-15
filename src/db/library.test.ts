@@ -131,6 +131,16 @@ describe('attachFile', () => {
     expect(await db.libraryDocs.get(added.id)).toMatchObject({ sha256: 'sha-2', pageCount: 1, textStatus: 'indexed' });
     expect((await hasFiles(db)).has(added.id)).toBe(true);
   });
+
+  it('takes the file name, type, kind and size of a file of another kind', async () => {
+    const db = freshDb();
+    const added = await addDocument(db, doc());
+    await attachFile(db, added.id, new Blob(['twelve bytes']), {
+      sha256: 'sha-3', textStatus: 'indexed', parts: [], fileName: 'plan.docx', kind: 'docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    expect(await db.libraryDocs.get(added.id)).toMatchObject({ fileName: 'plan.docx', kind: 'docx', size: 12, sha256: 'sha-3' });
+  });
 });
 
 describe('folders', () => {

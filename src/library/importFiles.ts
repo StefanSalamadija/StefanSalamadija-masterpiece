@@ -1,4 +1,4 @@
-import { addDocument, findBySha } from '../db/library';
+import { addDocument, attachFile, findBySha } from '../db/library';
 import type { MasterpieceDB } from '../db/schema';
 import type { LibraryDoc } from '../domain/types';
 import { describeError } from '../app/errors';
@@ -56,4 +56,32 @@ export async function importFiles(db: MasterpieceDB, files: File[], hooks: Impor
     }
   }
   return result;
+}
+
+export interface AttachHooks {
+  /** The file is not the one the document was made from: true uses it anyway. */
+  confirmDifferent(): Promise<boolean>;
+  progress(text: string): void;
+}
+
+export type AttachResult = { status: 'attached' } | { status: 'cancelled' } | { status: 'duplicate'; title: string };
+
+/**
+ * Gives a document with no file here the file `file`. A file that another live document already has is refused; one that
+ * is not the document's own file (another hash) is used only when `confirmDifferent` says so.
+ */
+export async function attachChosenFile(db: MasterpieceDB, doc: LibraryDoc, file: File, hooks: AttachHooks): Promise<AttachResult> {
+  const data = await file.arrayBuffer();
+  const sha256 = await sha256Hex(data);
+  const other = await findBySha(db, sha256);
+  if (other && other.id !== doc.id) return { status: 'duplicate', title: other.title };
+  if (sha256 !== doc.sha256 && !(await hooks.confirmDifferent())) return { status: 'cancelled' };
+  const kind = kindOf(file.name, file.type);
+  hooks.progress(`Indexing ${doc.title}`);
+  const read = await extract(kind, data, (done, total) => hooks.progress(`Indexing ${doc.title}: page ${done} of ${total}`));
+  await attachFile(db, doc.id, file, {
+    sha256, fileName: file.name, mimeType: file.type, kind, pageCount: read.pageCount, textStatus: read.textStatus,
+    textError: read.textError, parts: read.parts.map((p) => ({ ...p, text: normaliseText(p.text) })),
+  });
+  return { status: 'attached' };
 }

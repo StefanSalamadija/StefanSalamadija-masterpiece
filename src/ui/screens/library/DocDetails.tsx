@@ -3,11 +3,10 @@ import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { useRoute } from '../../../app/router';
 import {
-  attachFile, deleteDocument, findBySha, getFile, hasFiles, listFolders, restoreDocument, updateDocument,
+  deleteDocument, getFile, hasFiles, listFolders, restoreDocument, updateDocument,
 } from '../../../db/library';
 import type { LibraryDoc as Doc } from '../../../domain/types';
-import { extract, kindOf, sha256Hex } from '../../../library/extract';
-import { normaliseText } from '../../../library/search';
+import { attachChosenFile } from '../../../library/importFiles';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Field } from '../../components/Field';
 import { metaText, parseTags, statusLabel } from '../../libraryView';
@@ -42,7 +41,7 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
   const [tags, setTags] = useState(doc.tags.join(', '));
   const [titleError, setTitleError] = useState(false);
   const [status, setStatus] = useState('');
-  const [different, setDifferent] = useState<{ file: File; data: ArrayBuffer; sha256: string }>();
+  const [different, setDifferent] = useState<{ answer: (use: boolean) => void }>();
   const attachInput = useRef<HTMLInputElement>(null);
   const flag = statusLabel(doc, hasFile);
 
@@ -61,33 +60,16 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
     }
   }
 
-  async function attach(file: File, data: ArrayBuffer, sha256: string): Promise<void> {
-    const kind = kindOf(file.name, file.type);
-    setStatus(`Indexing ${doc.title}`);
-    const read = await extract(kind, data, (done, total) => setStatus(`Indexing ${doc.title}: page ${done} of ${total}`));
-    await attachFile(db, doc.id, file, {
-      sha256, pageCount: read.pageCount, textStatus: read.textStatus, textError: read.textError,
-      parts: read.parts.map((p) => ({ ...p, text: normaliseText(p.text) })),
-    });
-    setStatus('File attached.');
-  }
-
   async function chooseAttach(file: File | undefined): Promise<void> {
     const input = attachInput.current;
     if (!file) return;
     try {
-      const data = await file.arrayBuffer();
-      const sha256 = await sha256Hex(data);
-      const other = await findBySha(db, sha256);
-      if (other && other.id !== doc.id) {
-        setStatus(`Already in the library as ${other.title}.`);
-        return;
-      }
-      if (sha256 !== doc.sha256) {
-        setDifferent({ file, data, sha256 });
-        return;
-      }
-      await attach(file, data, sha256);
+      const result = await attachChosenFile(db, doc, file, {
+        progress: setStatus,
+        confirmDifferent: () => new Promise<boolean>((resolve) => setDifferent({ answer: (use) => { setDifferent(undefined); resolve(use); } })),
+      });
+      if (result.status === 'duplicate') setStatus(`Already in the library as ${result.title}.`);
+      else setStatus(result.status === 'attached' ? 'File attached.' : '');
     } catch (err) {
       setStatus('');
       reportError(err);
@@ -151,12 +133,7 @@ function Details({ doc, hasFile, folders, onDeleted }: { doc: Doc; hasFile: bool
         <ConfirmDialog
           title="This is a different file. Use it anyway?" confirmLabel="Use it anyway" focusFallback={attachInput}
           body={<p>It does not match the file this document was made from.</p>}
-          onCancel={() => setDifferent(undefined)}
-          onConfirm={() => {
-            const { file, data, sha256 } = different;
-            setDifferent(undefined);
-            attach(file, data, sha256).catch((err: unknown) => { setStatus(''); reportError(err); });
-          }}
+          onCancel={() => different.answer(false)} onConfirm={() => different.answer(true)}
         />
       )}
     </>

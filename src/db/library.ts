@@ -24,7 +24,8 @@ export interface NewDocument {
 }
 
 /** What reading a file gives: the fields of a document that come from its content. */
-export type Extracted = Pick<NewDocument, 'pageCount' | 'textStatus' | 'textError' | 'parts'> & { sha256: string };
+export type Extracted = Pick<NewDocument, 'pageCount' | 'textStatus' | 'textError' | 'parts'> & { sha256: string }
+  & Partial<Pick<NewDocument, 'fileName' | 'mimeType' | 'kind'>>;
 
 function textRows(docId: string, parts: NewDocument['parts']): LibraryTextRow[] {
   return parts.map((part, i) => ({ ...part, id: `${docId}:${i}`, docId }));
@@ -139,10 +140,10 @@ export function purgeDocument(db: MasterpieceDB, id: string, now: Date): Promise
 
 /**
  * Gives a document that has no file here (its record came from another device) its file, and the text and facts read
- * from it. The text rows it had are replaced.
+ * from it (its size, and the file name, type and kind when given). The text rows it had are replaced.
  */
 export function attachFile(db: MasterpieceDB, id: string, blob: Blob, extracted: Extracted): Promise<void> {
-  const { parts, sha256, pageCount, textStatus, textError } = extracted;
+  const { parts, sha256, pageCount, textStatus, textError, fileName, mimeType, kind } = extracted;
   return guardWrite(() =>
     db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText, db.settings], async () => {
       const doc = await db.libraryDocs.get(id);
@@ -152,7 +153,8 @@ export function attachFile(db: MasterpieceDB, id: string, blob: Blob, extracted:
       await db.libraryText.bulkAdd(textRows(id, parts));
       const { pageCount: _p, textError: _e, ...rest } = doc;
       await db.libraryDocs.put({
-        ...rest, sha256, textStatus, ...(pageCount !== undefined ? { pageCount } : {}), ...(textError !== undefined ? { textError } : {}),
+        ...rest, sha256, textStatus, size: blob.size, ...(fileName !== undefined ? { fileName } : {}),
+        ...(mimeType !== undefined ? { mimeType } : {}), ...(kind !== undefined ? { kind } : {}), ...(pageCount !== undefined ? { pageCount } : {}), ...(textError !== undefined ? { textError } : {}),
         ...(await stampNow(db)),
       });
     }),

@@ -156,8 +156,8 @@ export function Library() {
 
       {duplicate && (
         <ConfirmDialog
-          title={`Already in the library as ${duplicate.title}.`} confirmLabel="Add again" focusFallback={fileInput}
-          body={<p>This file has the same content as a document already in the library. Add it again?</p>}
+          title={`Already in the library as ${duplicate.title}. Import again?`} confirmLabel="Import again" focusFallback={fileInput}
+          body={<p>This file has the same content as a document already in the library. Import it again?</p>}
           onCancel={() => duplicate.answer(false)} onConfirm={() => duplicate.answer(true)}
         />
       )}
