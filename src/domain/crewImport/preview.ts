@@ -1,7 +1,7 @@
 import { latestContractByPassport, normalisePassport } from '../crew';
 import type { CrewDraft, CrewField, CrewMember, DateFormat, FieldError } from '../types';
 import { validateCrewMember } from '../validation';
-import { matchHeader } from './header';
+import { isSurnameFirstHeader, matchHeader } from './header';
 import type { ColumnMapping } from './mapping';
 import type { Cell } from './readSpreadsheet';
 import { cellText, parseDateCell, parseRank, splitFullName } from './values';
@@ -93,12 +93,12 @@ function dateText(cell: Cell, dateFormat: DateFormat, currentYear: number): stri
 }
 
 /** What the file says, with `''` for every empty cell. Empty cells are filled in, or defaulted, by `evaluate`. */
-function draftFromRow(row: Cell[], mapping: ColumnMapping, dateFormat: DateFormat, currentYear: number): CrewDraft {
+function draftFromRow(row: Cell[], mapping: ColumnMapping, dateFormat: DateFormat, currentYear: number, surnameFirst: boolean): CrewDraft {
   const text = (field: CrewField): string => cellText(cellFor(row, mapping, field));
   const date = (field: CrewField): string => dateText(cellFor(row, mapping, field), dateFormat, currentYear);
   // The full name column is only read when neither the surname nor the given names have a column of their own.
   const splitName = mapping.surname === undefined && mapping.givenNames === undefined && mapping.fullName !== undefined;
-  const { surname, givenNames } = splitName ? splitFullName(text('fullName')) : { surname: text('surname'), givenNames: text('givenNames') };
+  const { surname, givenNames } = splitName ? splitFullName(text('fullName'), surnameFirst) : { surname: text('surname'), givenNames: text('givenNames') };
   const { rank, rankOther } = parseRank(text('rank'));
   const signOffDate = date('signOffDate');
   const signOffPort = text('signOffPort');
@@ -235,10 +235,11 @@ export function buildPreview(input: PreviewInput): PreviewRow[] {
   const { rows, headerRow, mapping, dateFormat, existing, currentYear, today, defaultSignOnDate } = input;
   const columns = [...new Set(Object.values(mapping).filter((column): column is number => column !== undefined))];
   const seenPassports = new Set<string>();
+  const surnameFirst = mapping.fullName !== undefined && isSurnameFirstHeader(rows[headerRow]?.[mapping.fullName] ?? null);
   const preview: PreviewRow[] = [];
   for (let i = headerRow + 1; i < rows.length; i++) {
     if (!isCrewRow(rows[i], mapping, columns)) continue;
-    const fileDraft = draftFromRow(rows[i], mapping, dateFormat, currentYear);
+    const fileDraft = draftFromRow(rows[i], mapping, dateFormat, currentYear, surnameFirst);
     const row = resolveRow({ rowNumber: i + 1, fileDraft, overrides: {}, skip: false }, { existing, today, defaultSignOnDate });
 
     const passport = normalisePassport(row.draft.passportNo);

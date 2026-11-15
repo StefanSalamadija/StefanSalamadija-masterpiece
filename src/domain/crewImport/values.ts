@@ -105,17 +105,29 @@ function isCapitals(word: string): boolean {
   return /\p{L}/u.test(word) && word === word.toUpperCase();
 }
 
+/** Words that belong to the surname that follows them: "De Guzman", "dela Cruz", "van der Berg". */
+const SURNAME_PARTICLES = new Set(['de', 'del', 'dela', 'delos', 'delas', 'da', 'dos', 'das', 'di', 'du', 'la', 'le', 'van', 'von', 'der', 'den', 'mc', 'san', 'santa']);
+
 /**
  * Splits a full name into surname and given names. With a comma the surname is what precedes it. Otherwise it is the
- * leading words in capitals (`VAN DER BERG Jan`), or else the last word (`Ivan Petrović`). The spacing inside each part is kept.
+ * leading words in capitals (`VAN DER BERG Jan`), or else the last word (`Ivan Petrović`).
+ * Under a surname-first heading (`surnameFirst`) it is the first word, with any particles before it (`DE LA PRUEBA Ana`). The spacing inside each part is kept.
  */
-export function splitFullName(text: string): { surname: string; givenNames: string } {
+export function splitFullName(text: string, surnameFirst = false): { surname: string; givenNames: string } {
   const name = text.trim();
   const comma = name.indexOf(',');
   if (comma !== -1) return { surname: name.slice(0, comma).trim(), givenNames: name.slice(comma + 1).trim() };
 
   const words = [...name.matchAll(/\S+/g)];
   if (words.length === 0) return { surname: '', givenNames: '' };
+  if (surnameFirst) {
+    // The surname is the first word, with the particles in front of it ("DE LA PRUEBA ANA").
+    let n = 0;
+    while (n < words.length - 1 && SURNAME_PARTICLES.has(words[n][0].toLowerCase())) n++;
+    const last = words[Math.min(n, words.length - 1)];
+    const end = last.index + last[0].length;
+    return { surname: name.slice(0, end), givenNames: name.slice(end).trim() };
+  }
   let leading = 0;
   while (leading < words.length && isCapitals(words[leading][0])) leading++;
   if (leading > 0) {
