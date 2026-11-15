@@ -88,13 +88,23 @@ export function findBySha(db: MasterpieceDB, sha256: string): Promise<LibraryDoc
   return db.libraryDocs.where('sha256').equals(sha256).filter((d) => !d.deleted).first();
 }
 
-/** Changes a live document's title, folder, tags or last-opened time. A field set to `undefined` is removed. */
+/** Changes a live document's title, folder or tags. A field set to `undefined` is removed. */
 export function updateDocument(
-  db: MasterpieceDB, id: string, patch: Partial<Pick<LibraryDoc, 'title' | 'folderId' | 'tags' | 'openedAt'>>,
+  db: MasterpieceDB, id: string, patch: Partial<Pick<LibraryDoc, 'title' | 'folderId' | 'tags'>>,
 ): Promise<LibraryDoc> {
-  const { title, folderId, tags, openedAt } = patch;
-  const allowed = Object.fromEntries(Object.entries({ title, folderId, tags, openedAt }).filter(([key]) => key in patch));
+  const { title, folderId, tags } = patch;
+  const allowed = Object.fromEntries(Object.entries({ title, folderId, tags }).filter(([key]) => key in patch));
   return updateRecord<LibraryDoc>(db, 'libraryDocs', id, allowed);
+}
+
+/** Notes that a document was opened here. It is kept on this device only, so it never changes the synced record. */
+export async function markOpened(db: MasterpieceDB, id: string, now: Date): Promise<void> {
+  await guardWrite(async () => { await db.libraryOpened.put({ docId: id, openedAt: now.toISOString() }); });
+}
+
+/** When each document was last opened on this device. */
+export async function openedTimes(db: MasterpieceDB): Promise<Map<string, string>> {
+  return new Map((await db.libraryOpened.toArray()).map((r) => [r.docId, r.openedAt]));
 }
 
 /** Moves a document to "recently deleted". Its file and text stay until `purgeDeleted`. Deleting it again keeps the first time. */
@@ -123,13 +133,13 @@ export async function restoreDocument(db: MasterpieceDB, id: string): Promise<vo
 }
 
 /**
- * Drops the file and the text of the documents deleted more than `RETENTION_DAYS` ago. The tombstone stays, so the
+ * Drops the file and the text of the documents deleted more than `RETENTION_DAYS` ago, and any file or text whose document record no longer exists. The tombstone stays, so the
  * deletion still reaches other devices. Returns how many documents it dropped something for.
  */
 export function purgeDeleted(db: MasterpieceDB, now: Date): Promise<number> {
   const cutoff = now.getTime() - RETENTION_DAYS * DAY_MS;
   return guardWrite(() =>
-    db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText], async () => {
+    db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText, db.libraryOpened], async () => {
       const expired = await db.libraryDocs
         .filter((d) => d.deleted && d.deletedAt !== undefined && Date.parse(d.deletedAt) < cutoff).toArray();
       let purged = 0;
@@ -141,6 +151,17 @@ export function purgeDeleted(db: MasterpieceDB, now: Date): Promise<number> {
         await db.libraryText.bulkDelete(texts);
         purged += 1;
       }
+      // What a restore or a failed write left behind: files and text whose document record is gone.
+      const live = new Set(await db.libraryDocs.toCollection().primaryKeys());
+      const orphans = new Set<string>();
+      for (const docId of await db.libraryFiles.toCollection().primaryKeys()) if (!live.has(docId)) orphans.add(docId);
+      for (const docId of await db.libraryText.orderBy('docId').uniqueKeys()) if (!live.has(docId as string)) orphans.add(docId as string);
+      for (const docId of orphans) {
+        await db.libraryFiles.delete(docId);
+        await db.libraryText.where('docId').equals(docId).delete();
+        purged += 1;
+      }
+      await db.libraryOpened.bulkDelete((await db.libraryOpened.toCollection().primaryKeys()).filter((docId) => !live.has(docId)));
       return purged;
     }),
   );

@@ -41,3 +41,16 @@ describe('partsWithWords', () => {
     expect(partsWithWords(rows, [])).toEqual([]);
   });
 });
+
+describe('matchRanges with folded letters', () => {
+  it('covers the whole of ß for "strasse"', () => {
+    const text = 'Die Straße ist lang';
+    expect(matchRanges(text, ['strasse']).map(([s, e]) => text.slice(s, e))).toEqual(['Straße']);
+    expect(matchRanges(text, ['ss']).map(([s, e]) => text.slice(s, e))).toEqual(['ß']);
+  });
+  it('matches Øst with "ost" and Uređaj with "uredaj"', () => {
+    expect(matchRanges('Øst', ['ost']).map(([s, e]) => [s, e])).toEqual([[0, 3]]);
+    const t = 'x Uređaj y';
+    expect(matchRanges(t, ['uredaj']).map(([s, e]) => t.slice(s, e))).toEqual(['Uređaj']);
+  });
+});

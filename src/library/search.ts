@@ -13,9 +13,17 @@ export interface SearchHit {
   moreParts: number;
 }
 
+/** Letters that NFD does not take apart, folded to the letters a keyboard without them types. */
+const FOLDS: Record<string, string> = { đ: 'd', ħ: 'h', ł: 'l', ø: 'o', ı: 'i', ß: 'ss', æ: 'ae', œ: 'oe' };
+
+/** Lowercase, diacritics removed, and the letters in `FOLDS` folded. Whitespace is left alone. */
+export function foldText(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '').replace(/[đħłøıßæœ]/g, (c) => FOLDS[c]);
+}
+
 /** Lowercase, diacritics removed, whitespace collapsed. */
 export function normaliseText(s: string): string {
-  return s.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return foldText(s).replace(/\s+/g, ' ').trim();
 }
 
 /** The normalised, unique query words of two or more characters. */
@@ -47,7 +55,7 @@ function snippetOf(text: string, word: string): string {
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
 }
 
-export function searchLibrary(input: { docs: LibraryDoc[]; folders: LibraryFolder[]; text: LibraryTextRow[]; query: string }): SearchHit[] {
+export function searchLibrary(input: { docs: LibraryDoc[]; folders: LibraryFolder[]; text: LibraryTextRow[]; query: string; opened?: Map<string, string> }): SearchHit[] {
   const words = queryWords(input.query);
   if (words.length === 0) return [];
   const folderName = new Map(input.folders.map((f) => [f.id, normaliseText(f.name)]));
@@ -71,7 +79,7 @@ export function searchLibrary(input: { docs: LibraryDoc[]; folders: LibraryFolde
     found.push({
       hit: { docId: d.id, byMeta, parts: matches.slice(0, MAX_PARTS), moreParts: Math.max(0, matches.length - MAX_PARTS) },
       count: matches.length,
-      when: d.openedAt ?? d.addedAt,
+      when: input.opened?.get(d.id) ?? d.addedAt,
     });
   }
   found.sort((a, b) => Number(b.hit.byMeta) - Number(a.hit.byMeta) || b.count - a.count || (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));

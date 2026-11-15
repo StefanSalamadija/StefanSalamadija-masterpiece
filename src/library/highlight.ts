@@ -1,3 +1,5 @@
+import { foldText } from './search';
+
 
 /** A document's viewer position, as carried in the hash: `#/library/doc/<id>?page=3&q=ballast%20exch`. */
 export interface DocParams { page?: number; q: string }
@@ -24,7 +26,7 @@ function normalisedWithMap(text: string): { norm: string; from: number[] } {
   const from: number[] = [];
   let i = 0;
   for (const ch of text) {
-    const piece = ch.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
+    const piece = foldText(ch);
     for (let k = 0; k < piece.length; k++) from.push(i);
     norm += piece;
     i += ch.length;

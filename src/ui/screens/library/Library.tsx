@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
-import { allText, hasFiles, listDocuments, listFolders, purgeDeleted, saveFolder } from '../../../db/library';
+import { allText, hasFiles, listDocuments, listFolders, openedTimes, purgeDeleted, saveFolder } from '../../../db/library';
 import { importFiles } from '../../../library/importFiles';
 import { queryWords, searchLibrary } from '../../../library/search';
 import type { ImportResult } from '../../../library/importFiles';
@@ -45,8 +45,8 @@ export function Library() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const data = useLive(async () => {
-    const [docs, folders, withFile] = await Promise.all([listDocuments(db), listFolders(db), hasFiles(db)]);
-    return { docs, folders, withFile };
+    const [docs, folders, withFile, opened] = await Promise.all([listDocuments(db), listFolders(db), hasFiles(db), openedTimes(db)]);
+    return { docs, folders, withFile, opened };
   }, [db]);
 
   // The search runs 200 ms after the last keystroke.
@@ -57,8 +57,8 @@ export function Library() {
   const searching = queryWords(term).length > 0 && queryWords(query).length > 0;
   const hits = useLive(async () => {
     if (!searching) return [];
-    const [docs, folders, text] = await Promise.all([listDocuments(db), listFolders(db), allText(db)]);
-    return searchLibrary({ docs, folders, text, query: term });
+    const [docs, folders, text, opened] = await Promise.all([listDocuments(db), listFolders(db), allText(db), openedTimes(db)]);
+    return searchLibrary({ docs, folders, text, query: term, opened });
   }, [db, term, searching]);
 
   // Once, when the library opens: drop the files of what was deleted more than 30 days ago.
@@ -95,10 +95,10 @@ export function Library() {
   }
 
   const docs = useMemo(
-    () => (data ? sortDocs(inFolder(data.docs, folderId, data.folders), sort) : []),
+    () => (data ? sortDocs(inFolder(data.docs, folderId, data.folders), sort, data.opened) : []),
     [data, folderId, sort],
   );
-  const recent = useMemo(() => (data ? recentlyOpened(data.docs) : []), [data]);
+  const recent = useMemo(() => (data ? recentlyOpened(data.docs, data.opened) : []), [data]);
 
   return (
     <section class="screen">

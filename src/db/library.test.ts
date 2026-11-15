@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { allTables } from './records';
 import {
   addDocument, allText, attachFile, deleteDocument, deleteFolder, findBySha, getFile, hasFiles, listDocuments, listFolders, purgeDeleted,
-  purgeDocument, restoreDocument, saveFolder, updateDocument,
+  markOpened, openedTimes, purgeDocument, restoreDocument, saveFolder, updateDocument,
 } from './library';
 import type { NewDocument } from './library';
 import { openDb } from './schema';
@@ -78,8 +78,8 @@ describe('updateDocument', () => {
     const db = freshDb();
     const added = await addDocument(db, doc({ folderId: 'f1' }));
     vi.setSystemTime(new Date('2026-11-03T09:00:00Z'));
-    const updated = await updateDocument(db, added.id, { title: 'Renamed', tags: ['x', 'y'], folderId: undefined, openedAt: '2026-11-03T09:00:00.000Z' });
-    expect(updated).toMatchObject({ title: 'Renamed', tags: ['x', 'y'], openedAt: '2026-11-03T09:00:00.000Z', updatedAt: '2026-11-03T09:00:00.000Z' });
+    const updated = await updateDocument(db, added.id, { title: 'Renamed', tags: ['x', 'y'], folderId: undefined });
+    expect(updated).toMatchObject({ title: 'Renamed', tags: ['x', 'y'], updatedAt: '2026-11-03T09:00:00.000Z' });
     expect(updated).not.toHaveProperty('folderId');
     expect(updated.sha256).toBe('sha-1');
   });
@@ -193,5 +193,40 @@ describe('purgeDocument', () => {
     const db = await freshDb();
     const added = await addDocument(db, doc());
     await expect(purgeDocument(db, added.id, new Date())).rejects.toThrow();
+  });
+});
+
+describe('opening a document', () => {
+  it('is kept on this device and leaves the synced record alone', async () => {
+    const db = freshDb();
+    const added = await addDocument(db, doc());
+    vi.setSystemTime(new Date('2026-11-05T09:00:00Z'));
+    await markOpened(db, added.id, new Date());
+    expect(await db.libraryDocs.get(added.id)).toEqual(added);
+    expect((await db.libraryDocs.get(added.id))?.updatedAt).toBe(added.updatedAt);
+    expect(await openedTimes(db)).toEqual(new Map([[added.id, '2026-11-05T09:00:00.000Z']]));
+    expect(JSON.stringify(await allTables(db))).not.toContain('2026-11-05');
+  });
+  it('is still there when the database is opened again', async () => {
+    const name = 'lib-' + crypto.randomUUID();
+    const db = openDb(name);
+    const added = await addDocument(db, doc());
+    await markOpened(db, added.id, new Date('2026-11-06T00:00:00Z'));
+    db.close();
+    expect((await openedTimes(openDb(name))).get(added.id)).toBe('2026-11-06T00:00:00.000Z');
+  });
+});
+
+describe('the orphan sweep', () => {
+  it('removes files, text and opened times whose document record is gone', async () => {
+    const db = freshDb();
+    const kept = await addDocument(db, doc());
+    const gone = await addDocument(db, doc({ sha256: 'sha-2' }));
+    await markOpened(db, gone.id, new Date());
+    await db.libraryDocs.delete(gone.id);
+    expect(await purgeDeleted(db, new Date())).toBe(1);
+    expect([...(await hasFiles(db))]).toEqual([kept.id]);
+    expect([...new Set((await allText(db)).map((r) => r.docId))]).toEqual([kept.id]);
+    expect((await openedTimes(db)).size).toBe(0);
   });
 });

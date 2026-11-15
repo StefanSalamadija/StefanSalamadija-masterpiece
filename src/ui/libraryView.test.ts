@@ -19,12 +19,13 @@ describe('libraryView', () => {
     expect(statusLabel(d({}), true)).toBeUndefined();
   });
   it('sorts and picks recently opened', () => {
-    const a = d({ id: 'a', title: 'B', addedAt: '2026-11-01', openedAt: '2026-11-05' });
+    const a = d({ id: 'a', title: 'B', addedAt: '2026-11-01' });
+    const opened = new Map([['a', '2026-11-05']]);
     const b = d({ id: 'b', title: 'A', addedAt: '2026-11-02' });
     expect(sortDocs([a, b], 'title').map((x) => x.id)).toEqual(['b', 'a']);
     expect(sortDocs([a, b], 'added').map((x) => x.id)).toEqual(['b', 'a']);
-    expect(sortDocs([b, a], 'opened').map((x) => x.id)).toEqual(['a', 'b']);
-    expect(recentlyOpened([a, b]).map((x) => x.id)).toEqual(['a']);
+    expect(sortDocs([b, a], 'opened', opened).map((x) => x.id)).toEqual(['a', 'b']);
+    expect(recentlyOpened([a, b], opened).map((x) => x.id)).toEqual(['a']);
   });
   it('words deletion and storage, and keeps only restorable ones', () => {
     expect(deletedText('2026-11-15T10:00:00Z')).toBe('Deleted 15-NOV-2026 · removed after 15-DEC-2026');

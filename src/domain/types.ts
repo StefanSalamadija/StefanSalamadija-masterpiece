@@ -95,10 +95,12 @@ export type TextStatus = 'indexed' | 'no-text' | 'failed' | 'not-supported';
  */
 export interface LibraryDoc extends BaseRecord { scope: 'personal'; title: string; folderId?: string; tags: string[]; fileName: string;
   mimeType: string; kind: LibraryKind; size: number; sha256: string; pageCount?: number; textStatus: TextStatus; textError?: string;
-  addedAt: string; openedAt?: string; deletedAt?: string }
+  addedAt: string; deletedAt?: string }
 export interface LibraryFolder extends BaseRecord { scope: 'personal'; name: string }
 /** One searchable part of a document (a page, a sheet), as text that is already normalised. Local only. */
 export interface LibraryTextRow { id: string; docId: string; part: number; label: string; text: string }
+/** When a document was last opened on this device. Local only: it is not synced, so opening a document never conflicts. */
+export interface LibraryOpenedRow { docId: string; openedAt: string }
 /** A document's file. Local only. */
 export interface LibraryFileRow { docId: string; blob: Blob }
 export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange

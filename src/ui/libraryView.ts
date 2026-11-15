@@ -39,11 +39,11 @@ export function statusLabel(doc: Pick<LibraryDoc, 'textStatus'>, hasFile: boolea
   return undefined;
 }
 
-export function sortDocs(docs: LibraryDoc[], key: SortKey): LibraryDoc[] {
+export function sortDocs(docs: LibraryDoc[], key: SortKey, opened: Map<string, string> = new Map()): LibraryDoc[] {
   const copy = [...docs];
   if (key === 'title') return copy.sort((a, b) => a.title.localeCompare(b.title));
   if (key === 'added') return copy.sort((a, b) => (a.addedAt < b.addedAt ? 1 : a.addedAt > b.addedAt ? -1 : 0));
-  return copy.sort((a, b) => (b.openedAt ?? '').localeCompare(a.openedAt ?? '') || a.title.localeCompare(b.title));
+  return copy.sort((a, b) => (opened.get(b.id) ?? '').localeCompare(opened.get(a.id) ?? '') || a.title.localeCompare(b.title));
 }
 
 /** The documents in `folderId` (all of them when none is given). */
@@ -54,8 +54,8 @@ export function inFolder(docs: LibraryDoc[], folderId: string | undefined, folde
 }
 
 /** The last opened documents, newest first. */
-export function recentlyOpened(docs: LibraryDoc[]): LibraryDoc[] {
-  return docs.filter((d) => d.openedAt !== undefined).sort((a, b) => (b.openedAt ?? '').localeCompare(a.openedAt ?? '')).slice(0, RECENT_COUNT);
+export function recentlyOpened(docs: LibraryDoc[], opened: Map<string, string>): LibraryDoc[] {
+  return docs.filter((d) => opened.has(d.id)).sort((a, b) => (opened.get(b.id) ?? '').localeCompare(opened.get(a.id) ?? '')).slice(0, RECENT_COUNT);
 }
 
 /** A storage line such as "12.3 MB of 4.0 GB used". */

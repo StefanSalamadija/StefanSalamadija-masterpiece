@@ -12,12 +12,12 @@ function doc(id: string, over: Partial<LibraryDoc> = {}): LibraryDoc {
 function row(docId: string, part: number, text: string): LibraryTextRow {
   return { id: `${docId}:${part}`, docId, part, label: `Page ${part}`, text: normaliseText(text) };
 }
-const search = (docs: LibraryDoc[], text: LibraryTextRow[], query: string, folders: LibraryFolder[] = []) =>
-  searchLibrary({ docs, folders, text, query });
+const search = (docs: LibraryDoc[], text: LibraryTextRow[], query: string, folders: LibraryFolder[] = [], opened?: Map<string, string>) =>
+  searchLibrary({ docs, folders, text, query, ...(opened ? { opened } : {}) });
 
 describe('normaliseText and queryWords', () => {
   it('lowercases, strips diacritics and collapses whitespace', () => {
-    expect(normaliseText('  Šifra   BRODA\n Đ ')).toBe('sifra broda đ');
+    expect(normaliseText('  Šifra   BRODA\n Đ ')).toBe('sifra broda d');
   });
   it('drops 1-letter words and duplicates', () => {
     expect(queryWords('A Šifra b sifra  ok')).toEqual(['sifra', 'ok']);
@@ -76,17 +76,15 @@ describe('searchLibrary', () => {
 
   it('ranks meta, then more parts, then most recently opened', () => {
     const docs = [
-      doc('few', { openedAt: '2026-05-01T00:00:00.000Z' }),
-      doc('many', { openedAt: '2026-01-02T00:00:00.000Z' }),
-      doc('meta', { title: 'anchor guide' }),
-      doc('manyNew', { openedAt: '2026-06-01T00:00:00.000Z' }),
+      doc('few'), doc('many'), doc('meta', { title: 'anchor guide' }), doc('manyNew'),
     ];
+    const opened = new Map([['few', '2026-05-01T00:00:00.000Z'], ['many', '2026-01-02T00:00:00.000Z'], ['manyNew', '2026-06-01T00:00:00.000Z']]);
     const text = [
       row('few', 1, 'anchor'),
       row('many', 1, 'anchor'), row('many', 2, 'anchor'),
       row('manyNew', 1, 'anchor'), row('manyNew', 2, 'anchor'),
     ];
-    expect(search(docs, text, 'anchor').map((h) => h.docId)).toEqual(['meta', 'manyNew', 'many', 'few']);
+    expect(search(docs, text, 'anchor', [], opened).map((h) => h.docId)).toEqual(['meta', 'manyNew', 'many', 'few']);
   });
 
   it('falls back to addedAt when never opened', () => {
@@ -157,5 +155,17 @@ describe('performance', () => {
     expect(hits).toEqual([]);
     expect(t1 - t0).toBeLessThan(300);
     expect(t2 - t1).toBeLessThan(300);
+  });
+});
+
+describe('letters with no decomposition', () => {
+  it('folds đ ħ ł ø ı ß æ œ, in either case', () => {
+    expect(normaliseText('Uređaj')).toBe('uredaj');
+    expect(normaliseText('ĐĦŁØ ı')).toBe('dhlo i');
+    expect(normaliseText('Straße Æsir Œuvre')).toBe('strasse aesir oeuvre');
+    expect(queryWords('uredaj')).toEqual(['uredaj']);
+  });
+  it('finds "uređaj" by typing "uredaj"', () => {
+    expect(search([doc('a')], [row('a', 1, normaliseText('Uređaj za balast'))], 'uredaj').map((h) => h.docId)).toEqual(['a']);
   });
 });

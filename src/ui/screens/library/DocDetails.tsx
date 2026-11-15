@@ -3,7 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { useRoute } from '../../../app/router';
 import {
-  deleteDocument, hasFiles, listFolders, restoreDocument, updateDocument,
+  deleteDocument, hasFiles, listFolders, markOpened, restoreDocument, updateDocument,
 } from '../../../db/library';
 import type { LibraryDoc as Doc } from '../../../domain/types';
 import { attachChosenFile } from '../../../library/importFiles';
@@ -126,7 +126,7 @@ export function LibraryDoc() {
   // Opening a document is what puts it in "Recently opened": once for each time the screen is opened on it.
   const liveId = doc && !doc.deleted ? doc.id : undefined;
   useEffect(() => {
-    if (liveId) updateDocument(db, liveId, { openedAt: new Date().toISOString() }).catch(reportError);
+    if (liveId) markOpened(db, liveId, new Date()).catch(reportError);
   }, [db, liveId]);
   return (
     <section class="screen">

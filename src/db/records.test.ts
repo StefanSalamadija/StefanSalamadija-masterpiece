@@ -31,7 +31,7 @@ describe('database', () => {
     const db = freshDb();
     expect(db.verno).toBe(4);
     expect(db.tables.map((t) => t.name).sort()).toEqual([
-      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFiles', 'libraryFolders', 'libraryText',
+      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFiles', 'libraryFolders', 'libraryOpened', 'libraryText',
       'settings', 'ships', 'snapshots', 'voyages',
     ]);
     expect(db.crewDocuments.schema.primKey.name).toBe('id');
