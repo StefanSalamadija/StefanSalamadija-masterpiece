@@ -50,7 +50,11 @@ import { effectiveMonth, potTargetAmount } from './targets';
  * Debt instalments: each live debt that still owes at the start of a month (from its start month) is paid its
  * `instalment`, a planned Debts payment on that debt, unless an expense template in the Debts pot that pays that debt
  * (its `untilDebtId`, or the only debt) runs in the month, so it is never paid twice. Under the targets method the
- * Debts pot target covers these instalments first. An actual payment to the debt counts against it (one line).
+ * Debts pot's plan covers these instalments first, whatever its method: under targets they use up the Debts category
+ * targets first, then the pot target; a fixed amount is net of them; and the average leaves out past payments to a
+ * debt that has an instalment. An actual payment to the debt counts against it (one line). With two or more debts, an
+ * actual Debts payment that names no debt pays none (the ledger lists it as unassigned, for the user to say which):
+ * until then it is counted on top of the instalments.
  *
  * Transfers (§3.9.1): spending in the Savings & investments pot raises investments (the contribution), in the
  * Emergency fund pot raises the emergency fund, and in the Debts pot lowers the debt it pays: the one the entry names,
@@ -103,6 +107,8 @@ export interface ForecastMonth {
   interest: Cents;
   /** Spending in the Needs pot. */
   needs: Cents;
+  /** Spending that moved into investments, the emergency fund or a debt (the rest of spending is gone). */
+  transfers: Cents;
 }
 
 export interface ForecastResult {
@@ -113,6 +119,11 @@ export interface ForecastResult {
   buffer: Cents;
   /** Investments at the end of the month before the first forecast month. */
   startInvestments: Cents;
+  /**
+   * Investments were corrected in the current month: the first month's investments are that correction (with what is
+   * still to come), not `startInvestments` grown by a month.
+   */
+  investmentsCorrectedNow: boolean;
   /** The assumptions in force, a scenario's rates included. */
   assumptions: Assumptions;
 }
@@ -154,13 +165,14 @@ export function forecast(input: ForecastInput): ForecastResult {
   const cur = ymOf(input.today);
   const prev = addMonths(cur, -1);
   const corrections = data.budgetCorrections.filter((c) => !c.deleted);
-  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, assumptions };
+  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, investmentsCorrectedNow: false, assumptions };
   if (!corrections.some((c) => c.account === 'bank' && c.ym <= cur)) return empty;
 
   const count = Math.max(1, Math.floor(input.months ?? settings.horizon));
   const last = addMonths(cur, count - 1);
   const categories = data.budgetCategories.filter((c) => !c.deleted);
-  const potOf = new Map(categories.map((c) => [c.id, c.pot]));
+  // Deleted categories still route their entries, as in the ledger.
+  const potOf = new Map(data.budgetCategories.map((c) => [c.id, c.pot]));
   const debts = data.budgetDebts.filter((d) => !d.deleted);
   const debtIds = new Set(debts.map((d) => d.id));
   const funds = data.budgetFunds.filter((f) => !f.deleted);
@@ -195,6 +207,11 @@ export function forecast(input: ForecastInput): ForecastResult {
   for (const ym of tracked) {
     for (const e of history.get(ym)!) {
       if (e.kind !== 'expense' || e.categoryId === undefined || e.recurringId !== undefined || e.fundId !== undefined || e.oneOff === true) continue;
+      // A payment to a debt with an instalment is the instalment's: it is paid automatically, never by the average too.
+      if (potOf.get(e.categoryId) === 'debts') {
+        const paidDebt = e.debtId !== undefined ? (debtIds.has(e.debtId) ? e.debtId : undefined) : onlyDebt;
+        if (paidDebt !== undefined && debts.find((d) => d.id === paidDebt)!.instalment > 0) continue;
+      }
       average.set(e.categoryId, (average.get(e.categoryId) ?? 0) + e.amount);
     }
   }
@@ -357,22 +374,26 @@ export function forecast(input: ForecastInput): ForecastResult {
       const inPot = categories.filter((c) => c.pot === pot);
       const override = potFrom.get(pot);
       const method = override !== undefined ? 'targets' : settings.forecastMethod[pot] ?? 'targets';
+      // The automatic debt instalments come first out of the Debts pot's plan, whatever its method.
+      let pool = pot === 'debts' ? autoInstalments : 0;
       if (method === 'fixed') {
-        planned.push({ key: `pot:${pot}`, pot, amount: Math.max(0, settings.fixedSpend?.[pot] ?? 0) });
+        planned.push({ key: `pot:${pot}`, pot, amount: Math.max(0, (settings.fixedSpend?.[pot] ?? 0) - pool) });
       } else if (method === 'average') {
         for (const c of inPot) if (c.id !== SAVINGS_GOALS_CATEGORY_ID) planned.push({ key: `cat:${c.id}`, pot, amount: average.get(c.id) ?? 0 });
       } else {
         const potTarget = override ?? potTargetAmount(plan.potTargets[pot], plannedIncome);
-        // The automatic debt instalments are part of the Debts pot's target.
-        let taken = pot === 'debts' ? autoInstalments : 0;
+        let taken = 0;
         for (const c of inPot) {
           const target = override === undefined ? plan.categoryTargets[c.id]?.amount : undefined;
           const cov = covered.get(c.id) ?? 0;
           if (target === undefined) { taken += cov; continue; }
-          if (c.id !== SAVINGS_GOALS_CATEGORY_ID) planned.push({ key: `cat:${c.id}`, pot, amount: Math.max(0, target - cov) });
+          const rest = Math.max(0, target - cov);
+          const byInstalments = Math.min(rest, pool);
+          pool -= byInstalments;
+          if (c.id !== SAVINGS_GOALS_CATEGORY_ID) planned.push({ key: `cat:${c.id}`, pot, amount: rest - byInstalments });
           taken += Math.max(target, cov);
         }
-        planned.push({ key: `pot:${pot}`, pot, amount: Math.max(0, potTarget - taken) });
+        planned.push({ key: `pot:${pot}`, pot, amount: Math.max(0, potTarget - taken - pool) });
       }
     }
     if (investFrom) {
@@ -468,6 +489,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     months.push({
       ym, status: salaryFromPeriods(rotation, periods, ym).onboard, income, spending, bank, freeToSpend: bank - fundsTotal, investments: invested,
       emergency, debts: debtsTotal, netWorth: bank + invested + emergency + assetsValue - debtsTotal, funds: fundsTotal, contribution, interest, needs,
+      transfers: contribution + toEmergency + sum([...paidTo.values()].map((p) => p.actual + p.rest)),
     });
   }
 
@@ -479,5 +501,6 @@ export function forecast(input: ForecastInput): ForecastResult {
     if (m.bank < 0) warnings.push({ kind: 'negativeBank', ym: m.ym });
     if (lowest === undefined || m.freeToSpend < lowest.freeToSpend) lowest = { ym: m.ym, freeToSpend: m.freeToSpend, status: m.status };
   }
-  return { months, lowest, warnings, debtFree, totalInterest, needsBankStart: false, buffer, startInvestments: before.investments, assumptions };
+  return { months, lowest, warnings, debtFree, totalInterest, needsBankStart: false, buffer, startInvestments: before.investments,
+    investmentsCorrectedNow: correctedNow('investments'), assumptions };
 }

@@ -3,7 +3,7 @@ import type { BudgetMonth, BudgetSettings, ForecastMethod, PotId } from '../doma
 import { budgetData, category, correction, debt, entry, fund, month, recurring, settings } from '../test/budgetRecords';
 import { forecast } from './forecast';
 import type { BudgetData, ForecastResult } from './forecast';
-import { SAVINGS_GOALS_CATEGORY_ID } from './ledger';
+import { balancesByMonth, SAVINGS_GOALS_CATEGORY_ID } from './ledger';
 import { addMonths } from './months';
 import type { ScenarioChange } from './scenarioTypes';
 
@@ -295,6 +295,36 @@ describe('forecast: transfers, funds and debts', () => {
     expect(r.months[0]).toMatchObject({ spending: 240000, debts: 960000 });
   });
 
+  describe('pays the automatic instalment once a month, whatever the Debts pot\'s method', () => {
+    const loan = debt({ startBalance: 300000, startYm: '2026-01', instalment: 30000 });
+    const methods = (debts: ForecastMethod) =>
+      ({ needs: 'targets', savings: 'targets', wants: 'targets', debts, emergency: 'targets' }) as Record<PotId, ForecastMethod>;
+    const paidOnce = (r: ForecastResult, from: number) => {
+      expect(r.months.slice(0, 3).map((m) => m.spending)).toEqual([230000, 230000, 230000]);
+      expect(r.months.slice(0, 3).map((m) => m.debts)).toEqual([from - 30000, from - 60000, from - 90000]);
+    };
+    it('a pot target', () => {
+      paidOnce(run({ budgetDebts: [loan], budgetMonths: [needs200({ potTargets: {
+        needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 30000 } } } })] }), 300000);
+    });
+    it('a category target', () => {
+      paidOnce(run({ budgetDebts: [loan], budgetMonths: [needs200({ categoryTargets: { 'cat-loan': { fromOn: 30000 } } })] }), 300000);
+    });
+    it('a category target and a pot target, the instalment covering both', () => {
+      const r = run({ budgetDebts: [loan], budgetMonths: [needs200({
+        potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 40000 } } },
+        categoryTargets: { 'cat-loan': { fromOn: 20000 } } })] });
+      expect(r.months[0]).toMatchObject({ spending: 240000, debts: 260000 });
+    });
+    it('the average method, the loan paid by hand in past months and this month', () => {
+      const paid = ['2026-08', '2026-09', '2026-10', '2026-11'].map((ym) => entry(`${ym}-05`, 30000, { categoryId: 'cat-loan' }));
+      paidOnce(run({ budgetDebts: [loan], budgetEntries: paid }, { forecastMethod: methods('average') }), 210000);
+    });
+    it('the fixed method', () => {
+      paidOnce(run({ budgetDebts: [loan] }, { forecastMethod: methods('fixed'), fixedSpend: { debts: 30000 } }), 300000);
+    });
+  });
+
   it('counts an actual payment to the debt against its instalment', () => {
     const r = run({
       budgetDebts: [debt({ startBalance: 100000, startYm: '2026-01', instalment: 30000 })],
@@ -434,12 +464,28 @@ describe('forecast: properties over 100 random plans', () => {
       const { data, s, overrides } = randomPlan(seed);
       const r = forecast({ today: TODAY, data, settings: s, overrides });
       expect(r.months.length, `seed ${seed}`).toBe(s.horizon);
+      // The first month continues the tracked balances (no bank correction is made this month in these plans).
+      const prevYm = addMonths('2026-11', -1);
+      const tracked = balancesByMonth({ entries: data.budgetEntries, corrections: data.budgetCorrections, debts: data.budgetDebts, assets: data.budgetAssets,
+        categories: data.budgetCategories, fundMoves: data.budgetFundMoves, funds: data.budgetFunds, fromYm: prevYm, toYm: prevYm, recurring: data.budgetRecurring });
+      if (!data.budgetCorrections.some((c) => c.account === 'bank' && c.ym === '2026-11')) {
+        expect(r.months[0].bank, `seed ${seed} month 0`).toBe(tracked.balances.get(prevYm)!.bank + r.months[0].income - r.months[0].spending);
+      }
       expect(Number.isInteger(r.totalInterest) && Number.isInteger(r.buffer) && Number.isInteger(r.startInvestments), `seed ${seed}`).toBe(true);
       r.months.forEach((m, i) => {
         for (const [field, value] of Object.entries(m)) {
           if (field !== 'ym' && field !== 'status') expect(Number.isInteger(value), `seed ${seed} ${m.ym} ${field}=${value}`).toBe(true);
         }
-        if (i > 0) expect(m.bank, `seed ${seed} ${m.ym}`).toBe(r.months[i - 1].bank + m.income - m.spending);
+        if (i > 0) {
+          const was = r.months[i - 1];
+          expect(m.bank, `seed ${seed} ${m.ym}`).toBe(was.bank + m.income - m.spending);
+          // What a transfer takes from the bank lands in investments, the emergency fund or a debt: nothing is lost.
+          const started = data.budgetDebts.filter((d) => d.startYm === m.ym).reduce((t, d) => t + d.startBalance, 0);
+          expect((m.emergency - was.emergency) - (m.debts - was.debts) + started, `seed ${seed} ${m.ym} conservation`)
+            .toBe(m.transfers - m.contribution - m.interest);
+        }
+        expect(m.netWorth - (m.bank + m.investments + m.emergency - m.debts), `seed ${seed} ${m.ym} assets`)
+          .toBe(r.months[0].netWorth - (r.months[0].bank + r.months[0].investments + r.months[0].emergency - r.months[0].debts));
         expect(m.freeToSpend, `seed ${seed} ${m.ym}`).toBe(m.bank - m.funds);
         expect(m.spending, `seed ${seed} ${m.ym}`).toBeGreaterThanOrEqual(0);
       });

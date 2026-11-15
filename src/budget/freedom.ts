@@ -5,7 +5,8 @@ import { addMonths, monthsBetween, ymOf } from './months';
 /*
  * The freedom date (v2 §3.4, §3.9.8): the first month the investments reach the freedom number.
  *
- *  - It uses investments only: they start at the forecast's `startInvestments` (the end of last month).
+ *  - It uses investments only: they start at the forecast's `startInvestments` (the end of last month), or, when
+ *    investments were corrected this month, at the forecast's first month (the correction and what is still to come).
  *  - Each month they grow by (1 + r)^(1/12), r the expected yearly return, rounded to the cent, and the month's planned
  *    contribution is added: the forecast's (templates and pot targets), not escalated. Past the forecast's horizon
  *    each month adds the average contribution of its last 12 months (or of all of them, when fewer), rounded.
@@ -64,7 +65,9 @@ export function freedom(input: { forecast: ForecastResult; yearlySpending: Cents
   let balance = forecast.startInvestments;
   for (let t = 0; t <= FREEDOM_MAX_MONTHS; t += 1) {
     const ym = addMonths(cur, t);
-    balance = Math.round(balance * growth) + (contributions.get(ym) ?? (lastYm !== undefined && ym > lastYm ? later : 0));
+    balance = t === 0 && forecast.investmentsCorrectedNow && forecast.months.length > 0
+      ? forecast.months[0].investments
+      : Math.round(balance * growth) + (contributions.get(ym) ?? (lastYm !== undefined && ym > lastYm ? later : 0));
     const target = numberIn(t);
     if (balance >= target) return { status: 'ok', number: numberIn(0), ym, years: Math.floor(t / 12), months: t % 12, numberAt: target, todayEuros };
   }

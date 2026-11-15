@@ -11,7 +11,7 @@ const TODAY = '2026-11-15';
 /** A forecast that only carries what the freedom date reads: the start of investments and each month's contribution. */
 function fc(startInvestments: number, contributions: number[]): ForecastResult {
   const months = contributions.map((contribution, i) => ({ ym: addMonths('2026-11', i), contribution }) as ForecastMonth);
-  return { months, warnings: [], debtFree: {}, totalInterest: 0, needsBankStart: false, buffer: 0, startInvestments,
+  return { months, warnings: [], debtFree: {}, totalInterest: 0, needsBankStart: false, buffer: 0, startInvestments, investmentsCorrectedNow: false,
     assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30 } };
 }
 const rates = (fields: Partial<Assumptions>): Assumptions => ({ withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30, ...fields });
@@ -67,6 +67,21 @@ describe('freedom', () => {
     expect(r.todayEuros(1020000, '2027-11')).toBe(1000000);
     expect(r.todayEuros(1000000, '2026-11')).toBe(1000000);
     expect(r.todayEuros(1040400, '2028-11')).toBe(1000000);
+  });
+
+  it('starts from an investments correction made this month', () => {
+    const f = forecast({
+      today: TODAY,
+      data: budgetData({
+        budgetCategories: [category('cat-etf', 'savings')],
+        budgetCorrections: [correction('bank', '2026-10', 500000), correction('investments', '2026-11', 59800000)],
+        budgetMonths: [month('2026-11', { potTargets: { savings: { fromOn: { kind: 'amount', value: 200000 } } } })],
+      }),
+      settings: settings({ horizon: 12 }),
+    });
+    expect(f.months[0].investments).toBe(60000000);
+    const r = freedom({ forecast: f, yearlySpending: 2400000, assumptions: rates({ yearlyReturnPct: 0, inflationPct: 0 }), today: TODAY });
+    expect(r).toMatchObject({ status: 'ok', ym: '2026-11', years: 0, months: 0 });
   });
 
   it('works from a real forecast: its planned investment contributions', () => {
