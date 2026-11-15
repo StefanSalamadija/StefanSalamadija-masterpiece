@@ -1,8 +1,9 @@
 /* Test helpers: budget records with their record fields filled in. Used by the budget tests only. */
+import type { BudgetData } from '../budget/forecast';
 import type { MonthPlan } from '../budget/targets';
 import type {
   BaseRecord, BudgetAccount, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetMonth,
-  BudgetRecurring,
+  BudgetRecurring, BudgetSettings,
 } from '../domain/types';
 
 let counter = 0;
@@ -57,4 +58,26 @@ export function asset(id: string, fields: Fields<BudgetAsset> = {}): BudgetAsset
 
 export function correction(account: BudgetAccount, ym: string, balance: number, fields: Fields<BudgetCorrection> = {}): BudgetCorrection {
   return { ...base(fields.id, fields.createdAt), account, ym, balance, ...fields } as BudgetCorrection;
+}
+
+/** Budget settings with the defaults of a new budget (see `ensureBudgetSetup`), and a rotation. */
+export function settings(fields: Omit<Fields<BudgetSettings>, 'rotation'> & { rotation?: Partial<BudgetSettings['rotation']> } = {}): BudgetSettings {
+  const { rotation, ...rest } = fields;
+  return {
+    ...base('budget-settings'), key: 'budget',
+    rotation: { salaryFrom: [], periods: [], patternOn: 8, patternOff: 4, paidNextMonth: false, paidAtHomePct: 0, ...rotation },
+    assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30 },
+    favourites: [],
+    forecastMethod: { needs: 'targets', savings: 'targets', wants: 'targets', debts: 'targets', emergency: 'targets' },
+    horizon: 24,
+    ...rest,
+  } as BudgetSettings;
+}
+
+/** Every budget table, empty unless given. */
+export function budgetData(fields: Partial<BudgetData> = {}): BudgetData {
+  return {
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [],
+    budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], ...fields,
+  };
 }
