@@ -58,7 +58,7 @@ const cloneAfter = (last: Element, count: number): Element[] => {
 };
 
 /** A speed guard: 1 s here, more on the shared build servers, whose speed varies from run to run. */
-const TIME_LIMIT_MS = process.env.CI ? 3000 : 1000;
+const TIME_LIMIT_MS = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.CI ? 3000 : 1000;
 
 describe('detectWord', () => {
   it('finds the fields, groups, ticks and controls of the fixtures (the brief\'s test)', () => {
