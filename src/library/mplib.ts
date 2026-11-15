@@ -1,4 +1,4 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { strFromU8, strToU8, zipSync } from 'fflate';
 import { BackupError, NewerVersionError, WrongPasswordError } from '../backup/envelope';
 import {
   DEFAULT_ITERATIONS, IV_BYTES, SALT_BYTES, TAG_BYTES, deriveKey, fromBase64, isBase64, isValidIterations, toBase64,
@@ -8,6 +8,7 @@ import type { MasterpieceDB } from '../db/schema';
 import type { LibraryDoc, LibraryFolder } from '../domain/types';
 import { extract, sha256Hex } from './extract';
 import { normaliseText } from './search';
+import { MPLIB_ENTRY_MAX_BYTES, unzipLimited } from './zipLimits';
 
 /*
  * Library files (`.mplib`): the library's documents, encrypted, in parts that are each small enough to share. A part is one
@@ -152,7 +153,8 @@ export async function readLibraryPart(bytes: Uint8Array, password: string): Prom
     throw new WrongPasswordError();
   }
   try {
-    const entries = unzipSync(plain);
+    // Every entry is stored, never deflated (see `zipPart`), so a deflated one is not ours.
+    const entries = unzipLimited(plain, MPLIB_ENTRY_MAX_BYTES, (f) => f.compression === 0);
     const manifest = JSON.parse(strFromU8(entries['manifest.json']!)) as Manifest;
     if (!Array.isArray(manifest.docs) || !Array.isArray(manifest.folders)) throw new Error('manifest');
     const files = new Map<string, Uint8Array>();

@@ -61,6 +61,23 @@ test('library: importing the same pdf again asks, and Cancel adds nothing', asyn
   await expect(list(page).getByRole('listitem')).toHaveCount(2);
 });
 
+test('library: leaving with the duplicate question open adds nothing, and importing works when you come back', async ({ page }) => {
+  await open(page);
+  const file = pdf('Manual.pdf', [[LONG]]);
+  await importDocs(page, file);
+  await expect(list(page).getByRole('listitem')).toHaveCount(1);
+  await importDocs(page, { ...file, name: 'Copy.pdf' });
+  await expect(page.getByRole('dialog')).toContainText('Already in the library as Manual. Import again?');
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.evaluate(() => { location.hash = '#/library'; });
+  await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(list(page).getByRole('listitem')).toHaveCount(1);
+  await importDocs(page, { ...file, name: 'Copy.pdf' });
+  await page.getByRole('dialog').getByRole('button', { name: 'Import again' }).click();
+  await expect(list(page).getByRole('listitem')).toHaveCount(2);
+});
+
 test('library: rename, folder and tags persist after a reload', async ({ page }) => {
   await open(page);
   await importDocs(page, pdf('Manual.pdf', [[LONG]]));

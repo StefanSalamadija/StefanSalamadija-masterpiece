@@ -42,6 +42,10 @@ export function Library() {
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState('');
   const busy = useRef(false);
+  // Leaving with the duplicate question open answers it "no", so the import ends instead of waiting for ever.
+  const pending = useRef(duplicate);
+  pending.current = duplicate;
+  useEffect(() => () => pending.current?.answer(false), []);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const data = useLive(async () => {

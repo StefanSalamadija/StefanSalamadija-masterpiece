@@ -1,4 +1,5 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8 } from 'fflate';
+import { DOCX_XML_MAX_BYTES, unzipLimited } from './zipLimits';
 import { parseXml } from '../forms/xml';
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -35,7 +36,7 @@ function headingLevel(p: Element): 2 | 3 | 4 | undefined {
 
 /** Reads `word/document.xml` into paragraphs, headings and tables, in order. Throws when it is not a Word document. */
 export function docxBlocks(data: ArrayBuffer): DocxBlock[] {
-  const files = unzipSync(new Uint8Array(data), { filter: (f) => f.name === 'word/document.xml' });
+  const files = unzipLimited(new Uint8Array(data), DOCX_XML_MAX_BYTES, (f) => f.name === 'word/document.xml');
   const entry = files['word/document.xml'];
   if (!entry) throw new Error('no document.xml');
   const body = parseXml(strFromU8(entry)).getElementsByTagNameNS(W_NS, 'body')[0];
