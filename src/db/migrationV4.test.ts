@@ -54,7 +54,7 @@ describe('upgrading a version-3 database to version 4', () => {
     expect(await db.libraryFiles.count()).toBe(0);
     expect(await db.libraryText.count()).toBe(0);
     expect((await getSettings(db)).deviceId).toBe('dev-1');
-    expect(db.backendDB().version).toBe(40);
+    expect(db.backendDB().version).toBe(50);
     expect(Object.keys(db.libraryDocs.schema.idxByName).sort()).toEqual(['folderId', 'sha256']);
     expect(Object.keys(db.libraryText.schema.idxByName)).toEqual(['docId']);
     db.close();

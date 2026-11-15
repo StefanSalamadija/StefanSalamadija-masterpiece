@@ -26,10 +26,12 @@ function at(hour: number) {
 }
 
 /** The counts of the forms tables of a snapshot that has none. */
-const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0 };
+const NO_FORMS = { formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
+    budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0, budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0 };
 const emptyTables = (): Tables => ({
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
   formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
 });
 
 beforeEach(() => {

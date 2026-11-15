@@ -1,5 +1,7 @@
 // Type-only: the forms engine stays out of the main bundle (it is loaded on demand by the Forms screens).
 import type { DraftValues, FormKind, FormSchema, FormSetup } from '../forms/types';
+// Type-only, as above: the budget's code is loaded on demand by the Budget screens.
+import type { ScenarioChange } from '../budget/scenarioTypes';
 
 export type Scope = 'ship' | 'personal';
 export interface BaseRecord { id: string; createdAt: string; updatedAt: string; updatedBy: string; deleted: boolean; scope: Scope }
@@ -103,19 +105,94 @@ export interface LibraryTextRow { id: string; docId: string; part: number; label
 export interface LibraryOpenedRow { docId: string; openedAt: string }
 /** A document's file. Local only. */
 export interface LibraryFileRow { docId: string; blob: Blob }
+/*
+ * The personal budget. Every amount is whole euro cents (`Cents`), every month `'YYYY-MM'` (`Ym`), every date
+ * `'YYYY-MM-DD'`. All of it is personal (`scope: 'personal'`): in full backups and snapshots, never in a handover, and
+ * tied to no ship. Balances, the forecast and the net worth are worked out, never stored, except the user's corrections.
+ */
+/** An amount in whole euro cents: always an integer. */
+export type Cents = number;
+/** A calendar month, `'YYYY-MM'`. */
+export type Ym = string;
+export type PotId = 'needs' | 'savings' | 'wants' | 'debts' | 'emergency';
+/** A category of a pot; `group` is its heading (one level deep). A hidden category is kept for its history. */
+export interface BudgetCategory extends BaseRecord { scope: 'personal'; pot: PotId; group?: string; name: string; order: number; hidden: boolean;
+  /** Other words the quick entry knows the category by. */
+  synonyms?: string[] }
+export type IncomeSource = 'salary' | 'property' | 'sales' | 'jobs' | 'other';
+/** Money in or out on a day. A planned entry is one still to confirm in its month. Undoing an entry deletes it (a tombstone). */
+export interface BudgetEntry extends BaseRecord { scope: 'personal'; kind: 'expense' | 'income'; date: string; amount: Cents; categoryId?: string;
+  incomeSource?: IncomeSource; note?: string; payee?: string; status: 'actual' | 'planned';
+  /** The recurring template it was made from. */
+  recurringId?: string;
+  /** The sinking fund it was paid from. */
+  fundId?: string;
+  /** The asset an income entry sold, which lowers that asset's value. */
+  soldAssetId?: string;
+  /** Where an imported entry came from (its month and cell), so that importing the same file again replaces it. */
+  importKey?: string;
+  /** Marked as a one-off: left out of the averages. */
+  oneOff?: boolean }
+export interface PotTarget { kind: 'pct' | 'amount'; value: number; inherited: boolean }
+/** A month's plan. A target is `inherited` when it came "from this month on" from an earlier month, not set for this one. */
+export interface BudgetMonth extends BaseRecord { scope: 'personal'; ym: Ym; plannedIncome?: Cents; potTargets: Partial<Record<PotId, PotTarget>>;
+  categoryTargets: Record<string, { amount: Cents; inherited: boolean }>; notes?: string }
+/** A template that repeats every month on `day`, from `startYm` to `endYm` (or until the debt `untilDebtId` is paid off). */
+export interface BudgetRecurring extends BaseRecord { scope: 'personal'; name: string; amount: Cents; categoryId?: string; incomeSource?: IncomeSource;
+  day: number; startYm: Ym; endYm?: Ym; untilDebtId?: string }
+/** A sinking fund for a bill of `amount` due in `dueYm` (and every `repeatMonths` after it, for a repeating one). */
+export interface BudgetFund extends BaseRecord { scope: 'personal'; name: string; amount: Cents; dueYm: Ym; repeatMonths?: number; categoryId?: string;
+  startBalance: Cents }
+/** The fund record: money set aside into a fund in a month, or a bill paid from it (with the entry that paid it). */
+export interface BudgetFundMove extends BaseRecord { scope: 'personal'; fundId: string; ym: Ym; amount: Cents; kind: 'setaside' | 'paid'; entryId?: string }
+export interface BudgetDebt extends BaseRecord { scope: 'personal'; name: string; startBalance: Cents; yearlyRatePct: number; instalment: Cents; startYm: Ym }
+export interface BudgetGoal extends BaseRecord { scope: 'personal'; name: string; amount: Cents; targetYm: Ym; categoryId?: string }
+export interface BudgetAsset extends BaseRecord { scope: 'personal'; name: string; includeInNetWorth: boolean }
+export type BudgetAccount = 'bank' | 'investments' | 'emergency' | `debt:${string}` | `asset:${string}` | `fund:${string}`;
+/** The user's own figure for an account's balance at the end of a month: a starting balance, or a correction. */
+export interface BudgetCorrection extends BaseRecord { scope: 'personal'; account: BudgetAccount; ym: Ym; balance: Cents }
+export interface BudgetScenario extends BaseRecord { scope: 'personal'; name: string; changes: ScenarioChange[] }
+export interface RotationSettings {
+  /** The monthly net salary onboard, each amount from its month on. */
+  salaryFrom: { ym: Ym; amount: Cents }[];
+  /** Past and planned contracts, as `YYYY-MM-DD` dates. */
+  periods: { signOn: string; signOff: string }[];
+  /** Months on and off of the pattern that repeats after the last period. */
+  patternOn: number; patternOff: number;
+  /** The salary lands in the month after it is earned. */
+  paidNextMonth: boolean;
+  paidAtHomePct: number;
+}
+export interface Assumptions { yearlyReturnPct?: number; withdrawalRatePct: number; inflationPct?: number; emergencyMonths: number; fundReminderDays: number }
+export type ForecastMethod = 'targets' | 'average' | 'fixed';
+/** The budget's settings: one record, `key: 'budget'`. No `bufferCents` means the default buffer, a month of Needs. */
+export interface BudgetSettings extends BaseRecord { scope: 'personal'; key: 'budget'; rotation: RotationSettings; assumptions: Assumptions;
+  /** The crew record that is the user, for "Use my contract". */
+  meCrewId?: string;
+  favourites: { name: string; amount: Cents; categoryId: string }[];
+  bufferCents?: Cents; forecastMethod: Record<PotId, ForecastMethod>; fixedSpend?: Partial<Record<PotId, Cents>>; horizon: 12 | 24 | 36 | 60 }
 export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange
-  | FormTemplate | FormDraft | FormLastValues | FormPhoto | LibraryDoc | LibraryFolder;
+  | FormTemplate | FormDraft | FormLastValues | FormPhoto | LibraryDoc | LibraryFolder
+  | BudgetCategory | BudgetEntry | BudgetMonth | BudgetRecurring | BudgetFund | BudgetFundMove | BudgetDebt | BudgetGoal | BudgetAsset
+  | BudgetCorrection | BudgetScenario | BudgetSettings;
+export type BudgetTableName = 'budgetCategories' | 'budgetEntries' | 'budgetMonths' | 'budgetRecurring' | 'budgetFunds' | 'budgetFundMoves'
+  | 'budgetDebts' | 'budgetGoals' | 'budgetAssets' | 'budgetCorrections' | 'budgetScenarios' | 'budgetSettings';
 export type TableName = 'ships' | 'crew' | 'voyages' | 'certificates' | 'clockChanges' | 'crewDocuments'
-  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos' | 'libraryDocs' | 'libraryFolders';
+  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos' | 'libraryDocs' | 'libraryFolders' | BudgetTableName;
+/** The budget's tables, in `TABLE_NAMES` order. */
+export const BUDGET_TABLES: readonly BudgetTableName[] = [
+  'budgetCategories', 'budgetEntries', 'budgetMonths', 'budgetRecurring', 'budgetFunds', 'budgetFundMoves', 'budgetDebts', 'budgetGoals',
+  'budgetAssets', 'budgetCorrections', 'budgetScenarios', 'budgetSettings',
+];
 /** Every syncable table. A table added later goes last: it is the order of the snapshot, and an old backup file may lack it. */
 export const TABLE_NAMES: readonly TableName[] = [
   'ships', 'crew', 'voyages', 'certificates', 'clockChanges', 'crewDocuments', 'formTemplates', 'formDrafts', 'formLastValues', 'formPhotos',
-  'libraryDocs', 'libraryFolders',
+  'libraryDocs', 'libraryFolders', ...BUDGET_TABLES,
 ];
-/** The syncable tables that belong to the person, not to a ship: the forms library and the knowledge library. */
-export const PERSONAL_TABLES: readonly TableName[] = ['formTemplates', 'libraryDocs', 'libraryFolders'];
+/** The syncable tables that belong to the person, not to a ship: the forms library, the knowledge library and the budget. */
+export const PERSONAL_TABLES: readonly TableName[] = ['formTemplates', 'libraryDocs', 'libraryFolders', ...BUDGET_TABLES];
 /** A table whose records belong to a ship by their `shipId`: every syncable table but the ships and the personal ones. */
-export type ShipTableName = Exclude<TableName, 'ships' | 'formTemplates' | 'libraryDocs' | 'libraryFolders'>;
+export type ShipTableName = Exclude<TableName, 'ships' | 'formTemplates' | 'libraryDocs' | 'libraryFolders' | BudgetTableName>;
 /** The tables of `ShipTableName`, in `TABLE_NAMES` order. Each is indexed by `shipId`. */
 export const SHIP_TABLES: readonly ShipTableName[] = TABLE_NAMES.filter(
   (name): name is ShipTableName => name !== 'ships' && !PERSONAL_TABLES.includes(name),

@@ -56,7 +56,7 @@ describe('another connection upgrades the database', () => {
     const { watch, db, name } = watched();
     await db.open();
     const heard = nextChange(watch);
-    const other = await openRaw(name, 50); // a newer version of the app (version 5), in another tab
+    const other = await openRaw(name, 60); // a newer version of the app (version 6), in another tab
     await heard;
     expect(watch.problem()).toBe('outdated');
     expect(db.isOpen()).toBe(false);
@@ -140,7 +140,7 @@ describe('an upgrade is blocked by another connection', () => {
     await cleared;
     expect(watch.problem()).toBeUndefined();
     expect(db.isOpen()).toBe(true);
-    expect(db.verno).toBe(4);
+    expect(db.verno).toBe(5);
   });
 
   it('does not say anything for an open that is not blocked', async () => {

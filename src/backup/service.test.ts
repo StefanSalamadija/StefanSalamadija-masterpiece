@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPhoto, closeDraft, openDraft, saveTemplate } from '../db/forms';
+import { DEFAULT_CATEGORIES } from '../budget/catalog';
+import { addEntry, createBudgetRecord, ensureBudgetSetup, listCategories, undoEntry, updateEntry } from '../db/budget';
 import { allTables, createRecord, softDelete, updateRecord } from '../db/records';
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
@@ -54,6 +56,8 @@ afterEach(() => {
 const emptyTables = (): Tables => ({
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
   formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+  budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [],
+  budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
 });
 
 /** Device A as the tests use it: two ships, and on the first one crew (one of them deleted), a voyage, a certificate and a personal-scope record. */
@@ -574,6 +578,8 @@ describe('prepareImport and applyImport between two devices', () => {
     expect(snapshots[0].reason).toBe('before-import');
     expect(snapshots[0].counts).toEqual({
       ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
+      budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0,
+      budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0,
     });
   });
 
@@ -1122,6 +1128,23 @@ describe('prepareImport rejects what it cannot trust', () => {
     formPhotos: { ...base, id: 'pho-1', shipId: 'ship-1', draftId: 'drf-1', jpegBase64: '/9j/', width: 1, height: 1 },
     libraryDocs: { ...base, scope: 'personal', id: 'lib-1', title: 'Manual', sha256: 'ab', tags: [] },
     libraryFolders: { ...base, scope: 'personal', id: 'fol-1', name: 'Engine' },
+    budgetCategories: { ...base, scope: 'personal', id: 'bc-1', pot: 'needs', group: 'Food', name: 'Groceries, food & drink', order: 0, hidden: false },
+    budgetEntries: { ...base, scope: 'personal', id: 'be-1', kind: 'expense', date: '2026-10-24', amount: 320, categoryId: 'bc-1', status: 'actual' },
+    budgetMonths: { ...base, scope: 'personal', id: 'bm-1', ym: '2026-10', potTargets: {}, categoryTargets: {} },
+    budgetRecurring: { ...base, scope: 'personal', id: 'br-1', name: 'Rent', amount: 50000, day: 1, startYm: '2026-01' },
+    budgetFunds: { ...base, scope: 'personal', id: 'bf-1', name: 'Car insurance', amount: 60000, dueYm: '2027-05', startBalance: 0 },
+    budgetFundMoves: { ...base, scope: 'personal', id: 'bfm-1', fundId: 'bf-1', ym: '2026-10', amount: 5000, kind: 'setaside' },
+    budgetDebts: { ...base, scope: 'personal', id: 'bd-1', name: 'Car loan', startBalance: 900000, yearlyRatePct: 5.5, instalment: 25000, startYm: '2026-01' },
+    budgetGoals: { ...base, scope: 'personal', id: 'bg-1', name: 'Boat', amount: 1000000, targetYm: '2030-01' },
+    budgetAssets: { ...base, scope: 'personal', id: 'ba-1', name: 'Flat', includeInNetWorth: true },
+    budgetCorrections: { ...base, scope: 'personal', id: 'bco-1', account: 'bank', ym: '2026-10', balance: -1500 },
+    budgetScenarios: { ...base, scope: 'personal', id: 'bs-1', name: 'Longer contract', changes: [] },
+    budgetSettings: {
+      ...base, scope: 'personal', id: 'bset-1', key: 'budget', horizon: 24, favourites: [],
+      rotation: { salaryFrom: [], periods: [], patternOn: 8, patternOff: 4, paidNextMonth: false, paidAtHomePct: 0 },
+      assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30 },
+      forecastMethod: { needs: 'targets', savings: 'targets', wants: 'targets', debts: 'targets', emergency: 'targets' },
+    },
   };
 
   /** A correctly sealed file in which one record of `table` carries `patch`; a key set to undefined is left out of the file. */
@@ -1187,6 +1210,30 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a photo has no draftId', 'formPhotos', { draftId: undefined }],
     ['a photo has an image that is not text', 'formPhotos', { jpegBase64: 12 }],
     ['a photo has an image that is not base64', 'formPhotos', { jpegBase64: '%%%' }],
+    ['a budget category is on the ship side', 'budgetCategories', { scope: 'ship' }],
+    ['a budget category has a pot that is not one', 'budgetCategories', { pot: 'fun' }],
+    ['a budget category has no name', 'budgetCategories', { name: undefined }],
+    ['a budget entry is on the ship side', 'budgetEntries', { scope: 'ship' }],
+    ['a budget entry has an amount that is not whole cents', 'budgetEntries', { amount: 3.2 }],
+    ['a budget entry has an amount that is text', 'budgetEntries', { amount: '320' }],
+    ['a budget entry has a kind that is not one', 'budgetEntries', { kind: 'transfer' }],
+    ['a budget entry has a date that is not a date', 'budgetEntries', { date: '24.10.2026' }],
+    ['a budget entry has a status that is not one', 'budgetEntries', { status: 'maybe' }],
+    ['a budget month has a month that is not one', 'budgetMonths', { ym: '2026-13' }],
+    ['a budget month has no pot targets', 'budgetMonths', { potTargets: undefined }],
+    ['a recurring item has no amount', 'budgetRecurring', { amount: undefined }],
+    ['a fund has a start balance that is not whole cents', 'budgetFunds', { startBalance: 0.5 }],
+    ['a fund move has no fund', 'budgetFundMoves', { fundId: undefined }],
+    ['a fund move has a kind that is not one', 'budgetFundMoves', { kind: 'spent' }],
+    ['a debt has a rate that is not a number', 'budgetDebts', { yearlyRatePct: '5.5' }],
+    ['a goal has no target month', 'budgetGoals', { targetYm: undefined }],
+    ['an asset is not in or out of the net worth', 'budgetAssets', { includeInNetWorth: 'yes' }],
+    ['a correction has no account', 'budgetCorrections', { account: undefined }],
+    ['a correction has a balance that is not whole cents', 'budgetCorrections', { balance: 1.25 }],
+    ['a scenario has changes that are not a list', 'budgetScenarios', { changes: {} }],
+    ['the budget settings have another key', 'budgetSettings', { key: 'device' }],
+    ['the budget settings have no rotation', 'budgetSettings', { rotation: undefined }],
+    ['the budget settings have a horizon that is not a choice', 'budgetSettings', { horizon: 18 }],
   ] as [string, TableName, object][])('throws DamagedFileError when %s', async (_label, table, patch) => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith(table, patch), PW)).rejects.toThrow(DamagedFileError);
@@ -1268,5 +1315,133 @@ describe('the knowledge library in a backup', () => {
     expect(imported.libraryDocs).toEqual([]);
     expect(imported.libraryFolders).toEqual([]);
     expect(imported.ships).toHaveLength(2);
+  });
+});
+
+describe('the budget in a backup', () => {
+  /** Device A with a budget: the default categories and settings, two entries (one undone) and a fund. Invented figures only. */
+  async function deviceAWithBudget() {
+    const a = await deviceA();
+    await ensureBudgetSetup(a.db);
+    const [rent] = await listCategories(a.db);
+    const entry = await addEntry(a.db, { kind: 'expense', date: '2026-10-24', amount: 4250, categoryId: rent.id, status: 'actual', note: 'Market' });
+    const undone = await addEntry(a.db, { kind: 'expense', date: '2026-10-24', amount: 99, status: 'actual' });
+    await undoEntry(a.db, undone.id);
+    const fund = await createBudgetRecord(a.db, 'budgetFunds', { name: 'Car insurance', amount: 60000, dueYm: '2027-05', startBalance: 0 });
+    return { ...a, rent, entry, undone, fund };
+  }
+
+  const BUDGET_TABLES = TABLE_NAMES.filter((name) => name.startsWith('budget'));
+
+  it('goes into a full backup with its tombstones, and comes out on the other device exactly', async () => {
+    const a = await deviceAWithBudget();
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    expect(payload.tables.budgetEntries.map((r) => r.id).sort()).toEqual([a.entry.id, a.undone.id].sort());
+    expect(payload.tables.budgetCategories).toHaveLength(DEFAULT_CATEGORIES.length);
+    expect(payload.tables.budgetSettings).toHaveLength(1);
+    expect(payload.tables.budgetFunds.map((r) => r.id)).toEqual([a.fund.id]);
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    const [mine, theirs] = [await allTables(a.db), await allTables(b)];
+    for (const name of BUDGET_TABLES) expect(theirs[name], name).toEqual(mine[name]);
+    // Set up already: opening the budget on the other device seeds nothing more.
+    await ensureBudgetSetup(b);
+    expect(await b.budgetCategories.count()).toBe(DEFAULT_CATEGORIES.length);
+    expect(await b.budgetSettings.count()).toBe(1);
+  });
+
+  it('never goes into a handover, with or without the forms library', async () => {
+    const a = await deviceAWithBudget();
+    for (const includeLibrary of [false, true]) {
+      const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, includeLibrary, ...FAST });
+      const { payload } = await openBackup(text, PW);
+      expect(payload.tables.ships.map((r) => r.id)).toEqual([a.ship.id]);
+      for (const name of BUDGET_TABLES) expect(payload.tables[name], name).toEqual([]);
+    }
+  });
+
+  it('is left out by collectHandover even when a record looks like it belongs to the ship', async () => {
+    const a = await deviceAWithBudget();
+    const tables = await allTables(a.db);
+    tables.budgetEntries = tables.budgetEntries.map((r) => ({ ...r, shipId: a.ship.id }));
+    const h = collectHandover(tables, a.ship.id, { includeLibrary: true });
+    for (const name of BUDGET_TABLES) expect(h[name], name).toEqual([]);
+  });
+
+  it('merges an entry edited on two devices by the last writer: each later edit wins, with no conflict', async () => {
+    const a = await deviceAWithBudget();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    // This device takes the other's full backup too, so that each knows when it last heard from the other.
+    at('2026-10-25T09:30:00.000Z');
+    const back = (await exportBackup(b, 'full', PW, { shipId: a.ship.id, ...FAST })).text;
+    await applyImport(a.db, await prepareImport(a.db, back, PW), { conflicts: {}, applyDeletions: true });
+    // The other device edits the entry later, and sends it back.
+    at('2026-10-25T10:00:00.000Z');
+    await updateEntry(b, a.entry.id, { amount: 4300 });
+    at('2026-10-25T10:30:00.000Z');
+    const fromB = (await exportBackup(b, 'full', PW, { shipId: a.ship.id, ...FAST })).text;
+    const intoA = await prepareImport(a.db, fromB, PW);
+    expect(intoA.plan.items.map((i) => [i.table, i.id, i.kind])).toEqual([['budgetEntries', a.entry.id, 'update']]);
+    await applyImport(a.db, intoA, { conflicts: {}, applyDeletions: true });
+    expect(await a.db.budgetEntries.get(a.entry.id)).toMatchObject({ amount: 4300 });
+    // This device sends its backup back, so the other device knows its edit arrived; then this device edits it again,
+    // and its later edit is what the other device takes.
+    at('2026-10-25T10:45:00.000Z');
+    const ack = (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text;
+    const acked = await prepareImport(b, ack, PW);
+    expect(acked.plan.summary).toEqual({ added: 0, updated: 0, deleted: 0, conflicts: 0 });
+    await applyImport(b, acked, { conflicts: {}, applyDeletions: true });
+    at('2026-10-25T11:00:00.000Z');
+    await updateEntry(a.db, a.entry.id, { amount: 4400, note: 'Market and bakery' });
+    at('2026-10-25T11:30:00.000Z');
+    const fromA = (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text;
+    const intoB = await prepareImport(b, fromA, PW);
+    expect(intoB.plan.summary).toEqual({ added: 0, updated: 1, deleted: 0, conflicts: 0 });
+    await applyImport(b, intoB, { conflicts: {}, applyDeletions: true });
+    expect(await b.budgetEntries.get(a.entry.id)).toEqual(await a.db.budgetEntries.get(a.entry.id));
+  });
+
+  it('asks the user, as for any record, when both devices edited the same entry since they last exchanged', async () => {
+    const a = await deviceAWithBudget();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await updateEntry(a.db, a.entry.id, { amount: 4300 });
+    await updateEntry(b, a.entry.id, { amount: 4400 });
+    at('2026-10-25T11:00:00.000Z');
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.items.map((i) => [i.table, i.kind])).toEqual([['budgetEntries', 'conflict']]);
+    await applyImport(b, p, { conflicts: { [`budgetEntries:${a.entry.id}`]: 'incoming' }, applyDeletions: true });
+    expect(await b.budgetEntries.get(a.entry.id)).toMatchObject({ amount: 4300 });
+  });
+
+  it('carries an undo to the other device as a deletion', async () => {
+    const a = await deviceAWithBudget();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await undoEntry(a.db, a.entry.id);
+    at('2026-10-25T10:30:00.000Z');
+    const { text } = await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST });
+    const p = await prepareImport(b, text, PW);
+    expect(p.plan.items.map((i) => [i.table, i.id, i.kind])).toEqual([['budgetEntries', a.entry.id, 'delete']]);
+    await applyImport(b, p, { conflicts: {}, applyDeletions: true });
+    expect((await b.budgetEntries.get(a.entry.id))?.deleted).toBe(true);
+  });
+
+  it('is left out of nothing by an old file: a backup made before the budget imports with none', async () => {
+    const a = await deviceA();
+    const tables = await allTables(a.db);
+    const old = Object.fromEntries(Object.entries(tables).filter(([name]) => !name.startsWith('budget')));
+    const header: BackupHeader = { format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-old', deviceName: 'Old phone', exportedAt: '2026-10-20T00:00:00.000Z' };
+    const text = await sealBackup(header, { tables: old } as never, PW, FAST);
+    const b = freshDb();
+    const prepared = await prepareImport(b, text, PW);
+    await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
+    for (const name of BUDGET_TABLES) expect((await allTables(b))[name], name).toEqual([]);
+    expect((await allTables(b)).ships).toHaveLength(2);
   });
 });

@@ -122,7 +122,8 @@ describe('snapshotCountsText', () => {
   const counts = (over: Partial<Record<TableName, number>>): Record<TableName, number> =>
     ({
       ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0,
-      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0, ...over,
+      formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
+    budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0, budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0, ...over,
     });
 
   it('lists what the snapshot holds, with the right plural', () => {
@@ -141,6 +142,11 @@ describe('snapshotCountsText', () => {
       .toBe('1 ship · 3 forms · 2 form drafts · 5 photos');
     expect(snapshotCountsText(counts({ formTemplates: 1, formDrafts: 1, formPhotos: 1 }))).toBe('1 form · 1 form draft · 1 photo');
     expect(snapshotCountsText(counts({ libraryDocs: 1, libraryFolders: 2 }))).toBe('1 library document · 2 library folders');
+  });
+
+  it('counts the budget by its categories and entries, after the rest', () => {
+    expect(snapshotCountsText(counts({ ships: 1, budgetCategories: 43, budgetEntries: 1, budgetSettings: 1 }))).toBe('1 ship · 43 budget categories · 1 budget entry');
+    expect(snapshotCountsText(counts({ budgetCategories: 1, budgetEntries: 2 }))).toBe('1 budget category · 2 budget entries');
   });
 
   it('leaves out what it does not hold', () => {
