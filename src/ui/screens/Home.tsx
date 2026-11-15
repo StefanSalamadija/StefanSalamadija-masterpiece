@@ -126,6 +126,14 @@ export function Home() {
       <p>
         <a href="#/ship/particulars">Ship's data</a>
       </p>
+      <ul class="alert-list no-print" role="list" aria-label="Tools">
+        <li class="card alert-row">
+          <a class="alert-link" href="#/tools">
+            <span class="alert-title">Tools</span>
+            <span class="alert-detail">Unit converters, volume ↔ mass, speed · distance · time</span>
+          </a>
+        </li>
+      </ul>
     </section>
   );
 }
