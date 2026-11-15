@@ -9,8 +9,11 @@ const categories = [
 ];
 
 type Input = Parameters<typeof balancesByMonth>[0];
-function run(input: Partial<Input> & { fromYm: string; toYm: string }) {
+function runAll(input: Partial<Input> & { fromYm: string; toYm: string }) {
   return balancesByMonth({ entries: [], corrections: [], debts: [], assets: [], categories, fundMoves: [], funds: [], ...input });
+}
+function run(input: Partial<Input> & { fromYm: string; toYm: string }) {
+  return runAll(input).balances;
 }
 
 describe('balancesByMonth', () => {
@@ -81,6 +84,39 @@ describe('balancesByMonth', () => {
       const m = run({ entries, debts: [car, card], recurring: [tpl], fromYm: '2026-11', toYm: '2026-11' }).get('2026-11')!;
       expect(m['debt:car']).toBe(100000);
       expect(m['debt:card']).toBe(40000);
+    });
+
+    it('pays the debt the entry names, principal after interest, before any template link', () => {
+      const car = debt({ id: 'car', startBalance: 100000, yearlyRatePct: 6, startYm: '2026-11' });
+      const card = debt({ id: 'card', startBalance: 50000, startYm: '2026-11' });
+      const tpl = recurring({ id: 'card-tpl', amount: 30000, startYm: '2026-11', categoryId: 'loan', untilDebtId: 'card' });
+      const entries = [entry('2026-11-05', 30000, { id: 'pay', categoryId: 'loan', debtId: 'car', recurringId: 'card-tpl' })];
+      const result = runAll({ entries, debts: [car, card], recurring: [tpl], fromYm: '2026-11', toYm: '2026-11' });
+      expect(result.balances.get('2026-11')).toMatchObject({ bank: -30000, 'debt:car': 70500, 'debt:card': 50000 });
+      expect(result.unassignedDebtPayments).toEqual([]);
+    });
+
+    it('lists a payment it cannot place when there are several debts, and lowers no debt with it', () => {
+      const car = debt({ id: 'car', startBalance: 100000, startYm: '2026-11' });
+      const card = debt({ id: 'card', startBalance: 50000, startYm: '2026-11' });
+      const entries = [
+        entry('2026-10-05', 1000, { id: 'early', categoryId: 'loan' }), entry('2026-11-05', 10000, { id: 'pay', categoryId: 'loan' }),
+        entry('2026-11-06', 2000, { id: 'gone', categoryId: 'loan', debtId: 'old-debt' }),
+        entry('2026-11-07', 3000, { id: 'planned', categoryId: 'loan', status: 'planned' }), entry('2026-12-05', 4000, { id: 'late', categoryId: 'loan' }),
+      ];
+      const result = runAll({ entries, debts: [car, card], fromYm: '2026-11', toYm: '2026-11' });
+      expect(result.balances.get('2026-11')).toMatchObject({ bank: -13000, 'debt:car': 100000, 'debt:card': 50000 });
+      // A payment to a debt that is not there (deleted) is asked about too; planned entries and later months are not.
+      expect(result.unassignedDebtPayments).toEqual([
+        { entryId: 'early', ym: '2026-10', amount: 1000 }, { entryId: 'pay', ym: '2026-11', amount: 10000 },
+        { entryId: 'gone', ym: '2026-11', amount: 2000 },
+      ]);
+    });
+
+    it('lowers no debt, and asks nothing, when there are no debts', () => {
+      const result = runAll({ entries: [entry('2026-11-05', 10000, { categoryId: 'loan' })], fromYm: '2026-11', toYm: '2026-11' });
+      expect(result.balances.get('2026-11')).toEqual({ bank: -10000, investments: 0, emergency: 0 });
+      expect(result.unassignedDebtPayments).toEqual([]);
     });
 
     it('pays the only debt when the entry names none', () => {

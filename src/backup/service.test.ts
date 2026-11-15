@@ -1219,6 +1219,8 @@ describe('prepareImport rejects what it cannot trust', () => {
     ['a budget entry has a kind that is not one', 'budgetEntries', { kind: 'transfer' }],
     ['a budget entry has a date that is not a date', 'budgetEntries', { date: '24.10.2026' }],
     ['a budget entry has a status that is not one', 'budgetEntries', { status: 'maybe' }],
+    ['a budget entry has a debt that is not text', 'budgetEntries', { debtId: 7 }],
+    ['a budget entry has an asset sold that is not text', 'budgetEntries', { soldAssetId: false }],
     ['a budget month has a month that is not one', 'budgetMonths', { ym: '2026-13' }],
     ['a budget month has no pot targets', 'budgetMonths', { potTargets: undefined }],
     ['a recurring item has no amount', 'budgetRecurring', { amount: undefined }],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PotId } from '../domain/types';
-import { category, entry, fund, move, plan } from '../test/budgetRecords';
+import { category, correction, entry, fund, move, plan } from '../test/budgetRecords';
 import { categoryBand, summariseMonth, targetsWarning } from './month';
 
 const categories = [
@@ -95,6 +95,9 @@ describe('summariseMonth', () => {
       // Not yet confirmed: 60,000 over November to March (5 months).
       const pending = summariseMonth({ month: nov, categories, entries: [], funds: [car], fundMoves: [] });
       expect(pot(pending, 'needs')).toMatchObject({ spent: 0, planned: 12000 });
+      // Corrected to its full amount, the fund asks for nothing more.
+      const corrected = summariseMonth({ month: nov, categories, entries: [], funds: [car], fundMoves: [], corrections: [correction('fund:car', '2026-10', 60000)] });
+      expect(pot(corrected, 'needs')).toMatchObject({ spent: 0, planned: 0 });
     });
 
     it('does not count a bill paid from the fund twice against the pot', () => {

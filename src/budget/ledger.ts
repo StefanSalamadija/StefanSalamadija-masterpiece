@@ -1,6 +1,7 @@
 import type {
   BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetRecurring, Cents, Ym,
 } from '../domain/types';
+import { laterCorrection } from './corrections';
 import { monthlyInterest } from './debts';
 import { fundLedger } from './funds';
 import { addMonths, ymOf } from './months';
@@ -17,13 +18,18 @@ import { addMonths, ymOf } from './months';
  *  - A debt starts at its start balance in its start month. Each month from then on it is charged a month of interest
  *    on the balance at the start of the month (yearly rate ÷ 12, rounded to the cent), whether or not a payment is
  *    made, and every payment lowers it in full. So a month with one instalment lowers the debt by the principal
- *    (instalment − interest), as in `amortise`. A payment goes to the debt that its recurring template pays off
- *    (`untilDebtId`); with no such template, to the only debt when there is one; otherwise to no debt (the bank still
- *    pays it).
+ *    (instalment − interest), as in `amortise`. A payment goes to:
+ *      - the debt the entry names (`debtId`);
+ *      - else the debt its recurring template pays off (`untilDebtId`);
+ *      - else the only debt, when there is exactly one.
+ *    Otherwise it lowers no debt (the bank still pays it). With no debts at all, that is all. With two or more, or
+ *    when the debt it names is not there (deleted), it is listed in `unassignedDebtPayments`, so that the user can be
+ *    asked which debt it paid.
  *  - An income entry that names an asset it sold lowers that asset by its amount, never below zero. An asset's value
  *    is otherwise its corrections.
  *  - Sinking funds sit inside the bank: a set-aside moves no bank money; a bill paid from a fund is an ordinary expense
- *    that lowers the bank, and its fund record lowers the fund.
+ *    that lowers the bank, and its fund record lowers the fund. A fund's balance is `fundLedger`'s, corrections
+ *    included.
  *  - A correction sets the account's balance at the end of its month; later months continue from it. Of several
  *    corrections of one account in one month, the last one saved counts.
  *  - Planned (unconfirmed) and deleted entries move nothing.
@@ -34,17 +40,23 @@ export type Account = BudgetCorrection['account'];
 /** The default "Savings goals" category (its seeded id): money saved for a goal stays in the bank. */
 export const SAVINGS_GOALS_CATEGORY_ID = 'budget-cat:savings:savings-goals';
 
-const later = (a: BudgetCorrection, b: BudgetCorrection) =>
-  a.updatedAt !== b.updatedAt ? a.updatedAt > b.updatedAt : a.createdAt !== b.createdAt ? a.createdAt > b.createdAt : a.id > b.id;
+/** A payment in a Debts category that `balancesByMonth` could not put against a debt. */
+export interface UnassignedDebtPayment { entryId: string; ym: Ym; amount: Cents }
 
 export function balancesByMonth(input: {
   entries: BudgetEntry[]; corrections: BudgetCorrection[]; debts: BudgetDebt[]; assets: BudgetAsset[];
   categories: BudgetCategory[]; fundMoves: BudgetFundMove[]; funds: BudgetFund[]; fromYm: Ym; toYm: Ym;
   /** The recurring templates, to know which debt a payment made from one pays. */
   recurring?: BudgetRecurring[];
-}): Map<Ym, Record<Account, Cents>> {
+}): {
+  /** Each month end from `fromYm` to `toYm`, in order. */
+  balances: Map<Ym, Record<Account, Cents>>;
+  /** The actual Debts payments up to `toYm` that lowered no debt though there are debts, in date order. */
+  unassignedDebtPayments: UnassignedDebtPayment[];
+} {
   const out = new Map<Ym, Record<Account, Cents>>();
-  if (input.toYm < input.fromYm) return out;
+  const unassignedDebtPayments: UnassignedDebtPayment[] = [];
+  if (input.toYm < input.fromYm) return { balances: out, unassignedDebtPayments };
 
   const debts = input.debts.filter((d) => !d.deleted);
   const assets = input.assets.filter((a) => !a.deleted);
@@ -57,6 +69,7 @@ export function balancesByMonth(input: {
 
   /** Which debt a payment pays, if any. */
   const debtPaidBy = (e: BudgetEntry): string | undefined => {
+    if (e.debtId !== undefined) return debtIds.has(e.debtId) ? e.debtId : undefined;
     const viaTemplate = e.recurringId !== undefined ? debtOfTemplate.get(e.recurringId) : undefined;
     if (viaTemplate !== undefined && debtIds.has(viaTemplate)) return viaTemplate;
     return debts.length === 1 ? debts[0].id : undefined;
@@ -69,7 +82,8 @@ export function balancesByMonth(input: {
     month.set(account, (month.get(account) ?? 0) + amount);
     flows.set(ym, month);
   };
-  for (const e of entries) {
+  const byDate = [...entries].sort((a, b) => (a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const e of byDate) {
     const ym = ymOf(e.date);
     if (e.kind === 'income') {
       flow(ym, 'bank', e.amount);
@@ -84,6 +98,7 @@ export function balancesByMonth(input: {
     else if (pot === 'debts') {
       const debtId = debtPaidBy(e);
       if (debtId !== undefined) flow(ym, `debt:${debtId}`, -e.amount);
+      else if ((debts.length > 0 || e.debtId !== undefined) && ym <= input.toYm) unassignedDebtPayments.push({ entryId: e.id, ym, amount: e.amount });
     }
   }
 
@@ -93,7 +108,7 @@ export function balancesByMonth(input: {
     if (c.deleted) continue;
     const key = `${c.account}|${c.ym}`;
     const held = corrections.get(key);
-    if (held === undefined || later(c, held)) corrections.set(key, c);
+    if (held === undefined || laterCorrection(c, held)) corrections.set(key, c);
   }
   const correctionOf = (account: Account, ym: Ym) => corrections.get(`${account}|${ym}`)?.balance;
 
@@ -109,9 +124,6 @@ export function balancesByMonth(input: {
   const held = new Map<Account, Cents>(plain.map((a) => [a, 0]));
   /** A debt's balance once it has started (its start month, or an earlier correction). */
   const debtHeld = new Map<string, Cents>();
-  /** A fund's last correction: its value, and the fund's own balance in that month. */
-  const fundCorrected = new Map<string, { value: Cents; raw: Cents }>();
-  const fundHeld = new Map<string, Cents>();
 
   for (let ym = start; ym <= input.toYm; ym = addMonths(ym, 1)) {
     const moved = flows.get(ym);
@@ -132,20 +144,13 @@ export function balancesByMonth(input: {
       if (corrected !== undefined) balance = corrected;
       if (balance !== undefined) debtHeld.set(d.id, balance);
     }
-    for (const f of funds) {
-      const raw = fundLedger(f, input.fundMoves, ym).balance;
-      const corrected = correctionOf(`fund:${f.id}`, ym);
-      if (corrected !== undefined) fundCorrected.set(f.id, { value: corrected, raw });
-      const last = fundCorrected.get(f.id);
-      fundHeld.set(f.id, last === undefined ? raw : last.value + raw - last.raw);
-    }
     if (ym < input.fromYm) continue;
 
     const record: Record<Account, Cents> = { bank: held.get('bank')!, investments: held.get('investments')!, emergency: held.get('emergency')! };
     for (const d of debts) record[`debt:${d.id}`] = debtHeld.get(d.id) ?? 0;
     for (const a of assets) record[`asset:${a.id}`] = held.get(`asset:${a.id}`)!;
-    for (const f of funds) record[`fund:${f.id}`] = fundHeld.get(f.id)!;
+    for (const f of funds) record[`fund:${f.id}`] = fundLedger(f, input.fundMoves, ym, input.corrections).balance;
     out.set(ym, record);
   }
-  return out;
+  return { balances: out, unassignedDebtPayments };
 }

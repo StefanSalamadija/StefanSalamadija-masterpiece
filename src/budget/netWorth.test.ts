@@ -7,7 +7,7 @@ import { netWorthSeries, savingsRate, savingsRateOver } from './netWorth';
 const categories = [category('food', 'needs'), category('fun', 'wants'), category('etf', 'savings'), category('ef', 'emergency'), category('loan', 'debts')];
 type Input = Parameters<typeof balancesByMonth>[0];
 function balances(input: Partial<Input> & { fromYm: string; toYm: string }) {
-  return balancesByMonth({ entries: [], corrections: [], debts: [], assets: [], categories, fundMoves: [], funds: [], ...input });
+  return balancesByMonth({ entries: [], corrections: [], debts: [], assets: [], categories, fundMoves: [], funds: [], ...input }).balances;
 }
 
 describe('netWorthSeries', () => {

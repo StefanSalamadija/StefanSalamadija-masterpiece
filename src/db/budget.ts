@@ -1,6 +1,6 @@
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import { addMonths } from '../budget/months';
-import { budgetMoneyOk } from '../budget/validate';
+import { budgetMoneyOk, entryLinksOk } from '../budget/validate';
 import type {
   BaseRecord, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
   BudgetRecurring, BudgetScenario, BudgetSettings, BudgetTableName, Ym,
@@ -40,6 +40,7 @@ function assertCents(fields: object): void {
 function assertEntry(fields: Partial<BudgetEntry>): void {
   assertCents(fields);
   if (fields.date !== undefined && !DATE.test(fields.date)) throw new Error(`An entry's date must be YYYY-MM-DD, not ${fields.date}.`);
+  if (!entryLinksOk(fields as Record<string, unknown>)) throw new Error("An entry's category, fund, debt, asset or template must be an id.");
 }
 
 /** Adds a personal record to a budget table. */

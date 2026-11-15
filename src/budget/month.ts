@@ -1,4 +1,4 @@
-import type { BudgetCategory, BudgetEntry, BudgetFund, BudgetFundMove, Cents, PotId, Ym } from '../domain/types';
+import type { BudgetCategory, BudgetCorrection, BudgetEntry, BudgetFund, BudgetFundMove, Cents, PotId, Ym } from '../domain/types';
 import { POTS } from './catalog';
 import { fundLedger, fundStatus } from './funds';
 import { ymOf } from './months';
@@ -50,6 +50,8 @@ export function targetsWarning(targetsPctTotal: number): string | undefined {
 export function summariseMonth(input: {
   /** The month's plan, from `effectiveMonth`. */
   month: MonthPlan; entries: BudgetEntry[]; categories: BudgetCategory[]; fundMoves: BudgetFundMove[]; funds: BudgetFund[];
+  /** The corrections, so that the funds start from their own (see `fundStatus`). */
+  corrections?: BudgetCorrection[];
 }): MonthSummary {
   const { month } = input;
   const ym = month.ym;
@@ -67,7 +69,7 @@ export function summariseMonth(input: {
   // What each bill record took from its fund, by the entry it paid.
   const coveredBy = new Map<string, Cents>();
   for (const fund of input.funds) {
-    const { taken } = fundLedger(fund, input.fundMoves, ym);
+    const { taken } = fundLedger(fund, input.fundMoves, ym, input.corrections);
     for (const m of input.fundMoves) {
       if (m.fundId === fund.id && m.kind === 'paid' && m.entryId !== undefined && taken.has(m.id)) {
         coveredBy.set(m.entryId, (coveredBy.get(m.entryId) ?? 0) + taken.get(m.id)!);
@@ -91,7 +93,7 @@ export function summariseMonth(input: {
   }
   for (const fund of input.funds) {
     if (fund.deleted || input.fundMoves.some((m) => m.fundId === fund.id && !m.deleted && m.ym === ym && m.kind === 'setaside')) continue;
-    add(plannedBy, fund.categoryId, fundStatus(fund, input.fundMoves, ym).setAside);
+    add(plannedBy, fund.categoryId, fundStatus(fund, input.fundMoves, ym, input.corrections).setAside);
   }
 
   const potTotal = (map: Map<string, Cents>, pot: PotId) =>

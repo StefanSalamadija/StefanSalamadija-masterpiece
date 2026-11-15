@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fund, move } from '../test/budgetRecords';
-import { fundPayment, fundStatus } from './funds';
+import { correction, fund, move } from '../test/budgetRecords';
+import { fundLedger, fundPayment, fundStatus } from './funds';
 
 describe('fundStatus', () => {
   const car = fund({ id: 'car', amount: 60000, dueYm: '2027-03', createdAt: '2026-11-02T08:00:00.000Z' });
@@ -76,6 +76,39 @@ describe('fundStatus', () => {
   it('ignores deleted records and other funds\' records', () => {
     const moves = [move('car', '2026-11', 'setaside', 40000, { deleted: true }), move('other', '2026-11', 'setaside', 40000)];
     expect(fundStatus(car, moves, '2026-12').balance).toBe(0);
+  });
+});
+
+describe('fundStatus with corrections', () => {
+  const car = fund({ id: 'car', amount: 60000, dueYm: '2027-03', createdAt: '2026-11-02T08:00:00.000Z' });
+
+  it('needs no set-aside once the fund is corrected to its full amount', () => {
+    const corrections = [correction('fund:car', '2026-11', 60000)];
+    expect(fundStatus(car, [], '2026-12', corrections)).toMatchObject({ balance: 60000, setAside: 0, behind: false });
+    // In the corrected month itself too: the correction is the month-end balance.
+    expect(fundStatus(car, [move('car', '2026-11', 'setaside', 12000)], '2026-11', corrections)).toMatchObject({ balance: 60000, setAside: 0 });
+  });
+
+  it('runs on from the latest correction at or before the month, and ignores later, deleted and other funds\' corrections', () => {
+    const moves = [move('car', '2026-11', 'setaside', 12000), move('car', '2026-12', 'setaside', 5000)];
+    const corrections = [
+      correction('fund:car', '2026-11', 30000), correction('fund:car', '2027-01', 1),
+      correction('fund:car', '2026-11', 99999, { deleted: true }), correction('fund:other', '2026-11', 99999),
+    ];
+    // December: 30,000 + 5,000; it asks (60,000 − 30,000) ÷ 4 from the balance before its own set-aside.
+    expect(fundStatus(car, moves, '2026-12', corrections)).toMatchObject({ balance: 35000, setAside: 7500 });
+  });
+
+  it('judges "behind" from the corrected balance', () => {
+    // Without the correction, November's 0 set-aside fell short; corrected to full, nothing was owed.
+    expect(fundStatus(car, [], '2026-12').behind).toBe(true);
+    expect(fundStatus(car, [], '2026-12', [correction('fund:car', '2026-11', 60000)]).behind).toBe(false);
+  });
+
+  it('a bill paid from a corrected fund takes from the corrected balance', () => {
+    const moves = [move('car', '2027-03', 'paid', 60000, { id: 'paid' })];
+    expect(fundPayment(car, [], '2027-03', 60000, [correction('fund:car', '2027-02', 50000)])).toEqual({ fromFund: 50000, overspend: 10000 });
+    expect(fundLedger(car, moves, '2027-03', [correction('fund:car', '2027-02', 50000)]).taken.get('paid')).toBe(50000);
   });
 });
 

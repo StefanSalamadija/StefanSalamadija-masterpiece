@@ -1,4 +1,4 @@
-import type { BaseRecord, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetRecurring, Cents, Ym } from '../domain/types';
+import type { BaseRecord, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetRecurring, Cents, Ym } from '../domain/types';
 import { fundStatus } from './funds';
 import { ymOf } from './months';
 
@@ -33,6 +33,8 @@ export function plannedItemsFor(ym: Ym, input: {
   recurring: BudgetRecurring[]; funds: BudgetFund[]; fundMoves: BudgetFundMove[]; existing: BudgetEntry[]; debts: BudgetDebt[];
   /** Each debt's balance at the start of the month. */
   debtBalances: Record<string, Cents>;
+  /** The corrections, so that the funds start from their own (see `fundStatus`). */
+  corrections?: BudgetCorrection[];
 }): { entries: Omit<BudgetEntry, keyof BaseRecord>[]; setAsides: { fundId: string; amount: Cents }[] } {
   const made = new Set(input.existing.filter((e) => e.recurringId !== undefined && ymOf(e.date) === ym).map((e) => e.recurringId));
   const entries: Omit<BudgetEntry, keyof BaseRecord>[] = [];
@@ -50,7 +52,7 @@ export function plannedItemsFor(ym: Ym, input: {
   for (const fund of input.funds) {
     if (fund.deleted) continue;
     if (input.fundMoves.some((m) => m.fundId === fund.id && !m.deleted && m.ym === ym && m.kind === 'setaside')) continue;
-    const { setAside } = fundStatus(fund, input.fundMoves, ym);
+    const { setAside } = fundStatus(fund, input.fundMoves, ym, input.corrections);
     if (setAside > 0) setAsides.push({ fundId: fund.id, amount: setAside });
   }
   return { entries, setAsides };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetDebt } from '../domain/types';
-import { entry, fund, move, recurring } from '../test/budgetRecords';
+import { correction, entry, fund, move, recurring } from '../test/budgetRecords';
 import { plannedItemsFor } from './planned';
 
 const none = { recurring: [], funds: [], fundMoves: [], existing: [], debts: [], debtBalances: {} };
@@ -62,5 +62,11 @@ describe('plannedItemsFor', () => {
     // A set-aside that was undone is asked for again.
     const undone = [move('car', '2026-11', 'setaside', 12000, { deleted: true })];
     expect(plannedItemsFor('2026-11', { ...none, funds: [car], fundMoves: undone }).setAsides).toEqual([{ fundId: 'car', amount: 12000 }]);
+  });
+
+  it('asks no set-aside of a fund corrected to its full amount', () => {
+    const car = fund({ id: 'car', amount: 60000, dueYm: '2027-03' });
+    expect(plannedItemsFor('2026-11', { ...none, funds: [car] }).setAsides).toEqual([{ fundId: 'car', amount: 12000 }]);
+    expect(plannedItemsFor('2026-11', { ...none, funds: [car], corrections: [correction('fund:car', '2026-10', 60000)] }).setAsides).toEqual([]);
   });
 });

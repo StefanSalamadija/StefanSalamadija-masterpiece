@@ -10,7 +10,7 @@ import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { BUDGET_TABLES, TABLE_NAMES } from '../domain/types';
 import type { BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
-import { budgetMoneyOk, isCents } from '../budget/validate';
+import { budgetMoneyOk, entryLinksOk, isCents } from '../budget/validate';
 import { isBase64 } from './crypto';
 import {
   BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, StaleReviewError, openBackup, sealBackup, validatePassword,
@@ -143,7 +143,7 @@ function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): bool
       return POT_IDS.has(r.pot) && typeof r.name === 'string' && typeof r.order === 'number' && typeof r.hidden === 'boolean' && isOptionalText(r.group);
     case 'budgetEntries':
       return (r.kind === 'expense' || r.kind === 'income') && typeof r.date === 'string' && DATE.test(r.date) && isCents(r.amount)
-        && (r.status === 'actual' || r.status === 'planned') && isOptionalText(r.categoryId) && isOptionalText(r.fundId);
+        && (r.status === 'actual' || r.status === 'planned') && entryLinksOk(r);
     case 'budgetMonths': return isYm(r.ym) && isObject(r.potTargets) && isObject(r.categoryTargets);
     case 'budgetRecurring': return typeof r.name === 'string' && isCents(r.amount) && typeof r.day === 'number' && isYm(r.startYm);
     case 'budgetFunds': return typeof r.name === 'string' && isCents(r.amount) && isYm(r.dueYm) && isCents(r.startBalance);

@@ -123,6 +123,7 @@ describe('entries', () => {
     await expect(addEntry(db, coffee({ amount: 3.2 }))).rejects.toThrow();
     await expect(addEntry(db, coffee({ amount: Number.NaN }))).rejects.toThrow();
     await expect(addEntry(db, coffee({ date: '14.11.2026' }))).rejects.toThrow();
+    await expect(addEntry(db, coffee({ debtId: 7 as unknown as string }))).rejects.toThrow();
     expect(await db.budgetEntries.count()).toBe(0);
     db.close();
   });
@@ -135,6 +136,8 @@ describe('entries', () => {
     expect(edited).toMatchObject({ id: added.id, amount: 350, updatedAt: '2026-11-15T10:00:00.000Z' });
     expect(edited).not.toHaveProperty('note');
     await expect(updateEntry(db, added.id, { amount: 1.5 })).rejects.toThrow();
+    expect(await updateEntry(db, added.id, { categoryId: 'loan', debtId: 'debt-1' })).toMatchObject({ debtId: 'debt-1' });
+    await expect(updateEntry(db, added.id, { debtId: null as unknown as string })).rejects.toThrow();
     db.close();
   });
 

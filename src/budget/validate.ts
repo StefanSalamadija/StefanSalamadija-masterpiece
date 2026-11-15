@@ -10,6 +10,9 @@ const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'buffer
 /** The money fields of a scenario change. */
 const CHANGE_MONEY_FIELDS = ['amount', 'monthly', 'lump'] as const;
 
+/** The fields of an entry that link it to another record: each one is text when it is there. */
+const ENTRY_LINK_FIELDS = ['categoryId', 'fundId', 'debtId', 'soldAssetId', 'recurringId'] as const;
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -68,4 +71,9 @@ export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
     return false;
   }
   return true;
+}
+
+/** The links of an entry (or of a patch to one) that are there are text: its category, fund, debt, asset sold, template. */
+export function entryLinksOk(fields: Record<string, unknown>): boolean {
+  return ENTRY_LINK_FIELDS.every((key) => !(key in fields) || fields[key] === undefined || typeof fields[key] === 'string');
 }

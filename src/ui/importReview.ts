@@ -117,7 +117,7 @@ const LABELS: Record<TableName, Record<string, string>> = {
   budgetCategories: { name: 'Name', pot: 'Pot', group: 'Group', order: 'Order', hidden: 'Hidden', synonyms: 'Other words' },
   budgetEntries: {
     kind: 'Kind', date: 'Date', amount: 'Amount', categoryId: 'Category', incomeSource: 'Income source', note: 'Note', payee: 'Payee',
-    status: 'Status', fundId: 'Paid from fund', soldAssetId: 'Asset sold', oneOff: 'One-off',
+    status: 'Status', fundId: 'Paid from fund', soldAssetId: 'Asset sold', debtId: 'Debt', oneOff: 'One-off',
   },
   budgetMonths: { ym: 'Month', plannedIncome: 'Planned income', potTargets: 'Pot targets', categoryTargets: 'Category targets', notes: 'Notes' },
   budgetRecurring: {

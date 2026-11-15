@@ -129,6 +129,8 @@ export interface BudgetEntry extends BaseRecord { scope: 'personal'; kind: 'expe
   fundId?: string;
   /** The asset an income entry sold, which lowers that asset's value. */
   soldAssetId?: string;
+  /** The debt a payment in a Debts category pays (see `balancesByMonth` for one without it). */
+  debtId?: string;
   /** Where an imported entry came from (its month and cell), so that importing the same file again replaces it. */
   importKey?: string;
   /** Marked as a one-off: left out of the averages. */
