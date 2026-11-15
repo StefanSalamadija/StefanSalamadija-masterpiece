@@ -255,6 +255,54 @@ describe('forecast: transfers, funds and debts', () => {
     expect(r.months[0].netWorth).toBe(r.months[0].bank - 71000);
   });
 
+  it('pays a debt its instalment each month when no template pays it, the last one only what is left', () => {
+    const r = run({ budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 12, instalment: 30000 })] });
+    expect(r.months.slice(0, 5).map((m) => m.debts)).toEqual([71000, 41710, 12127, 0, 0]);
+    expect(r.months.slice(0, 5).map((m) => m.spending)).toEqual([230000, 230000, 230000, 212248, 200000]);
+    expect(r.debtFree).toEqual({ 'debt-1': '2027-02' });
+    expect(r.totalInterest).toBe(2248);
+  });
+
+  it('never pays the instalment twice when a template pays the debt', () => {
+    const viaUntil = run({
+      budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 12, instalment: 30000 })],
+      budgetRecurring: [recurring({ id: 'tpl-loan', amount: 30000, startYm: '2026-11', categoryId: 'cat-loan', untilDebtId: 'debt-1' })],
+    });
+    expect(viaUntil.months.slice(0, 5).map((m) => m.spending)).toEqual([230000, 230000, 230000, 212248, 200000]);
+    // A Debts template without untilDebtId pays the only debt.
+    const onlyDebt = run({
+      budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0, instalment: 30000 })],
+      budgetRecurring: [recurring({ id: 'tpl-loan', amount: 25000, startYm: '2026-11', categoryId: 'cat-loan' })],
+    });
+    expect(onlyDebt.months.slice(0, 2).map((m) => [m.spending, m.debts])).toEqual([[225000, 75000], [225000, 50000]]);
+  });
+
+  it('pays two debts down, each by its own instalment', () => {
+    const r = run({ budgetDebts: [
+      debt({ id: 'debt-1', startBalance: 100000, startYm: '2026-01', instalment: 50000 }),
+      debt({ id: 'debt-2', startBalance: 60000, startYm: '2026-01', instalment: 20000 }),
+    ] });
+    expect(r.months.slice(0, 4).map((m) => m.debts)).toEqual([90000, 20000, 0, 0]);
+    expect(r.months.slice(0, 4).map((m) => m.spending)).toEqual([270000, 270000, 220000, 200000]);
+    expect(r.debtFree).toEqual({ 'debt-1': '2026-12', 'debt-2': '2027-01' });
+  });
+
+  it('takes the automatic instalments out of the Debts pot target', () => {
+    const r = run({
+      budgetMonths: [needs200({ potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 40000 } } } })],
+      budgetDebts: [debt({ startBalance: 1000000, startYm: '2026-01', instalment: 30000 })],
+    });
+    expect(r.months[0]).toMatchObject({ spending: 240000, debts: 960000 });
+  });
+
+  it('counts an actual payment to the debt against its instalment', () => {
+    const r = run({
+      budgetDebts: [debt({ startBalance: 100000, startYm: '2026-01', instalment: 30000 })],
+      budgetEntries: [entry('2026-11-05', 30000, { categoryId: 'cat-loan', debtId: 'debt-1' })],
+    });
+    expect(r.months[0]).toMatchObject({ spending: 230000, debts: 70000 });
+  });
+
   it('leaves a debt that is never paid off without a debt-free month', () => {
     const r = run({ budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0 })] });
     expect(r.debtFree).toEqual({ 'debt-1': undefined });
@@ -335,7 +383,8 @@ function randomPlan(seed: number): { data: BudgetData; s: BudgetSettings; overri
   const entries = Array.from({ length: int(0, 40) }, () => entry(`${ym(-8, 3)}-${day()}`, int(1, 300000), rnd() < 0.2
     ? { kind: 'income', incomeSource: pick(['salary', 'property', 'other'] as const), status: rnd() < 0.3 ? 'planned' : 'actual' }
     : { categoryId: pick(cats), status: rnd() < 0.2 ? 'planned' : 'actual', oneOff: rnd() < 0.1, ...(rnd() < 0.2 && { debtId: 'debt-1' }) }));
-  const debts = Array.from({ length: int(0, 2) }, (_, i) => debt({ id: `debt-${i + 1}`, startBalance: int(0, 2000000), startYm: ym(-12, 6), yearlyRatePct: int(0, 1500) / 100 }));
+  const debts = Array.from({ length: int(0, 2) }, (_, i) => debt({ id: `debt-${i + 1}`, startBalance: int(0, 2000000), startYm: ym(-12, 6), yearlyRatePct: int(0, 1500) / 100,
+    instalment: rnd() < 0.7 ? int(0, 80000) : 0 }));
   const recurringT = Array.from({ length: int(0, 5) }, (_, i) => recurring({
     id: `tpl-${i}`, amount: int(1, 150000), startYm: ym(-6, 6), ...(rnd() < 0.3 && { endYm: ym(0, 20) }),
     ...(rnd() < 0.2 ? { incomeSource: 'property', categoryId: undefined } : { categoryId: pick(cats) }),

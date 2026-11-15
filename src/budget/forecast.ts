@@ -47,6 +47,11 @@ import { effectiveMonth, potTargetAmount } from './targets';
  *    pot target is theirs); with average each category is a line; with fixed the pot is one line.
  *  - Savings-goal money stays in the bank (as in the ledger): it is no spending here.
  *
+ * Debt instalments: each live debt that still owes at the start of a month (from its start month) is paid its
+ * `instalment`, a planned Debts payment on that debt, unless an expense template in the Debts pot that pays that debt
+ * (its `untilDebtId`, or the only debt) runs in the month, so it is never paid twice. Under the targets method the
+ * Debts pot target covers these instalments first. An actual payment to the debt counts against it (one line).
+ *
  * Transfers (§3.9.1): spending in the Savings & investments pot raises investments (the contribution), in the
  * Emergency fund pot raises the emergency fund, and in the Debts pot lowers the debt it pays: the one the entry names,
  * or the one its template pays off, else the only debt, else none (the bank still pays it). A debt is charged a
@@ -162,6 +167,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const templates = data.budgetRecurring.filter((t) => !t.deleted);
   const templateById = new Map(templates.map((t) => [t.id, t]));
   const assets = data.budgetAssets.filter((a) => !a.deleted);
+  const onlyDebt = debts.length === 1 ? debts[0].id : undefined;
 
   const { balances } = balancesByMonth({
     entries: data.budgetEntries, corrections: data.budgetCorrections, debts: data.budgetDebts, assets: data.budgetAssets, categories: data.budgetCategories,
@@ -265,6 +271,8 @@ export function forecast(input: ForecastInput): ForecastResult {
       return { key: `pot:${pot}`, pot };
     };
     const debtLine = (debtId: string): { key: string; pot: PotId; debtId: string } => ({ key: `debt:${debtId}`, pot: 'debts', debtId });
+    const templateLine = (t: BudgetRecurring): { key: string; pot?: PotId; debtId?: string } =>
+      (t.untilDebtId !== undefined && debtIds.has(t.untilDebtId) && potOf.get(t.categoryId ?? '') === 'debts' ? debtLine(t.untilDebtId) : lineOf(t.categoryId));
     const planned: Line[] = [];
     const actual: Line[] = [];
     /** Covered by templates and fund set-asides, by category (the targets method). */
@@ -290,9 +298,21 @@ export function forecast(input: ForecastInput): ForecastResult {
         if (t.incomeSource !== 'salary') otherPlanned += amount;
         continue;
       }
-      const line = t.untilDebtId !== undefined && debtIds.has(t.untilDebtId) && potOf.get(t.categoryId ?? '') === 'debts' ? debtLine(t.untilDebtId) : lineOf(t.categoryId);
-      planned.push({ ...line, amount });
+      planned.push({ ...templateLine(t), amount });
       cover(t.categoryId, amount);
+    }
+
+    // Each debt still owing is paid its instalment, unless a template running this month pays it already.
+    let autoInstalments = 0;
+    for (const d of debts) {
+      if (d.instalment <= 0 || ym < d.startYm) continue;
+      const atStart = debtBalance.get(d.id) ?? d.startBalance;
+      if (atStart <= 0) continue;
+      const paidByTemplate = templates.some((t) => t.incomeSource === undefined && ym >= t.startYm && (t.endYm === undefined || ym <= t.endYm)
+        && potOf.get(t.categoryId ?? '') === 'debts' && (templateLine(t).debtId ?? onlyDebt) === d.id);
+      if (paidByTemplate) continue;
+      planned.push({ ...debtLine(d.id), amount: d.instalment });
+      autoInstalments += d.instalment;
     }
 
     // Funds: the set-aside (earmarked) and the bill when due.
@@ -343,7 +363,8 @@ export function forecast(input: ForecastInput): ForecastResult {
         for (const c of inPot) if (c.id !== SAVINGS_GOALS_CATEGORY_ID) planned.push({ key: `cat:${c.id}`, pot, amount: average.get(c.id) ?? 0 });
       } else {
         const potTarget = override ?? potTargetAmount(plan.potTargets[pot], plannedIncome);
-        let taken = 0;
+        // The automatic debt instalments are part of the Debts pot's target.
+        let taken = pot === 'debts' ? autoInstalments : 0;
         for (const c of inPot) {
           const target = override === undefined ? plan.categoryTargets[c.id]?.amount : undefined;
           const cov = covered.get(c.id) ?? 0;
@@ -363,9 +384,14 @@ export function forecast(input: ForecastInput): ForecastResult {
     // Actual spending.
     for (const e of entries) {
       if (e.kind !== 'expense' || e.status !== 'actual') continue;
+      // An entry made from a template falls on the template's line; another payment on its debt's (as in the ledger).
+      const template = e.recurringId !== undefined ? templateById.get(e.recurringId) : undefined;
+      if (template !== undefined && template.incomeSource === undefined) {
+        actual.push({ ...templateLine(template), amount: e.amount });
+        continue;
+      }
       const pot = potOf.get(e.categoryId ?? '');
-      const viaTemplate = e.recurringId !== undefined ? templateById.get(e.recurringId)?.untilDebtId : undefined;
-      const debtId = pot !== 'debts' ? undefined : e.debtId !== undefined ? (debtIds.has(e.debtId) ? e.debtId : undefined) : viaTemplate !== undefined && debtIds.has(viaTemplate) ? viaTemplate : undefined;
+      const debtId = pot !== 'debts' ? undefined : e.debtId !== undefined ? (debtIds.has(e.debtId) ? e.debtId : undefined) : onlyDebt;
       actual.push({ ...(debtId !== undefined ? debtLine(debtId) : lineOf(e.categoryId)), amount: e.amount });
     }
 
@@ -379,7 +405,6 @@ export function forecast(input: ForecastInput): ForecastResult {
     };
     planned.forEach((l) => put(l, 'planned'));
     actual.forEach((l) => put(l, 'actual'));
-    const onlyDebt = debts.length === 1 ? debts[0].id : undefined;
     const spendOf = new Map<string, { actual: Cents; rest: Cents }>();
     for (const [key, l] of lines) spendOf.set(key, { actual: l.actual, rest: Math.max(0, l.planned - l.actual) });
     const debtOfLine = (l: { pot?: PotId; debtId?: string }) => (l.pot === 'debts' ? l.debtId ?? onlyDebt : undefined);
