@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { cpSync } from 'node:fs';
 import type { Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -26,6 +27,23 @@ function releaseInfoPlugin(): Plugin {
   };
 }
 
+/**
+ * Copies the pdf.js worker, standard fonts, CMaps, ICC profiles and wasm into dist/pdfjs/, where `src/library/pdfjs.ts`
+ * loads them from (under the app base, so they are cached for offline use like the rest of the app).
+ */
+function pdfjsAssetsPlugin(): Plugin {
+  return {
+    name: 'masterpiece-pdfjs-assets',
+    apply: 'build',
+    closeBundle() {
+      const from = 'node_modules/pdfjs-dist';
+      const to = 'dist/pdfjs';
+      cpSync(`${from}/build/pdf.worker.min.mjs`, `${to}/pdf.worker.min.mjs`);
+      for (const dir of ['standard_fonts', 'cmaps', 'iccs', 'wasm']) cpSync(`${from}/${dir}`, `${to}/${dir}`, { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
   define: {
@@ -34,10 +52,14 @@ export default defineConfig({
   plugins: [
     preact(),
     releaseInfoPlugin(),
+    pdfjsAssetsPlugin(),
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2,mjs,pfb,bcmap,ttf,wasm,icc}'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
       manifest: {
         name: 'Masterpiece',
         short_name: 'Masterpiece',
