@@ -50,6 +50,21 @@ export function addDocument(db: MasterpieceDB, doc: NewDocument): Promise<Librar
   );
 }
 
+/**
+ * Adds a document that came from a library file, keeping its own id and record as it was made (unlike `addDocument`, which
+ * makes a new record). The record, its file and its text rows are one transaction.
+ */
+export function putImportedDocument(db: MasterpieceDB, doc: LibraryDoc, blob: Blob, parts: NewDocument['parts']): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.libraryDocs, db.libraryFiles, db.libraryText], async () => {
+      await db.libraryDocs.put(doc);
+      await db.libraryFiles.put({ docId: doc.id, blob });
+      await db.libraryText.where('docId').equals(doc.id).delete();
+      await db.libraryText.bulkAdd(textRows(doc.id, parts));
+    }),
+  );
+}
+
 /** The documents that are live (the default) or the recently deleted ones, newest first (by when added, or deleted). */
 export async function listDocuments(db: MasterpieceDB, opts: { deleted?: boolean } = {}): Promise<LibraryDoc[]> {
   const wanted = opts.deleted === true;

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
 import * as XLSX from 'xlsx';
 import { makeDocx } from './fixtures/makeDocx';
 import { makePdf } from './fixtures/makePdf';
@@ -327,4 +327,84 @@ test('library viewer: a jump lands on the page when the pages are not all the sa
   await page.getByLabel('Go to page').press('Enter');
   await expect(target.locator('canvas')).toBeVisible();
   await expect.poll(inView).toBe(true);
+});
+
+test('library files: export in 2 parts, restore a backup on another device, import part 2 then part 1, then search works', async ({ browser }) => {
+  const CRYPTO = { timeout: 30_000 };
+  const [contextA, contextB] = [await browser.newContext(), await browser.newContext()];
+  try {
+    const [a, b] = [await contextA.newPage(), await contextB.newPage()];
+    await open(a);
+    await importDocs(a, pdf('Ballast Manual.pdf', BALLAST), pdf('Purifier.pdf', [['The purifier bowl must be cleaned every watch']]));
+    await expect(list(a).getByRole('listitem')).toHaveCount(2);
+
+    // A normal backup carries the records, not the files.
+    await a.goto('./#/settings');
+    const backupDownload = a.waitForEvent('download');
+    await a.getByRole('button', { name: 'Export full backup' }).click();
+    await a.getByRole('dialog').getByLabel('Backup password').fill('backup-pass-1');
+    await a.getByRole('dialog').getByLabel('Repeat password').fill('backup-pass-1');
+    await a.getByRole('dialog').getByRole('button', { name: 'Export', exact: true }).click();
+    const backup = await backupDownload;
+    await expect(a.getByRole('dialog')).toHaveCount(0);
+
+    // The library as 2 parts (the part size is lowered for the test).
+    await a.evaluate(() => localStorage.setItem('masterpiece.test.partBytes', '1'));
+    await a.getByRole('link', { name: 'Library files' }).click();
+    await expect(a.getByRole('heading', { name: 'Library files' })).toBeVisible();
+    await a.getByRole('button', { name: 'Export library' }).click();
+    await a.getByRole('dialog').getByLabel('Backup password').fill('library-pass-1');
+    await a.getByRole('dialog').getByLabel('Repeat password').fill('library-pass-1');
+    await a.getByRole('dialog').getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(a.getByText('Library ready in 2 parts.')).toBeVisible(CRYPTO);
+    const saves: string[] = [];
+    for (const n of [1, 2]) {
+      const download = a.waitForEvent('download');
+      await a.getByRole('button', { name: `Save part ${n} of 2` }).click();
+      const file = await download;
+      expect(file.suggestedFilename()).toBe(`Masterpiece-library-2026-10-25-part-${n}-of-2.mplib`);
+      saves.push((await file.path())!);
+    }
+
+    // Device B: the backup first. The records are there, the files are not.
+    await freshApp(b);
+    await b.getByRole('link', { name: 'Import a backup' }).click();
+    await b.getByLabel('Backup file').setInputFiles((await backup.path())!);
+    await b.getByLabel('Password').fill('backup-pass-1');
+    await b.getByRole('button', { name: 'Open' }).click();
+    await b.getByRole('button', { name: 'Apply import' }).click({ timeout: 30_000 });
+    await skipProtectStep(b);
+    await b.goto('./#/library');
+    await expect(list(b).getByRole('listitem')).toHaveCount(2);
+    await expect(list(b).getByText('File not on this device')).toHaveCount(2);
+
+    // A wrong password first, and a file that is not a library file.
+    await b.goto('./#/library/files');
+    await b.getByLabel('Library file').setInputFiles(saves[1]!);
+    await b.getByLabel('Password').fill('not the password');
+    await b.getByRole('button', { name: 'Import library' }).click();
+    await expect(b.getByRole('alert')).toContainText('Wrong password, or the file is damaged. Nothing was changed.', CRYPTO);
+    await b.getByLabel('Library file').setInputFiles({ name: 'x.mplib', mimeType: 'application/octet-stream', buffer: Buffer.from(new TextEncoder().encode('hello world')) });
+    await b.getByRole('button', { name: 'Import library' }).click();
+    await expect(b.getByRole('alert')).toContainText('This is not a Masterpiece library file.');
+
+    // Part 2, then part 1.
+    await b.getByLabel('Password').fill('library-pass-1');
+    await b.getByLabel('Library file').setInputFiles(saves[1]!);
+    await b.getByRole('button', { name: 'Import library' }).click();
+    await expect(b.getByText('Part 2 of 2: 0 added, 1 attached, 0 already here.')).toBeVisible(CRYPTO);
+    await b.getByLabel('Library file').setInputFiles(saves[0]!);
+    await b.getByRole('button', { name: 'Import library' }).click();
+    await expect(b.getByText('Part 1 of 2: 0 added, 1 attached, 0 already here.')).toBeVisible(CRYPTO);
+
+    await b.goto('./#/library');
+    await expect(list(b).getByText('File not on this device')).toHaveCount(0);
+    const results = await search(b, 'purifier bowl');
+    await expect(results.getByRole('listitem').filter({ hasText: 'Purifier' })).toBeVisible();
+    const ballast = await search(b, 'ballast exchange procedure');
+    await expect(ballast).toContainText('Page 3');
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
 });
