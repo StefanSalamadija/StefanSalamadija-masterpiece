@@ -1,7 +1,7 @@
 # Masterpiece: Knowledge Library (Piece 4) Design
 
 Date: 2026-11-15
-Status: draft for user review. A builder check was done; its questions are answered below and marked *(builder check)*.
+Status: approved by the user (2026-11-15). A builder check was done; its questions are answered below and marked *(builder check)*.
 
 ## 1. Intent
 
