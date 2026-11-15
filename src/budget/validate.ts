@@ -24,9 +24,17 @@ function optionalCents(fields: Record<string, unknown>, key: string): boolean {
   return fields[key] === undefined || isCents(fields[key]);
 }
 
+/** How a target was set: for its month only, or from its month on. */
+const ORIGINS: ReadonlySet<unknown> = new Set(['this', 'fromOn']);
+
+/** A category's target: whole cents, or `null` for one removed on purpose. */
+function isCategoryTarget(value: unknown): boolean {
+  return isObject(value) && (value.amount === null || isCents(value.amount)) && ORIGINS.has(value.origin);
+}
+
 /** A pot's target: a percentage of income (0 to 100, fractions allowed) or an amount in whole cents. */
 function isPotTarget(value: unknown): boolean {
-  if (!isObject(value) || typeof value.inherited !== 'boolean') return false;
+  if (!isObject(value) || !ORIGINS.has(value.origin)) return false;
   if (value.kind === 'pct') return typeof value.value === 'number' && Number.isFinite(value.value) && value.value >= 0 && value.value <= 100;
   return value.kind === 'amount' && isCents(value.value);
 }
@@ -45,7 +53,7 @@ export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
     return false;
   }
   if (categoryTargets !== undefined
-    && !(isObject(categoryTargets) && Object.values(categoryTargets).every((t) => isObject(t) && isCents(t.amount) && typeof t.inherited === 'boolean'))) {
+    && !(isObject(categoryTargets) && Object.values(categoryTargets).every(isCategoryTarget))) {
     return false;
   }
   if (favourites !== undefined && !(Array.isArray(favourites) && favourites.every((f) => isObject(f) && isCents(f.amount)))) return false;

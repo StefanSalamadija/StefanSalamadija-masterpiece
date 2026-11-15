@@ -1,141 +1,122 @@
-import type { BudgetMonth, Cents, PotId, PotTarget, Ym } from '../domain/types';
-import { addMonths } from './months';
+import type { BaseRecord, BudgetMonth, Cents, CategoryTarget, PotId, PotTarget, TargetOrigin, Ym } from '../domain/types';
 
 /*
- * A month's plan (planned income, pot targets, category targets) and how it carries on from month to month.
+ * A month's plan (planned income, pot targets, category targets) and how it carries on from month to month
+ * (base §3.2, §3.3).
  *
- * A month with no stored plan uses the plan of the latest earlier stored month, every target marked `inherited`. A
- * target set in a month is `inherited: false` ("edited individually"); a stored month holds a copy of every target it
- * uses, so a stored month never looks further back.
+ * A stored month holds only the targets edited in it, each with how it was edited (`origin`):
+ *  - `'this'`: for that month only. It is the month's own target and passes on to no other month;
+ *  - `'fromOn'`: from that month on. Every later month without a target of its own uses it, up to the next later
+ *    "from this month on" edit. A later month edited for itself keeps its own target, and the months after it still
+ *    use the "from this month on" one.
+ * A removed category target is kept as `amount: null` (no target), so it too is an edit, and the walk above stops at
+ * it like at any other edit.
  *
- * Editing a target:
- *  - "this month only" (`'this'`) changes that one month. So that the month after it does not inherit the new value,
- *    the month after it is stored too (when it is not already), holding the plan it had before;
- *  - "from this month on" (`'fromOn'`) changes the month, and every later stored month whose target is still the
- *    inherited value that this month passed on. A later month edited individually is left alone, and so are the
- *    months that inherit from it.
+ * So an edit changes one record only: the month that was edited. Nothing is copied into later months, and nothing in a
+ * later month is ever overwritten.
  *
- * The setters are pure: they return the month records that changed (copies), in month order, and leave the input
- * alone. A record that is not stored yet has the id `''` (see `isNewMonth`): the caller adds it as a new record.
+ * `effectiveMonth` works the plan of a month out (`MonthPlan`); it never makes a record. The setters are pure: they
+ * return the one record to add (`create`, without an id: the db layer gives it one) or to change (`update`).
  */
 
-type TargetScope = 'this' | 'fromOn';
+/** The fields of a month record not stored yet: what `createBudgetRecord(db, 'budgetMonths', …)` takes. */
+export type NewBudgetMonth = Omit<BudgetMonth, keyof BaseRecord>;
 
-/** A month that is not stored yet: the setters and `effectiveMonth` return such a record with the id `''`. */
-export function isNewMonth(month: BudgetMonth): boolean {
-  return month.id === '';
+/** A month's plan as it applies: its own targets (`inherited: false`) and those it uses from an earlier month. */
+export interface MonthPlan {
+  ym: Ym;
+  plannedIncome?: Cents;
+  potTargets: Partial<Record<PotId, { kind: PotTarget['kind']; value: number; inherited: boolean }>>;
+  /** The categories with a target in the month (one removed on purpose is left out). */
+  categoryTargets: Record<string, { amount: Cents; inherited: boolean }>;
+  notes?: string;
+  /** The month's stored record, when it has one. */
+  record?: BudgetMonth;
 }
 
-function live(months: BudgetMonth[]): BudgetMonth[] {
-  return months.filter((m) => !m.deleted);
-}
+/** What an edit changes: at most one record, to add or to change. */
+export interface MonthChanges { create: NewBudgetMonth[]; update: BudgetMonth[] }
 
-/** The stored month of `ym` (the oldest, should two devices each have stored one). */
-function stored(months: BudgetMonth[], ym: Ym): BudgetMonth | undefined {
-  return months.filter((m) => m.ym === ym).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))[0];
-}
+type TargetScope = TargetOrigin;
 
-function newMonth(ym: Ym): BudgetMonth {
-  return { id: '', createdAt: '', updatedAt: '', updatedBy: '', deleted: false, scope: 'personal', ym, potTargets: {}, categoryTargets: {} };
+const byYm = (a: BudgetMonth, b: BudgetMonth) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
+
+/** The live stored months, one per month (the oldest, should two devices each have stored one), in month order. */
+function storedMonths(months: BudgetMonth[]): BudgetMonth[] {
+  const seen = new Set<Ym>();
+  return months.filter((m) => !m.deleted).sort(byYm).filter((m) => (seen.has(m.ym) ? false : (seen.add(m.ym), true)));
 }
 
 /**
- * The plan of `ym`: its stored month if it has one; else the plan of the latest earlier stored month (planned income
- * and targets, each target marked inherited, without its notes); else an empty plan. Deleted months are ignored.
+ * The target a month uses for one slot: its own edit, else the latest earlier "from this month on" edit.
+ * `earlier` is in month order, latest last.
  */
-export function effectiveMonth(months: BudgetMonth[], ym: Ym): BudgetMonth {
-  const all = live(months);
-  const own = stored(all, ym);
-  if (own) return own;
-  const earlier = all.filter((m) => m.ym < ym).sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0))[0];
-  const month = newMonth(ym);
-  if (!earlier) return month;
-  const from = stored(all, earlier.ym)!;
-  if (from.plannedIncome !== undefined) month.plannedIncome = from.plannedIncome;
-  for (const [pot, t] of Object.entries(from.potTargets) as [PotId, PotTarget][]) month.potTargets[pot] = { kind: t.kind, value: t.value, inherited: true };
-  for (const [id, t] of Object.entries(from.categoryTargets)) month.categoryTargets[id] = { amount: t.amount, inherited: true };
-  return month;
-}
-
-/** One target of a month plan, read and written without its `inherited` flag. */
-interface Slot<V> {
-  read(m: BudgetMonth): { value: V; inherited: boolean } | undefined;
-  /** A copy of `m` with the target set (or removed, for `undefined`). */
-  write(m: BudgetMonth, value: V | undefined, inherited: boolean): BudgetMonth;
-  same(a: V | undefined, b: V | undefined): boolean;
-}
-
-function setTarget<V>(months: BudgetMonth[], ym: Ym, value: V | undefined, scope: TargetScope, slot: Slot<V>): BudgetMonth[] {
-  const all = live(months);
-  const changed = new Map<Ym, BudgetMonth>();
-  const keep = (before: BudgetMonth, after: BudgetMonth) => {
-    if (isNewMonth(before) || JSON.stringify(slot.read(before)) !== JSON.stringify(slot.read(after))) changed.set(after.ym, after);
-  };
-
-  const current = effectiveMonth(all, ym);
-  const next = addMonths(ym, 1);
-  const nextStored = stored(all, next);
-  keep(current, slot.write(current, value, false));
-
-  if (scope === 'this') {
-    // The month after keeps the plan it had, rather than inheriting this month's own value.
-    if (!nextStored) {
-      const after = effectiveMonth(all, next);
-      if (!slot.same(slot.read(after)?.value, value)) changed.set(next, after);
-    }
-  } else {
-    // The values this month passed on: its own, and (when it was edited for itself only) the plan that went on after it.
-    const passedOn: (V | undefined)[] = [slot.read(current)?.value];
-    const nextTarget = nextStored && slot.read(nextStored);
-    if (nextTarget && nextTarget.inherited) passedOn.push(nextTarget.value);
-    for (const m of all.filter((n) => n.ym > ym).sort((a, b) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0))) {
-      if (stored(all, m.ym) !== m) continue;
-      const t = slot.read(m);
-      const inherits = t === undefined ? passedOn.some((v) => v === undefined) : t.inherited && passedOn.some((v) => slot.same(v, t.value));
-      if (inherits) keep(m, slot.write(m, value, true));
-    }
+function resolve<T extends { origin: TargetOrigin }>(own: T | undefined, earlier: BudgetMonth[], read: (m: BudgetMonth) => T | undefined):
+  { target: T; inherited: boolean } | undefined {
+  if (own) return { target: own, inherited: false };
+  for (let i = earlier.length - 1; i >= 0; i -= 1) {
+    const t = read(earlier[i]);
+    if (t && t.origin === 'fromOn') return { target: t, inherited: true };
   }
-  return [...changed.values()].sort((a, b) => (a.ym < b.ym ? -1 : 1));
+  return undefined;
 }
 
-const potSlot = (pot: PotId): Slot<{ kind: PotTarget['kind']; value: number }> => ({
-  read: (m) => {
-    const t = m.potTargets[pot];
-    return t && { value: { kind: t.kind, value: t.value }, inherited: t.inherited };
-  },
-  write: (m, value, inherited) => {
-    const potTargets = { ...m.potTargets };
-    if (value === undefined) delete potTargets[pot];
-    else potTargets[pot] = { kind: value.kind, value: value.value, inherited };
-    return { ...m, potTargets };
-  },
-  same: (a, b) => (a === undefined || b === undefined ? a === b : a.kind === b.kind && a.value === b.value),
-});
+/**
+ * The plan of `ym`. Each target is the month's own, or the latest earlier "from this month on" one (marked inherited);
+ * a month's "this month only" edits apply to it alone. Planned income is the month's own, else that of the latest
+ * earlier month that has one. Notes are the month's own. Deleted months are ignored.
+ */
+export function effectiveMonth(months: BudgetMonth[], ym: Ym): MonthPlan {
+  const all = storedMonths(months);
+  const record = all.find((m) => m.ym === ym);
+  const earlier = all.filter((m) => m.ym < ym);
+  const plan: MonthPlan = { ym, potTargets: {}, categoryTargets: {} };
 
-const categorySlot = (categoryId: string): Slot<Cents> => ({
-  read: (m) => {
-    const t = m.categoryTargets[categoryId];
-    return t && { value: t.amount, inherited: t.inherited };
-  },
-  write: (m, value, inherited) => {
-    const categoryTargets = { ...m.categoryTargets };
-    if (value === undefined) delete categoryTargets[categoryId];
-    else categoryTargets[categoryId] = { amount: value, inherited };
-    return { ...m, categoryTargets };
-  },
-  same: (a, b) => a === b,
-});
+  const income = record?.plannedIncome ?? [...earlier].reverse().find((m) => m.plannedIncome !== undefined)?.plannedIncome;
+  if (income !== undefined) plan.plannedIncome = income;
+  if (record?.notes !== undefined) plan.notes = record.notes;
+  if (record) plan.record = record;
 
-/** Sets a pot's target (a % of planned income, or an amount in cents) for one month, or from this month on. */
+  const pots = new Set<PotId>();
+  const categories = new Set<string>();
+  for (const m of [...earlier, ...(record ? [record] : [])]) {
+    (Object.keys(m.potTargets) as PotId[]).forEach((p) => pots.add(p));
+    Object.keys(m.categoryTargets).forEach((c) => categories.add(c));
+  }
+  for (const pot of pots) {
+    const found = resolve(record?.potTargets[pot], earlier, (m) => m.potTargets[pot]);
+    if (found) plan.potTargets[pot] = { kind: found.target.kind, value: found.target.value, inherited: found.inherited };
+  }
+  for (const id of categories) {
+    const found = resolve(record?.categoryTargets[id], earlier, (m) => m.categoryTargets[id]);
+    if (found && found.target.amount !== null) plan.categoryTargets[id] = { amount: found.target.amount, inherited: found.inherited };
+  }
+  return plan;
+}
+
+/** Writes one target into the month `ym`: a change to its record, or a new record when it has none. */
+function edit(months: BudgetMonth[], ym: Ym, change: (m: NewBudgetMonth) => NewBudgetMonth): MonthChanges {
+  const record = storedMonths(months).find((m) => m.ym === ym);
+  if (!record) return { create: [change({ ym, potTargets: {}, categoryTargets: {} })], update: [] };
+  const changed = { ...record, ...change(record) };
+  const same = JSON.stringify([changed.potTargets, changed.categoryTargets]) === JSON.stringify([record.potTargets, record.categoryTargets]);
+  return { create: [], update: same ? [] : [changed] };
+}
+
+/** Sets a pot's target (a % of planned income, or an amount in cents) for one month only, or from this month on. */
 export function setPotTarget(
   months: BudgetMonth[], ym: Ym, pot: PotId, t: { kind: 'pct' | 'amount'; value: number }, scope: TargetScope,
-): BudgetMonth[] {
-  return setTarget(months, ym, { kind: t.kind, value: t.value }, scope, potSlot(pot));
+): MonthChanges {
+  return edit(months, ym, (m) => ({ ...m, potTargets: { ...m.potTargets, [pot]: { kind: t.kind, value: t.value, origin: scope } } }));
 }
 
-/** Sets a category's monthly target, or removes it (`undefined`), for one month or from this month on. */
-export function setCategoryTarget(months: BudgetMonth[], ym: Ym, categoryId: string, amount: Cents | undefined, scope: TargetScope): BudgetMonth[] {
-  return setTarget(months, ym, amount, scope, categorySlot(categoryId));
+/**
+ * Sets a category's monthly target for one month only, or from this month on. `undefined` removes it: the month (and,
+ * from this month on, the months that inherit) then has no target, which is kept as `amount: null`.
+ */
+export function setCategoryTarget(months: BudgetMonth[], ym: Ym, categoryId: string, amount: Cents | undefined, scope: TargetScope): MonthChanges {
+  const target: CategoryTarget = { amount: amount ?? null, origin: scope };
+  return edit(months, ym, (m) => ({ ...m, categoryTargets: { ...m.categoryTargets, [categoryId]: target } }));
 }
 
 /** A pot target in cents: a percentage is of planned income, rounded to the cent. No target is 0. */

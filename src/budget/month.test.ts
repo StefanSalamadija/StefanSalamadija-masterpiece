@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PotId } from '../domain/types';
-import { category, entry, fund, month, move } from '../test/budgetRecords';
+import { category, entry, fund, move, plan } from '../test/budgetRecords';
 import { categoryBand, summariseMonth, targetsWarning } from './month';
 
 const categories = [
@@ -11,7 +11,7 @@ const categories = [
 const pot = (summary: ReturnType<typeof summariseMonth>, id: PotId) => summary.pots.find((p) => p.pot === id)!;
 
 describe('summariseMonth', () => {
-  const nov = month('2026-11', {
+  const nov = plan('2026-11', {
     plannedIncome: 400000,
     potTargets: {
       needs: { kind: 'pct', value: 50, inherited: false },
@@ -65,7 +65,7 @@ describe('summariseMonth', () => {
   });
 
   it('reports targets that do not add up to 100%', () => {
-    const off = month('2026-11', { plannedIncome: 300000, potTargets: {
+    const off = plan('2026-11', { plannedIncome: 300000, potTargets: {
       needs: { kind: 'pct', value: 60, inherited: false }, wants: { kind: 'amount', value: 90000, inherited: false },
       savings: { kind: 'pct', value: 12.5, inherited: false },
     } });
@@ -77,7 +77,7 @@ describe('summariseMonth', () => {
   });
 
   it('copes with a month without planned income or targets', () => {
-    const empty = month('2026-11');
+    const empty = plan('2026-11');
     const s = summariseMonth({ month: empty, categories, funds: [], fundMoves: [], entries: [entry('2026-11-03', 2500, { categoryId: 'cafes' })] });
     expect(s.plannedIncome).toBe(0);
     expect(pot(s, 'wants')).toEqual({ pot: 'wants', target: 0, targetPct: 0, spent: 2500, spentPct: 0, unused: -2500, planned: 0 });
@@ -98,7 +98,7 @@ describe('summariseMonth', () => {
     });
 
     it('does not count a bill paid from the fund twice against the pot', () => {
-      const mar = month('2027-03', { plannedIncome: 400000, potTargets: { needs: { kind: 'pct', value: 50, inherited: false } } });
+      const mar = plan('2027-03', { plannedIncome: 400000, potTargets: { needs: { kind: 'pct', value: 50, inherited: false } } });
       const moves = [
         move('car', '2026-11', 'setaside', 12000), move('car', '2026-12', 'setaside', 12000), move('car', '2027-01', 'setaside', 12000),
         move('car', '2027-02', 'setaside', 12000), move('car', '2027-03', 'setaside', 12000, { seq: 1 }),
@@ -111,7 +111,7 @@ describe('summariseMonth', () => {
     });
 
     it('shows the part of a bill the fund could not cover as overspend', () => {
-      const mar = month('2027-03', { plannedIncome: 400000, potTargets: { needs: { kind: 'amount', value: 10000, inherited: false } } });
+      const mar = plan('2027-03', { plannedIncome: 400000, potTargets: { needs: { kind: 'amount', value: 10000, inherited: false } } });
       const moves = [
         move('car', '2026-11', 'setaside', 40000),
         // The fund held 40,000: it gives that, and is empty.
@@ -141,7 +141,7 @@ describe('categoryBand', () => {
   });
 
   it('is the band each category shows in the month', () => {
-    const m = month('2026-11', { categoryTargets: {
+    const m = plan('2026-11', { categoryTargets: {
       rent: { amount: 10000, inherited: false }, food: { amount: 10000, inherited: false },
       cafes: { amount: 10000, inherited: false }, etf: { amount: 10000, inherited: false },
     } });

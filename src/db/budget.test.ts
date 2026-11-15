@@ -170,10 +170,14 @@ describe('the other budget tables', () => {
     const db = freshDb();
     await ensureBudgetSetup(db);
     const month = (over: object) => ({ ym: '2026-11', potTargets: {}, categoryTargets: {}, ...over });
-    await expect(createBudgetRecord(db, 'budgetMonths', month({ categoryTargets: { c1: { amount: 12.5, inherited: false } } }))).rejects.toThrow();
-    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'amount', value: 0.5, inherited: false } } }))).rejects.toThrow();
-    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 101, inherited: false } } }))).rejects.toThrow();
-    const saved = await createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 52.5, inherited: false } } }));
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ categoryTargets: { c1: { amount: 12.5, origin: 'this' } } }))).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'amount', value: 0.5, origin: 'this' } } }))).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 101, origin: 'this' } } }))).rejects.toThrow();
+    // A target must say how it was set; an old-style `inherited` flag is not enough.
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 50, inherited: false } } }))).rejects.toThrow();
+    await expect(createBudgetRecord(db, 'budgetMonths', month({ categoryTargets: { c1: { amount: 100, origin: 'later' } } }))).rejects.toThrow();
+    const saved = await createBudgetRecord(db, 'budgetMonths', month({ potTargets: { needs: { kind: 'pct', value: 52.5, origin: 'this' } },
+      categoryTargets: { c1: { amount: null, origin: 'fromOn' } } }));
     await expect(updateBudgetRecord(db, 'budgetMonths', saved.id, { plannedIncome: 4500.5 })).rejects.toThrow();
     await expect(updateBudgetSettings(db, { favourites: [{ name: 'Coffee', amount: 3.2, categoryId: 'c1' }] })).rejects.toThrow();
     await expect(updateBudgetSettings(db, { fixedSpend: { wants: 100.01 } })).rejects.toThrow();

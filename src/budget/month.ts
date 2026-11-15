@@ -1,8 +1,9 @@
-import type { BudgetCategory, BudgetEntry, BudgetFund, BudgetFundMove, BudgetMonth, Cents, PotId, Ym } from '../domain/types';
+import type { BudgetCategory, BudgetEntry, BudgetFund, BudgetFundMove, Cents, PotId, Ym } from '../domain/types';
 import { POTS } from './catalog';
 import { fundLedger, fundStatus } from './funds';
 import { ymOf } from './months';
 import { potTargetAmount } from './targets';
+import type { MonthPlan } from './targets';
 
 /*
  * The totals of a month (base §3.2–§3.4, v2 §3.2, §3.9.1 and §3.9.6).
@@ -47,7 +48,8 @@ export function targetsWarning(targetsPctTotal: number): string | undefined {
 }
 
 export function summariseMonth(input: {
-  month: BudgetMonth; entries: BudgetEntry[]; categories: BudgetCategory[]; fundMoves: BudgetFundMove[]; funds: BudgetFund[];
+  /** The month's plan, from `effectiveMonth`. */
+  month: MonthPlan; entries: BudgetEntry[]; categories: BudgetCategory[]; fundMoves: BudgetFundMove[]; funds: BudgetFund[];
 }): MonthSummary {
   const { month } = input;
   const ym = month.ym;

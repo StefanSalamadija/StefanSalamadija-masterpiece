@@ -1,4 +1,5 @@
 /* Test helpers: budget records with their record fields filled in. Used by the budget tests only. */
+import type { MonthPlan } from '../budget/targets';
 import type { BaseRecord, BudgetCategory, BudgetEntry, BudgetFund, BudgetFundMove, BudgetMonth, BudgetRecurring } from '../domain/types';
 
 let counter = 0;
@@ -13,6 +14,11 @@ type Fields<T> = Partial<Omit<T, keyof BaseRecord>> & Partial<BaseRecord>;
 
 export function month(ym: string, fields: Fields<BudgetMonth> = {}): BudgetMonth {
   return { ...base(fields.id), ym, potTargets: {}, categoryTargets: {}, ...fields } as BudgetMonth;
+}
+
+/** A month's plan as `effectiveMonth` gives it. */
+export function plan(ym: string, fields: Partial<MonthPlan> = {}): MonthPlan {
+  return { ym, potTargets: {}, categoryTargets: {}, ...fields };
 }
 
 export function category(id: string, pot: BudgetCategory['pot'], fields: Fields<BudgetCategory> = {}): BudgetCategory {
