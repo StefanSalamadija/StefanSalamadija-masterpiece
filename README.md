@@ -46,6 +46,16 @@ The forms library, your drafts and their photos stay on your devices. Nothing is
 
 Home → **Tools**: unit converters (length and drafts in ft + in, mass and volume, density and stowage factor, speed, temperature, pressure, power), volume ↔ mass, and speed · distance · time with the ETA in ship's time. Type a value in any row and every other unit updates. Everything works offline.
 
+## Library
+
+Home → **Library**: your own manuals, procedures and circulars (PDF, Word .docx, Excel .xlsx, JPEG/PNG), stored on this device and searchable offline.
+
+- **Import documents** reads the text of every page once, so search finds words inside the files. Scanned PDFs and images have no text: they are found by title and tags and marked "No searchable text".
+- Search ignores case and accents; results show the page and a snippet, and open the document at that page with the words highlighted. PDFs open in the app's own viewer; Word, Excel and images too; anything else opens with **Open with…**.
+- Folders, tags, Recently opened; deleted documents stay 30 days in **Recently deleted**.
+- One file can be up to 100 MB.
+- Normal backups carry only titles, folders and tags. **Library files** (Library → Library files, or Settings) exports the documents themselves as encrypted files of up to 100 MB each; import them on another device in any order.
+
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.
