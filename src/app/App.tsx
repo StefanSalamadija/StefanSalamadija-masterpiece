@@ -56,6 +56,11 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/forms/:id/setup': FormSetup,
   // Loaded on demand, so that the fill screen and its helpers stay out of the main chunk.
   '/forms/:id/fill': lazyScreen(() => import('../ui/screens/FormFill').then((m) => m.FormFill)),
+  // The Tools section is one chunk, loaded on demand, so the converters stay out of the main chunk.
+  '/tools': lazyScreen(() => import('../ui/screens/tools').then((m) => m.Tools)),
+  '/tools/sdt': lazyScreen(() => import('../ui/screens/tools').then((m) => m.Sdt)),
+  '/tools/volume-mass': lazyScreen(() => import('../ui/screens/tools').then((m) => m.VolumeMass)),
+  '/tools/:group': lazyScreen(() => import('../ui/screens/tools').then((m) => m.ToolGroup)),
   '/profiles': Profiles,
   '/settings': Settings,
   '/settings/import': ImportBackup,
