@@ -2,7 +2,7 @@
  * Builds a valid minimal PDF for tests. Each page is either lines of Helvetica text, or 'image' for a page that holds
  * only a small picture and no text operators (as a scan does). The xref table holds the real byte offsets.
  */
-export function makePdf(pages: (string[] | 'image')[]): Uint8Array {
+export function makePdf(pages: (string[] | 'image')[], sizes: ([number, number] | undefined)[] = []): Uint8Array {
   const objects: string[] = [];
   const n = pages.length;
   // Object numbers: 1 catalog, 2 pages, 3 font, 4 image, then a page and a content stream per page.
@@ -16,7 +16,7 @@ export function makePdf(pages: (string[] | 'image')[]): Uint8Array {
     const content = page === 'image'
       ? 'q 400 0 0 400 100 200 cm /Im1 Do Q'
       : `BT /F1 12 Tf 14 TL 72 720 Td ${page.map((line) => `(${line.replace(/[\\()]/g, '\\$&')}) Tj T*`).join(' ')} ET`;
-    objects[pageId(i)] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >> /Contents ${pageId(i) + 1} 0 R >>`;
+    objects[pageId(i)] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${sizes[i]?.[0] ?? 612} ${sizes[i]?.[1] ?? 792}] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R >> >> /Contents ${pageId(i) + 1} 0 R >>`;
     objects[pageId(i) + 1] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
   });
   let out = '%PDF-1.4\n';

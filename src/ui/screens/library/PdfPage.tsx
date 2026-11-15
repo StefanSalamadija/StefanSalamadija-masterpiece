@@ -1,31 +1,37 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useRef } from 'preact/hooks';
 import { reportError } from '../../../app/errors';
 import { clearMarks, markWords } from './markDom';
+
+const MAX_CANVAS_PIXELS = 8_000_000;
 
 interface Props {
   pdf: PDFDocumentProxy;
   n: number;
   scale: number;
-  /** The size of page 1 at scale 1, which holds the place of a page that has not been drawn yet. */
-  base: { w: number; h: number };
+  /** This page's own size at scale 1, so that a page not drawn yet takes the room it will need. */
+  size: { w: number; h: number };
   /** Drawn only while near the page on view; otherwise its canvas and text layer are dropped. */
   active: boolean;
   words: string[];
 }
 
 /** One page: a canvas at the device pixel ratio, and pdf.js's text layer over it with the words marked. */
-export function PdfPage({ pdf, n, scale, base, active, words }: Props) {
+export function PdfPage({ pdf, n, scale, size, active, words }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState<{ w: number; h: number }>();
   const latest = useRef(words);
   latest.current = words;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return undefined;
-    if (!active) {
+    const drop = (): void => {
+      // Setting a canvas to 0 x 0 frees its pixels now, rather than when the garbage collector gets to it.
+      el.querySelectorAll('canvas').forEach((c) => { c.width = 0; c.height = 0; });
       el.replaceChildren();
+    };
+    if (!active) {
+      drop();
       return undefined;
     }
     let cancelled = false;
@@ -33,10 +39,9 @@ export function PdfPage({ pdf, n, scale, base, active, words }: Props) {
     (async () => {
       const [{ TextLayer }, page] = await Promise.all([import('pdfjs-dist'), pdf.getPage(n)]);
       if (cancelled) return;
-      const natural = page.getViewport({ scale: 1 });
-      setSize({ w: natural.width, h: natural.height });
       const viewport = page.getViewport({ scale });
-      const ratio = window.devicePixelRatio || 1;
+      // The backing store is capped, so that a high zoom on a phone cannot ask for more pixels than a canvas may have.
+      const ratio = Math.min(window.devicePixelRatio || 1, Math.sqrt(MAX_CANVAS_PIXELS / (viewport.width * viewport.height)));
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width * ratio);
       canvas.height = Math.floor(viewport.height * ratio);
@@ -56,7 +61,7 @@ export function PdfPage({ pdf, n, scale, base, active, words }: Props) {
       // A render that was cancelled by scrolling away or zooming ends in an exception of its own: that is not a failure.
       if (!cancelled) reportError(err);
     });
-    return () => { cancelled = true; cleanup(); };
+    return () => { cancelled = true; cleanup(); drop(); };
   }, [pdf, n, scale, active]);
 
   useEffect(() => {
@@ -66,8 +71,8 @@ export function PdfPage({ pdf, n, scale, base, active, words }: Props) {
     markWords(layer, words);
   }, [words]);
 
-  const w = (size?.w ?? base.w) * scale;
-  const h = (size?.h ?? base.h) * scale;
+  const w = size.w * scale;
+  const h = size.h * scale;
   return (
     <div class="pdf-page" data-page={n} style={{ width: `${w}px`, height: `${h}px`, '--total-scale-factor': scale }}>
       <div class="pdf-page-body" ref={host} />

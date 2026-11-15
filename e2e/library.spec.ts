@@ -305,3 +305,26 @@ test('library search: the pdf viewer has no sideways scroll at 360 px', async ({
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await expectNoHorizontalScroll(page);
 });
+
+test('library viewer: a jump lands on the page when the pages are not all the same size', async ({ page }) => {
+  await open(page);
+  const mixed = { name: 'Mixed.pdf', mimeType: 'application/pdf', buffer: Buffer.from(makePdf([[LONG], ['A tall fold-out drawing of the engine room'], [LONG + ' third'], ['The fourth page is the landing target']], [undefined, [612, 2400], undefined, undefined])) };
+  await importDocs(page, mixed);
+  await expect(list(page).getByRole('listitem')).toHaveCount(1);
+  const results = await search(page, 'landing');
+  await results.getByRole('link', { name: /Page 4/ }).click();
+  const target = page.locator('.pdf-page[data-page="4"]');
+  await expect(target.locator('canvas')).toBeVisible();
+  const inView = () => page.evaluate(() => {
+    const box = document.querySelector('.pdf-view')!.getBoundingClientRect();
+    const top = document.querySelector('.pdf-page[data-page="4"]')!.getBoundingClientRect().top;
+    return top >= box.top - 2 && top < box.bottom;
+  });
+  expect(await inView()).toBe(true);
+  await page.getByLabel('Go to page').fill('1');
+  await page.getByLabel('Go to page').press('Enter');
+  await page.getByLabel('Go to page').fill('4');
+  await page.getByLabel('Go to page').press('Enter');
+  await expect(target.locator('canvas')).toBeVisible();
+  await expect.poll(inView).toBe(true);
+});

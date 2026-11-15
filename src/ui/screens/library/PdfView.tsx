@@ -1,6 +1,7 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
+import { reportError } from '../../../app/errors';
 import { navigate } from '../../../app/router';
 import { partsWithWords } from '../../../library/highlight';
 import { loadPdf } from '../../../library/pdfjs';
@@ -26,7 +27,7 @@ interface Props {
 export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
   const { db } = useAppState();
   const [pdf, setPdf] = useState<PDFDocumentProxy>();
-  const [base, setBase] = useState<{ w: number; h: number }>();
+  const [sizes, setSizes] = useState<{ w: number; h: number }[]>();
   const [failed, setFailed] = useState(false);
   const [current, setCurrent] = useState(page ?? 1);
   const [pageText, setPageText] = useState(String(page ?? 1));
@@ -43,12 +44,26 @@ export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
     let loaded: PDFDocumentProxy | undefined;
     (async () => {
       loaded = await loadPdf(await blob.arrayBuffer());
-      const first = await loaded.getPage(1);
-      const view = first.getViewport({ scale: 1 });
-      if (!live) return;
-      setBase({ w: view.width, h: view.height });
-      setPdf(loaded);
-    })().catch(() => { if (live) setFailed(true); });
+      const doc = loaded;
+      // Every page's own size, so that the room held for a page not drawn yet is right and a jump lands on the page.
+      const all = await Promise.all(Array.from({ length: doc.numPages }, async (_, i) => {
+        const view = (await doc.getPage(i + 1)).getViewport({ scale: 1 });
+        return { w: view.width, h: view.height };
+      }));
+      if (!live) {
+        void doc.loadingTask.destroy(); // the screen was left while it loaded
+        return;
+      }
+      setSizes(all);
+      setPdf(doc);
+    })().catch((err: unknown) => {
+      if (!live) void loaded?.loadingTask.destroy();
+      else {
+        setFailed(true);
+        reportError(err);
+      }
+    });
+    // Also when it is still loading: the document is destroyed as soon as it exists.
     return () => { live = false; void loaded?.loadingTask.destroy(); };
   }, [blob]);
 
@@ -61,7 +76,7 @@ export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
     return () => watch.disconnect();
   }, []);
 
-  const fit = base && boxWidth > 0 ? (boxWidth - 2 * PAD) / base.w : 0;
+  const fit = sizes && boxWidth > 0 ? (boxWidth - 2 * PAD) / Math.max(...sizes.map((z) => z.w)) : 0;
   const scale = fit * zoom;
 
   const goto = (n: number): void => {
@@ -97,7 +112,11 @@ export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
     return () => { watch.disconnect(); seen.clear(); };
   }, [count, scale > 0]);
 
-  useEffect(() => setPageText(String(current)), [current]);
+  // The page number follows the page on view, but not while a number is being typed.
+  const pageInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (document.activeElement !== pageInput.current) setPageText(String(current));
+  }, [current]);
 
   const [rows, setRows] = useState<{ part: number; text: string }[]>([]);
   useEffect(() => {
@@ -127,8 +146,8 @@ export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
       <div class="viewer-bar" role="toolbar" aria-label="Document">
         <button type="button" class="btn btn-outline" onClick={() => (window.history.length > 1 ? window.history.back() : navigate('/library'))}>Back</button>
         <button type="button" class="btn btn-outline" aria-label="Previous page" disabled={current <= 1} onClick={() => goto(current - 1)}>‹</button>
-        <form class="viewer-page" onSubmit={(event) => { event.preventDefault(); goto(Number(pageText) || current); }}>
-          <input aria-label="Go to page" inputMode="numeric" value={pageText} disabled={count === 0}
+        <form class="viewer-page" onSubmit={(event) => { event.preventDefault(); goto(Number(pageText) || current); event.currentTarget.querySelector('input')?.blur(); }}>
+          <input ref={pageInput} aria-label="Go to page" inputMode="numeric" value={pageText} disabled={count === 0}
             onInput={(event) => setPageText(event.currentTarget.value)} onBlur={() => setPageText(String(current))} />
           <span>/ {count || '…'}</span>
         </form>
@@ -147,10 +166,10 @@ export function PdfView({ blob, docId, page, q, onOpenWith }: Props) {
       {failed && <p class="field-error" role="alert">This PDF could not be displayed.</p>}
       <div class="viewer-box pdf-view" ref={box}>
         {!pdf && !failed && <p class="helper-text">Loading…</p>}
-        {pdf && base && scale > 0 && (
+        {pdf && sizes && scale > 0 && (
           <div class="pdf-pages">
             {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-              <PdfPage key={n} pdf={pdf} n={n} scale={scale} base={base} words={words} active={Math.abs(n - current) <= WINDOW} />
+              <PdfPage key={n} pdf={pdf} n={n} scale={scale} size={sizes[n - 1]} words={words} active={Math.abs(n - current) <= WINDOW} />
             ))}
           </div>
         )}
