@@ -1,6 +1,9 @@
 /* Test helpers: budget records with their record fields filled in. Used by the budget tests only. */
 import type { MonthPlan } from '../budget/targets';
-import type { BaseRecord, BudgetCategory, BudgetEntry, BudgetFund, BudgetFundMove, BudgetMonth, BudgetRecurring } from '../domain/types';
+import type {
+  BaseRecord, BudgetAccount, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetMonth,
+  BudgetRecurring,
+} from '../domain/types';
 
 let counter = 0;
 
@@ -42,4 +45,16 @@ export function move(fundId: string, ym: string, kind: BudgetFundMove['kind'], a
 
 export function recurring(fields: Fields<BudgetRecurring> & { amount: number; startYm: string }): BudgetRecurring {
   return { ...base(fields.id ?? 'rec-tpl'), name: 'Loan instalment', day: 5, ...fields } as BudgetRecurring;
+}
+
+export function debt(fields: Fields<BudgetDebt> & { startBalance: number; startYm: string }): BudgetDebt {
+  return { ...base(fields.id ?? 'debt-1'), name: 'Car loan', yearlyRatePct: 0, instalment: 0, ...fields } as BudgetDebt;
+}
+
+export function asset(id: string, fields: Fields<BudgetAsset> = {}): BudgetAsset {
+  return { ...base(id), name: id, includeInNetWorth: true, ...fields } as BudgetAsset;
+}
+
+export function correction(account: BudgetAccount, ym: string, balance: number, fields: Fields<BudgetCorrection> = {}): BudgetCorrection {
+  return { ...base(fields.id, fields.createdAt), account, ym, balance, ...fields } as BudgetCorrection;
 }
