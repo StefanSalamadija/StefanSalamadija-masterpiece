@@ -38,6 +38,9 @@ All of it works offline, for one person, in EUR.
   - Net worth and freedom date.
   - Yearly bills and sinking funds.
 - **EUR only**, as agreed.
+- **Accounts:** the emergency fund is a separate savings account, and investments are at a broker.
+- **Salary** is paid monthly for the days onboard, arriving in the same month. Nothing is paid at home.
+- **Freedom date** counts inflation, at the user's own rate.
 - **One person**, with phone and laptop synced through backups as for the rest of the app.
 - **Main pain:** entering expenses is slow.
 
@@ -75,7 +78,7 @@ All of it works offline, for one person, in EUR.
   - **Pattern for later:** the default is 8 months on and 4 months off. After the last entered period, the pattern repeats up to the forecast horizon.
   - **Prefill:** "Use my contract from ‹ship›" copies the sign-on date and contract months from the user's own crew record, if one exists. The user marks which crew member is "me" in Budget settings. Changing the crew record later never changes the budget silently: the screen offers "Update from contract".
 - **Pay rule:** salary for a calendar month = monthly salary × (days onboard in that month ÷ days in that month), rounded to cents. There is an optional **"paid at home" %**, default 0, for leave pay.
-- **Paid in:** the same month or the next month (default: next). This sets the month a salary lands in the bank.
+- **Paid in:** the same month or the next month (default: **same month**, user decision). This sets the month a salary lands in the bank.
 
 **Forecast** (Budget → Forecast), for each month from the current one to the horizon (default 24 months; choices 12, 24, 36 or 60):
 - **Income** = forecast salary + any other planned income entries.
@@ -110,6 +113,7 @@ All of it works offline, for one person, in EUR.
 - **Savings rate** per month and per 12 months = (income − spending on Needs and Wants) ÷ income. Debt repayment and investment count as saving.
 - **Freedom date:**
   - **Yearly spending** is either the average Needs + Wants of the last 12 tracked months, or a fixed amount the user enters.
+  - **Inflation:** a yearly rate the user enters (user decision). Yearly spending grows by it each year, so the freedom number grows with it. Investments are projected in nominal euros. The freedom date and all amounts are also shown in **today's euros**: value ÷ (1 + inflation)^years.
   - **Freedom number** = yearly spending ÷ withdrawal rate. The withdrawal rate is editable, default 4%, and labelled "an assumption, not advice".
   - **Freedom date** is the first forecast month where projected investments reach the freedom number. Investments are projected monthly as balance × (1 + r)^(1/12), where r is the yearly return the user enters (no default; the user must enter one, and 0% is allowed), plus planned contributions.
   - Shown as "At this plan: ‹Month YYYY› (in N years M months)". If it is never reached within 60 years: "Not within 60 years at this plan."
@@ -175,6 +179,61 @@ The Budget tab is lazy-loaded. Its routes:
 - **Syncing:** these go in full backups and snapshots. They **never** go in handovers, and no ship printout shows them. The App lock covers them, as for all data.
 - **Derived figures** (balances, forecast, net worth) are computed, never stored, except the user's corrections.
 - **Schema:** the next Dexie version, with a snapshot in the upgrade.
+
+## 3.9 Accounting rules
+
+The answers to the builder check are binding. *My call* marks a decision made by the designer; *user* marks the user's own decision.
+
+1. **Transfers are not spending** *(my call)*. An entry in a Savings & investments, Emergency fund or Debts category:
+   - lowers the bank;
+   - raises investments or the emergency fund (a separate account, *user*), or lowers the debt.
+   - Net worth does not change. Pot totals still count it as that pot's use of income, as in the workbook.
+2. **Debts** *(my call)*:
+   - The monthly rate is the yearly rate ÷ 12, and interest is rounded to cents each month.
+   - The instalment includes interest, so only the principal (instalment − interest) lowers the debt. With no rate given, the full payment lowers it.
+   - Total interest is the sum of the monthly interest.
+3. **Starting balances** *(my call)*:
+   - A first-run step, "Starting balances", records corrections at a start month for:
+     - the bank;
+     - investments;
+     - the emergency fund;
+     - each debt;
+     - each fund;
+     - other assets.
+   - The Excel import fills investments, debts and the emergency fund from STANJA, and asks for the bank balance.
+   - Without a bank start, the forecast shows "Enter your bank balance to see the forecast".
+4. **The pay rule** *(my call)*:
+   - A day counts as onboard if it falls between sign-on and sign-off inclusive, using ship's-time calendar dates.
+   - For a month that already has salary income entries, the actual amount replaces the rule.
+   - **The current month** = actual entries to date + for each category max(0, planned − actual), so nothing is counted twice.
+5. **The "targets" forecast method** *(my call)*:
+   - A category with a target forecasts max(0, target − recurring and fund amounts booked to it).
+   - A pot target covers the categories without one: max(0, pot target − category forecasts − covered parts).
+   - Nothing goes below zero.
+6. **Sinking funds** *(my call)*:
+   - Months left counts from the current month to the due month inclusive.
+   - A fund already at or above its amount needs no set-aside. An overdue fund asks for the whole remainder now.
+   - A repeating fund starts its next cycle when the bill is paid, and any leftover carries over.
+   - Confirming a set-aside creates a fund record, not a bank entry. Unconfirmed set-asides count in the forecast, not in today's free to spend.
+   - A bill bigger than its fund empties the fund, and the rest shows as overspend.
+7. **Net worth** *(my call)* = bank + investments + emergency fund + opted-in assets − debts. Sinking-fund money is inside the bank and is counted once.
+   - An income entry may name an asset it sold, which lowers that asset's value.
+8. **The freedom date** *(my call)*:
+   - It uses investments only.
+   - Contributions are the planned investment amounts from the forecast (templates and pot targets), not escalated.
+   - The 60 years count from today.
+9. **Scenarios** *(my call)*:
+   - Scenarios change the forecast only.
+   - A pot target change in a scenario sets that pot's forecast to the new target.
+   - An extra debt payment lowers the bank and the debt.
+   - **Apply to plan** writes each change to its real place:
+     - rotation → the rotation settings;
+     - salary → the salary from that month on;
+     - targets → "from this month on";
+     - contributions → the templates;
+     - one-off items → planned entries to confirm in their months;
+     - rates → the assumptions.
+10. **No migration from the October design is needed**, because it was never built.
 
 ## 4. Approaches
 
