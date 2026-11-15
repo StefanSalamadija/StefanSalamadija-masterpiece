@@ -2202,3 +2202,9 @@ textarea {
   top: 0;
   left: 0;
 }
+
+/* Crew import: what was found, and the settings folded under "Adjust columns". */
+.import-found { margin: 0; font-weight: 600; }
+.import-adjust { display: flex; flex-direction: column; gap: 16px; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.import-adjust[open] > * + * { margin-top: 16px; }
+.import-adjust > summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
