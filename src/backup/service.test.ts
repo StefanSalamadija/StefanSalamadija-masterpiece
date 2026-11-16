@@ -1514,43 +1514,79 @@ describe('the budget in a backup', () => {
   });
 });
 
-describe('budget months on two devices (I2)', () => {
-  it('a target set on one device and notes on the other both survive the merge, and the forecast uses the target', async () => {
+describe('budget months on two devices (I2, N1)', () => {
+  /** Device A with a ship and a December plan (Wants 30%), and device B that took A's full backup. */
+  async function synced() {
     const a = freshDb();
     const b = freshDb();
     at('2026-11-15T08:00:00.000Z');
     const ship = await createShip(a, 'M/V Ocean Star', 120);
     await ensureBudgetSetup(a);
     await ensureBudgetSetup(b);
+    await saveMonthChanges(a, setPotTarget(await listBudget(a, 'budgetMonths'), '2026-12', 'wants', { kind: 'pct', value: 30 }, 'fromOn'));
     at('2026-11-15T09:00:00.000Z');
-    await saveMonthChanges(a, setPotTarget(await listBudget(a, 'budgetMonths'), '2026-12', 'wants', { kind: 'amount', value: 30000 }, 'fromOn'));
-    at('2026-11-15T09:05:00.000Z');
+    const first = await exportBackup(a, 'full', PW, { shipId: ship.id, ...FAST });
+    await applyImport(b, await prepareImport(b, first.text, PW), { conflicts: {}, applyDeletions: true });
+    expect(effectiveMonth(await listBudget(b, 'budgetMonths'), '2026-12').potTargets.wants?.value).toBe(30);
+    return { a, b, ship };
+  }
+  const wantsOf = async (db: MasterpieceDB) => effectiveMonth(await listBudget(db, 'budgetMonths'), '2026-12').potTargets.wants?.value;
+
+  it('the same month changed on both devices since the last exchange is a conflict to choose, never folded silently', async () => {
+    const { a, b, ship } = await synced();
+    at('2026-11-15T10:00:00.000Z');
+    await saveMonthChanges(a, setPotTarget(await listBudget(a, 'budgetMonths'), '2026-12', 'wants', { kind: 'pct', value: 25 }, 'this'));
+    at('2026-11-15T10:05:00.000Z');
     await saveMonthNotes(b, '2026-12', 'Winter tyres');
+
+    at('2026-11-15T11:00:00.000Z');
+    const { text } = await exportBackup(a, 'full', PW, { shipId: ship.id, ...FAST });
+    const prepared = await prepareImport(b, text, PW);
+    expect(prepared.plan.summary.conflicts).toBe(1);
+    const item = prepared.plan.items.find((i) => i.table === 'budgetMonths')!;
+    expect(item).toMatchObject({ kind: 'conflict', id: 'budget-month:2026-12' });
+    // The user keeps the other device's version: its Wants 25% this month, without this device's notes.
+    await applyImport(b, prepared, { conflicts: { [conflictKey(item)]: 'incoming' }, applyDeletions: true });
+    expect(await wantsOf(b)).toBe(25);
+    expect(effectiveMonth(await listBudget(b, 'budgetMonths'), '2026-12').notes).toBeUndefined();
+    a.close(); b.close();
+  });
+
+  it('a month changed on one device only simply updates the other, and the forecast uses it', async () => {
+    const { a, b, ship } = await synced();
+    at('2026-11-15T10:00:00.000Z');
+    await saveMonthChanges(a, setPotTarget(await listBudget(a, 'budgetMonths'), '2026-12', 'wants', { kind: 'amount', value: 30000 }, 'fromOn'));
     await createBudgetRecord(b, 'budgetCorrections', { account: 'bank', ym: '2026-10', balance: 500000 });
 
-    at('2026-11-15T10:00:00.000Z');
+    at('2026-11-15T11:00:00.000Z');
+    const { text } = await exportBackup(a, 'full', PW, { shipId: ship.id, ...FAST });
+    const prepared = await prepareImport(b, text, PW);
+    expect(prepared.plan.summary.conflicts).toBe(0);
+    expect(prepared.plan.items.find((i) => i.table === 'budgetMonths')).toMatchObject({ kind: 'update', id: 'budget-month:2026-12' });
+    await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
+    expect(await wantsOf(b)).toBe(30000);
+    const r = forecast({ today: '2026-11-15', data: (await allTables(b)) as unknown as BudgetData, settings: await getBudgetSettings(b), months: 3 });
+    expect(r.months.find((m) => m.ym === '2026-12')?.pots.wants).toBe(30000);
+    a.close(); b.close();
+  });
+
+  it('old duplicate records (different ids) from two devices are both kept and read as one month, with nothing lost', async () => {
+    const a = freshDb();
+    const b = freshDb();
+    at('2026-11-15T08:00:00.000Z');
+    const ship = await createShip(a, 'M/V Ocean Star', 120);
+    await ensureBudgetSetup(a);
+    await ensureBudgetSetup(b);
+    // Made under random ids, as before month ids were fixed.
+    await createBudgetRecord(a, 'budgetMonths', { ym: '2026-12', potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } }, categoryTargets: {} });
+    at('2026-11-15T08:05:00.000Z');
+    await createBudgetRecord(b, 'budgetMonths', { ym: '2026-12', potTargets: {}, categoryTargets: {}, notes: 'Winter tyres' });
+    at('2026-11-15T09:00:00.000Z');
     const { text } = await exportBackup(a, 'full', PW, { shipId: ship.id, ...FAST });
     const prepared = await prepareImport(b, text, PW);
     expect(prepared.plan.summary.conflicts).toBe(0);
     await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
-
-    const months = await listBudget(b, 'budgetMonths');
-    expect(months.map((m) => m.id)).toEqual(['budget-month:2026-12']);
-    const plan = effectiveMonth(months, '2026-12');
-    expect(plan.notes).toBe('Winter tyres');
-    expect(plan.potTargets.wants).toMatchObject({ kind: 'amount', value: 30000 });
-    const tables = await allTables(b);
-    const settings = await getBudgetSettings(b);
-    const r = forecast({ today: '2026-11-15', data: tables as unknown as BudgetData, settings, months: 3 });
-    expect(r.months.find((m) => m.ym === '2026-12')?.pots.wants).toBe(30000);
-
-    // And back: the other device ends with the same record, with no conflict either.
-    at('2026-11-15T11:00:00.000Z');
-    const back = await exportBackup(b, 'full', PW, { shipId: ship.id, ...FAST });
-    const again = await prepareImport(a, back.text, PW);
-    expect(again.plan.summary.conflicts).toBe(0);
-    await applyImport(a, again, { conflicts: {}, applyDeletions: true });
-    expect(effectiveMonth(await listBudget(a, 'budgetMonths'), '2026-12')).toMatchObject({ notes: 'Winter tyres', potTargets: { wants: { value: 30000 } } });
+    expect(effectiveMonth(await listBudget(b, 'budgetMonths'), '2026-12')).toMatchObject({ notes: 'Winter tyres', potTargets: { wants: { value: 30000 } } });
     a.close(); b.close();
   });
 });

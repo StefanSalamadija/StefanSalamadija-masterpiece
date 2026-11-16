@@ -55,9 +55,10 @@ const byCreated = (a: BudgetMonth, b: BudgetMonth) =>
   (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * One record out of several live records of the same month (two devices that each made one before month ids were
- * fixed, or the same record edited on both): each slot (planned income, each pot target, each category target, the
- * notes) is taken from the latest-updated record that holds it, so every device's edits survive. The result keeps the
+ * One record out of several live records of the same month under different ids (two devices that each made one before
+ * month ids were fixed): each slot (planned income, each pot target, each category target, the
+ * notes) is taken from the latest-updated record that holds it, so every device's edits survive. The same record
+ * (`budget-month:<ym>`) changed on two devices is not folded: the backup's merge asks which version to keep. The result keeps the
  * canonical record's identity (`monthRecordId`) when one of them is it, else the oldest's, and the latest `updatedAt`.
  */
 export function foldMonthRecords(records: BudgetMonth[]): BudgetMonth {
