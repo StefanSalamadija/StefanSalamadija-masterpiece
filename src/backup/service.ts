@@ -215,7 +215,8 @@ function hasSurveyFields(name: SurveyTableName, r: Record<string, unknown>): boo
       return ['lbp', 'dF', 'dM', 'dA', 'beam', 'keelPlateCorr', 'lightShip'].every((key) => isFiniteNumber(r[key]))
         && ['summerDraught', 'summerDwt', 'depth', 'gt'].every((key) => isOptionalFinite(r[key]))
         && LCF_SOURCES.has(r.lcfSource) && isObject(r.ranges) && sheetRangesOk(r.ranges.initial) && sheetRangesOk(r.ranges.final)
-        && isOptionalText(r.sourceName) && isOptionalText(r.importedAt);
+        && isOptionalText(r.sourceName) && isOptionalText(r.importedAt)
+        && (r.lcfConfirmed === undefined || typeof r.lcfConfirmed === 'boolean');
     case 'hydroTables': return hydroRowsOk(r.rows);
     case 'draftSurveys':
       return SURVEY_KINDS.has(r.kind) && SURVEY_OPERATIONS.has(r.operation) && isOptionalText(r.initialId)

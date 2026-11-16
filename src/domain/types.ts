@@ -215,6 +215,8 @@ export type LcfSource = 'workbook' | 'tabled';
 export interface DraftSurveyShip extends BaseRecord { shipId: string; lbp: number; dF: number; dM: number; dA: number; beam: number;
   keelPlateCorr: number; lightShip: number; summerDraught?: number; summerDwt?: number; depth?: number; gt?: number;
   lcfSource: LcfSource; ranges: { initial: SheetRanges; final: SheetRanges };
+  /** The user has checked the LCF source against the stability booklet: the survey screen stops showing the other source's check line. */
+  lcfConfirmed?: boolean;
   /** The workbook the data was imported from, and when. */
   sourceName?: string; importedAt?: string }
 /** A ship's hydrostatic table, one record per ship (its id is `hydroTableId(shipId)`). Rows are in strictly increasing draft order. */

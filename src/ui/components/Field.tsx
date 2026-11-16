@@ -6,7 +6,7 @@ export interface FieldProps {
   label: string;
   value: string;
   onInput: (value: string) => void;
-  type?: 'text' | 'number' | 'date' | 'datetime-local' | 'password';
+  type?: 'text' | 'number' | 'date' | 'time' | 'datetime-local' | 'password';
   /** The on-screen keyboard to offer. Numbers are typed as text with `decimal` or `numeric`, then read with `parseDecimal`. */
   inputMode?: 'decimal' | 'numeric';
   /** An error is announced (`role="alert"`) and marks the input invalid; a warning is only shown. */
