@@ -54,3 +54,24 @@ export function extraDebtLine(extra: Cents, debtFreeYm: Ym | undefined, withExtr
   const sooner = monthsBetween(withExtraYm, debtFreeYm);
   return sooner > 0 ? `${line} (${sooner} ${sooner === 1 ? 'month' : 'months'} sooner)` : line;
 }
+
+/** A step of a debt's planned extra: `monthly` from `fromYm` on, until the next step. */
+export type ExtraStep = { fromYm: Ym; monthly: Cents };
+
+/** The planned extra in `ym`: the latest step at or before it; nothing before the first step. */
+export function extraFor(steps: readonly ExtraStep[] | undefined, ym: Ym): Cents {
+  let best: ExtraStep | undefined;
+  for (const s of steps ?? []) if (s.fromYm <= ym && (best === undefined || s.fromYm >= best.fromYm)) best = s;
+  return best?.monthly ?? 0;
+}
+
+/**
+ * The steps with `monthly` more from `fromYm` on: a step at `fromYm` of what was paid then plus `monthly`, and every
+ * later step raised by it. The steps before `fromYm` stay as they are, so no extra already planned starts earlier.
+ */
+export function addExtra(steps: readonly ExtraStep[] | undefined, fromYm: Ym, monthly: Cents): ExtraStep[] {
+  const held = [...(steps ?? [])].sort((a, b) => (a.fromYm < b.fromYm ? -1 : a.fromYm > b.fromYm ? 1 : 0));
+  const before = held.filter((s) => s.fromYm < fromYm);
+  const later = held.filter((s) => s.fromYm > fromYm).map((s) => ({ fromYm: s.fromYm, monthly: s.monthly + monthly }));
+  return [...before, { fromYm, monthly: extraFor(held, fromYm) + monthly }, ...later];
+}

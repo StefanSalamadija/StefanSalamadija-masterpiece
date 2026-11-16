@@ -571,7 +571,17 @@ test('budget plan: a debt at 6% shows its debt-free month and what an extra woul
   await expect(debt).toContainText('Debt-free in April 2027');
   await debt.getByLabel('Try an extra per month').fill('150');
   await expect(debt).toContainText("With an extra €150.00/month you'd be debt-free in January 2027 (3 months sooner)");
-  expect(await stored(page, 'budgetDebts')).toMatchObject([{ extraMonthly: 5000 }]);
+  expect(await stored(page, 'budgetDebts')).toMatchObject([{ extraSteps: [{ fromYm: '2026-10', monthly: 5000 }] }]);
+
+  // A second step: €100.00 from January 2027 on; the €50.00 keeps its months.
+  await debt.getByRole('button', { name: 'Edit' }).click();
+  await expect(edit.getByRole('list', { name: 'Planned extra' })).toContainText('Extra €50.00 a month from October 2026');
+  await edit.getByLabel('Extra each month').fill('100');
+  await edit.getByLabel('Extra from month').fill('2027-01');
+  await edit.getByRole('button', { name: 'Add extra' }).click();
+  await edit.getByRole('button', { name: 'Save' }).click();
+  await expect(debt).toContainText('Extra €50.00 a month from October 2026; Extra €100.00 a month from January 2027');
+  expect((await stored(page, 'budgetDebts'))[0].extraSteps).toEqual([{ fromYm: '2026-10', monthly: 5000 }, { fromYm: '2027-01', monthly: 10000 }]);
 });
 
 test('budget plan: a goal suggests a monthly amount; the emergency fund target is 6 × Needs', async ({ page }) => {

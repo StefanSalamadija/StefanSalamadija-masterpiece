@@ -6,7 +6,7 @@
 
 const POT_IDS: ReadonlySet<string> = new Set(['needs', 'savings', 'wants', 'debts', 'emergency']);
 /** The top-level fields that hold money, in any budget table. */
-const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'extraMonthly', 'bufferCents'] as const;
+const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'bufferCents'] as const;
 /** The money fields of a scenario change. */
 const CHANGE_MONEY_FIELDS = ['amount', 'monthly', 'lump'] as const;
 
@@ -41,13 +41,15 @@ function isPlanEdit(value: unknown, valid: (v: unknown) => boolean): boolean {
 
 /**
  * The money fields of a budget record (or of a patch to one) that are there are whole cents, the nested ones too:
- * a month's pot and category targets, the settings' favourites, fixed spending and salaries, and a scenario's changes.
+ * a month's pot and category targets, the settings' favourites, fixed spending and salaries, a scenario's changes and a
+ * debt's extra steps.
  * A nested field that is there must also have its shape (an object of targets, a list of favourites), since the sums
  * read it without checking again. Missing fields are not this function's business.
  */
 export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
   if (!MONEY_FIELDS.every((key) => optionalCents(fields, key))) return false;
-  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes } = fields;
+  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes, extraSteps } = fields;
+  if (extraSteps !== undefined && !(Array.isArray(extraSteps) && extraSteps.every((s) => isObject(s) && isCents(s.monthly)))) return false;
   if (plannedIncome !== undefined && !isPlanEdit(plannedIncome, isCents)) return false;
   if (potTargets !== undefined
     && !(isObject(potTargets) && Object.entries(potTargets).every(([pot, edit]) => POT_IDS.has(pot) && (edit === undefined || isPlanEdit(edit, isPotTarget))))) {

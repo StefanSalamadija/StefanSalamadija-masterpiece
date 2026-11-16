@@ -339,7 +339,7 @@ describe('forecast: transfers, funds and debts', () => {
   });
 
   describe('a planned extra payment stored on the debt', () => {
-    const loan = (fields = {}) => debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0, instalment: 30000, extraMonthly: 10000, ...fields });
+    const loan = (fields = {}) => debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0, instalment: 30000, extraSteps: [{ fromYm: '2026-11', monthly: 10000 }], ...fields });
 
     it('is paid on top of the instalment, the last payment only what is left', () => {
       const r = run({ budgetDebts: [loan()] });
@@ -348,7 +348,7 @@ describe('forecast: transfers, funds and debts', () => {
     });
 
     it('starts in its from-month', () => {
-      const r = run({ budgetDebts: [loan({ extraFromYm: '2026-12' })] });
+      const r = run({ budgetDebts: [loan({ extraSteps: [{ fromYm: '2026-12', monthly: 10000 }] })] });
       expect(r.months.slice(0, 3).map((m) => m.debts)).toEqual([70000, 30000, 0]);
     });
 
@@ -417,7 +417,8 @@ function randomPlan(seed: number): { data: BudgetData; s: BudgetSettings } {
     ? { kind: 'income', incomeSource: pick(['salary', 'property', 'other'] as const), status: rnd() < 0.3 ? 'planned' : 'actual' }
     : { categoryId: pick(cats), status: rnd() < 0.2 ? 'planned' : 'actual', oneOff: rnd() < 0.1, ...(rnd() < 0.2 && { debtId: 'debt-1' }) }));
   const debts = Array.from({ length: int(0, 2) }, (_, i) => debt({ id: `debt-${i + 1}`, startBalance: int(0, 2000000), startYm: ym(-12, 6), yearlyRatePct: int(0, 1500) / 100,
-    instalment: rnd() < 0.7 ? int(0, 80000) : 0 }));
+    instalment: rnd() < 0.7 ? int(0, 80000) : 0,
+    ...(rnd() < 0.3 && { extraSteps: Array.from({ length: int(1, 2) }, () => ({ fromYm: ym(-6, 12), monthly: int(0, 30000) })) }) }));
   const recurringT = Array.from({ length: int(0, 5) }, (_, i) => recurring({
     id: `tpl-${i}`, amount: int(1, 150000), startYm: ym(-6, 6), ...(rnd() < 0.3 && { endYm: ym(0, 20) }),
     ...(rnd() < 0.2 ? { incomeSource: 'property', categoryId: undefined } : { categoryId: pick(cats) }),

@@ -18,9 +18,10 @@ describe('entryLinksOk', () => {
 
 describe('budgetMoneyOk', () => {
   it("checks a debt's planned extra payment is whole cents", () => {
-    expect(budgetMoneyOk({ instalment: 20000, extraMonthly: 5000 })).toBe(true);
+    expect(budgetMoneyOk({ instalment: 20000, extraSteps: [{ fromYm: '2026-11', monthly: 5000 }] })).toBe(true);
     expect(budgetMoneyOk({ instalment: 20000 })).toBe(true);
-    expect(budgetMoneyOk({ extraMonthly: 50.5 })).toBe(false);
-    expect(budgetMoneyOk({ extraMonthly: '5000' })).toBe(false);
+    expect(budgetMoneyOk({ extraSteps: [{ fromYm: '2026-11', monthly: 50.5 }] })).toBe(false);
+    expect(budgetMoneyOk({ extraSteps: [{ fromYm: '2026-11', monthly: '5000' }] })).toBe(false);
+    expect(budgetMoneyOk({ extraSteps: 5000 })).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { debtPayoffs } from '../../../budget/debtPlan';
 import type { DebtPayoff } from '../../../budget/debtPlan';
 import { extraDebtLine } from '../../../budget/debts';
+import type { ExtraStep } from '../../../budget/debts';
 import { formatMoney } from '../../../budget/money';
 import { addMonths, monthLabel } from '../../../budget/months';
 import { createBudgetRecord, deleteBudgetRecord, updateBudgetRecord } from '../../../db/budget';
@@ -17,6 +18,10 @@ const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
 /** The extra the "With an extra €X/month" line starts with. */
 const DEFAULT_EXTRA = 5000;
 
+const sortedSteps = (steps: readonly ExtraStep[] | undefined): ExtraStep[] =>
+  [...(steps ?? [])].sort((a, b) => (a.fromYm < b.fromYm ? -1 : a.fromYm > b.fromYm ? 1 : 0));
+const stepText = (st: ExtraStep) => (st.monthly > 0 ? `Extra ${formatMoney(st.monthly)} a month from ${monthLabel(st.fromYm)}` : `No extra from ${monthLabel(st.fromYm)}`);
+
 function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: string; submit: string; onDone?: () => void }) {
   const { db } = useAppState();
   const currentYm = useCurrentYm();
@@ -25,26 +30,34 @@ function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: s
   const [rate, setRate] = useState(debt ? String(debt.yearlyRatePct).replace('.', ',') : '');
   const [instalment, setInstalment] = useState(inputText(debt?.instalment));
   const [startYm, setStartYm] = useState(debt?.startYm ?? currentYm);
-  const [extra, setExtra] = useState(inputText(debt?.extraMonthly));
-  const [extraFromYm, setExtraFromYm] = useState(debt?.extraFromYm ?? '');
+  const [steps, setSteps] = useState<ExtraStep[]>(sortedSteps(debt?.extraSteps));
+  const [extra, setExtra] = useState('');
+  const [extraFromYm, setExtraFromYm] = useState('');
   const [busy, run] = useBusy();
 
   const balanceCents = typedMoney(balance);
   const rateValue = typedRate(rate);
   const instalmentCents = typedMoney(instalment);
   const extraCents = typedMoney(extra);
-  const ok = name.trim() !== '' && typeof balanceCents === 'number' && rateValue !== 'invalid' && typeof instalmentCents === 'number' && YM.test(startYm)
-    && extraCents !== 'invalid' && (extraFromYm === '' || YM.test(extraFromYm));
+  const stepOk = extraCents !== 'invalid' && (extraFromYm === '' || YM.test(extraFromYm));
+  const ok = name.trim() !== '' && typeof balanceCents === 'number' && rateValue !== 'invalid' && typeof instalmentCents === 'number' && YM.test(startYm) && stepOk;
+  /** The steps with the one typed in the extra fields, if any: it replaces a step of the same month. */
+  const withTyped = (): ExtraStep[] => {
+    if (typeof extraCents !== 'number') return steps;
+    const fromYm = extraFromYm === '' ? startYm : extraFromYm;
+    return sortedSteps([...steps.filter((st) => st.fromYm !== fromYm), { fromYm, monthly: extraCents }]);
+  };
 
   const save = () => {
     if (!ok) return;
+    const all = withTyped();
     const fields: BudgetFields<'budgetDebts'> = {
       name: name.trim(), startBalance: balanceCents as number, yearlyRatePct: rateValue ?? 0, instalment: instalmentCents as number, startYm,
-      ...(typeof extraCents === 'number' && extraCents > 0 && { extraMonthly: extraCents, ...(extraFromYm !== '' && { extraFromYm }) }),
+      ...(all.length > 0 && { extraSteps: all }),
     };
-    // A field left out is removed, so that clearing the extra takes it away.
-    if (debt) run(() => updateBudgetRecord(db, 'budgetDebts', debt.id, { extraMonthly: undefined, extraFromYm: undefined, ...fields }), onDone);
-    else run(() => createBudgetRecord(db, 'budgetDebts', fields), () => { setName(''); setBalance(''); setRate(''); setInstalment(''); setExtra(''); setExtraFromYm(''); });
+    // A field left out is removed, so that removing every step takes the extra away.
+    if (debt) run(() => updateBudgetRecord(db, 'budgetDebts', debt.id, { extraSteps: undefined, ...fields }), onDone);
+    else run(() => createBudgetRecord(db, 'budgetDebts', fields), () => { setName(''); setBalance(''); setRate(''); setInstalment(''); setSteps([]); setExtra(''); setExtraFromYm(''); });
   };
 
   return (
@@ -58,12 +71,26 @@ function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: s
       <TextField label="Instalment" value={instalment} onInput={setInstalment} inputMode="decimal" hint="The monthly payment, interest included."
         error={instalmentCents === 'invalid' ? AMOUNT_ERROR : undefined} />
       <TextField label="From month" type="month" value={startYm} onInput={setStartYm} />
-      <TextField label="Extra each month" value={extra} onInput={setExtra} inputMode="decimal"
-        hint="A planned extra payment on top of the instalment, until the debt is paid off (optional)."
-        error={extraCents === 'invalid' ? AMOUNT_ERROR : undefined} />
-      {typeof extraCents === 'number' && extraCents > 0 && (
+      <fieldset class="plan-methods">
+        <legend>Planned extra</legend>
+        <p class="helper-text">Paid each month on top of the instalment until the debt is paid off. Each amount holds from its month to the next; 0 stops it.</p>
+        {steps.length > 0 && (
+          <ul class="budget-list" aria-label="Planned extra">
+            {steps.map((st) => (
+              <li key={st.fromYm} class="budget-row-head">
+                <span>{stepText(st)}</span>
+                <button type="button" class="btn btn-outline btn-small" onClick={() => setSteps(steps.filter((x) => x.fromYm !== st.fromYm))}>Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <TextField label="Extra each month" value={extra} onInput={setExtra} inputMode="decimal" error={extraCents === 'invalid' ? AMOUNT_ERROR : undefined} />
         <TextField label="Extra from month" type="month" value={extraFromYm} onInput={setExtraFromYm} hint="Empty: from the From month." />
-      )}
+        <div class="row-actions">
+          <button type="button" class="btn btn-outline btn-small" disabled={typeof extraCents !== 'number' || !stepOk}
+            onClick={() => { setSteps(withTyped()); setExtra(''); setExtraFromYm(''); }}>Add extra</button>
+        </div>
+      </fieldset>
       <div class="row-actions">
         <button type="submit" class="btn btn-primary btn-small" disabled={busy || !ok}>{submit}</button>
         {onDone && <button type="button" class="btn btn-outline btn-small" onClick={onDone}>Cancel</button>}
@@ -86,7 +113,8 @@ function DebtRow({ debt, data, balance, payoff, onDelete }: { debt: BudgetDebt; 
 
   const line = withExtra && typeof extra === 'number' ? extraDebtLine(extra, payoff.debtFreeYm, withExtra.debtFreeYm) : undefined;
   const done = payoff.debtFreeYm !== undefined && payoff.debtFreeYm < currentYm;
-  const hasExtra = debt.extraMonthly !== undefined && debt.extraMonthly > 0;
+  const steps = sortedSteps(debt.extraSteps);
+  const hasExtra = steps.some((st) => st.monthly > 0);
 
   return (
     <li class="card budget-row">
@@ -97,13 +125,11 @@ function DebtRow({ debt, data, balance, payoff, onDelete }: { debt: BudgetDebt; 
       <span class="budget-row-detail">
         {debt.yearlyRatePct}% a year · {formatMoney(debt.instalment)} a month · from {monthLabel(debt.startYm)}
       </span>
-      {hasExtra && (
-        <span class="budget-row-detail">Extra {formatMoney(debt.extraMonthly!)} a month from {monthLabel(debt.extraFromYm ?? debt.startYm)}</span>
-      )}
+      {steps.length > 0 && <span class="budget-row-detail">{steps.map(stepText).join('; ')}</span>}
       <p class="budget-debt-free">
         {done ? 'Paid off.' : payoff.debtFreeYm === undefined ? 'Not paid off at this payment.' : `Debt-free in ${monthLabel(payoff.debtFreeYm)}`}
       </p>
-      {!done && payoff.totalInterest > 0 && <span class="budget-row-detail">Interest still to pay {formatMoney(payoff.totalInterest)}</span>}
+      {!done && payoff.debtFreeYm !== undefined && payoff.totalInterest > 0 && <span class="budget-row-detail">Interest still to pay {formatMoney(payoff.totalInterest)}</span>}
       {!done && (
         <>
           <TextField label="Try an extra per month" value={extraText} onInput={setExtraText} inputMode="decimal"

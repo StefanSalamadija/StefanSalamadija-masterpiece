@@ -36,7 +36,7 @@ describe('debtPayoffs', () => {
   });
 
   it('pays the stored extra, and a what-if extra on top of it', () => {
-    const stored = data({ budgetDebts: [{ ...LOAN, extraMonthly: 20000 }] });
+    const stored = data({ budgetDebts: [{ ...LOAN, extraSteps: [{ fromYm: '2026-11', monthly: 20000 }] }] });
     expect(payoff(stored).debtFreeYm).toBe('2027-01');
     expect(payoff(stored, { debtId: 'd1', amount: 50000 }).debtFreeYm).toBe('2026-12');
   });

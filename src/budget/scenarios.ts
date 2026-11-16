@@ -7,6 +7,8 @@ import { forecast } from './forecast';
 import type { BudgetData, ForecastInput } from './forecast';
 import { freedom } from './freedom';
 import { SAVINGS_GOALS_CATEGORY_ID } from './ledger';
+import { addExtra } from './debts';
+import type { ExtraStep } from './debts';
 import { formatMoney } from './money';
 import { addMonths, monthsBetween, ymOf } from './months';
 import type { ScenarioChange } from './scenarioTypes';
@@ -50,8 +52,8 @@ export type { ScenarioChange };
  *      - the Savings & investments pot target set to that amount, as for a pot target change;
  *  - one-off → a planned entry to confirm on the 1st of its month, marked one-off: an expense in the pot's "Other …"
  *    category (else its first one; none without a pot), or other income;
- *  - extra debt → the monthly extra is stored on the debt (`extraMonthly`, added to any it has already, from the
- *    current month or the debt's start, or the earlier month its own extra started), which the forecast pays on top of
+ *  - extra debt → the monthly extra is added to the debt's extra steps from the current month or the debt's start on
+ *    (its own steps keep their months: `addExtra`), which the forecast pays on top of
  *    the instalment until the debt is paid off; the lump sum is a planned payment on that debt, to confirm in its
  *    month, in a Debts category ("Extra …" if there is one), with the id `scenario:<scenarioId>:<changeIndex>:<ym>` so
  *    that applying twice, or on two devices, makes one entry. Neither is ever covered by a target or a fixed amount.
@@ -80,7 +82,7 @@ export type PlanWrite =
   | { op: 'create'; table: 'budgetRecurring'; fields: Fields<BudgetRecurring> }
   | { op: 'update'; table: 'budgetRecurring'; id: string; patch: Partial<Fields<BudgetRecurring>> }
   | { op: 'delete'; table: 'budgetRecurring'; id: string }
-  | { op: 'update'; table: 'budgetDebts'; id: string; patch: Pick<Fields<BudgetDebt>, 'extraMonthly' | 'extraFromYm'> }
+  | { op: 'update'; table: 'budgetDebts'; id: string; patch: Required<Pick<Fields<BudgetDebt>, 'extraSteps'>> }
   /** `id`, when given, is the entry's own: the same on every device (see `applyToPlan`). */
   | { op: 'create'; table: 'budgetEntries'; fields: Fields<BudgetEntry>; id?: string };
 
@@ -384,8 +386,8 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
 }
 
 /**
- * The monthly extras, stored on their debts: each debt's extra raised by the scenario's, from the current month (or the
- * debt's start, or the earlier month its own extra started). An extra to a debt already paid off before it would start
+ * The monthly extras, stored on their debts: each debt's extra steps raised by the scenario's from the current month
+ * (or the debt's start) on (`addExtra`), so the debt's own steps keep their months. An extra to a debt already paid off before it would start
  * is left out. Each change's summary line names the month the debt is then paid off.
  */
 function extraWrites(data: BudgetData, settings: BudgetSettings, writes: PlanWrite[], today: string,
@@ -402,12 +404,12 @@ function extraWrites(data: BudgetData, settings: BudgetSettings, writes: PlanWri
     return true;
   });
   const out: PlanWrite[] = [];
+  const stepsAfter = new Map<string, ExtraStep[]>();
   for (const d of new Set(kept.map((x) => x.debt))) {
-    const added = kept.filter((x) => x.debt === d).reduce((sum, x) => sum + x.monthly, 0);
-    const has = d.extraMonthly !== undefined && d.extraMonthly > 0;
-    const ownFrom = d.extraFromYm ?? d.startYm;
-    const extraFromYm = has && ownFrom < startOf(d) ? ownFrom : startOf(d);
-    out.push({ op: 'update', table: 'budgetDebts', id: d.id, patch: { extraMonthly: (has ? d.extraMonthly! : 0) + added, extraFromYm } });
+    let steps: ExtraStep[] | undefined = d.extraSteps;
+    for (const x of kept) if (x.debt === d) steps = addExtra(steps, startOf(d), x.monthly);
+    stepsAfter.set(d.id, steps!);
+    out.push({ op: 'update', table: 'budgetDebts', id: d.id, patch: { extraSteps: steps! } });
   }
   if (kept.length === 0) return out;
   const paidOff = (span: number) => forecast({ today, ...planWith(data, settings, [...writes, ...out], today), months: span }).debtFree;
@@ -415,7 +417,12 @@ function extraWrites(data: BudgetData, settings: BudgetSettings, writes: PlanWri
   if (kept.some((x) => free[x.debt.id] === undefined)) free = paidOff(EXTRA_MAX_MONTHS);
   for (const x of kept) {
     const until = free[x.debt.id];
-    summary[x.line] = `${x.debt.name}: extra ${formatMoney(x.monthly)} a month from ${monthName(startOf(x.debt))} `
+    const start = startOf(x.debt);
+    // The debt's whole extra from then on, when it is not just this change's: its own extra stays in its months.
+    const from = stepsAfter.get(x.debt.id)!.filter((st) => st.fromYm >= start);
+    const plain = from.length === 1 && from[0].fromYm === start && from[0].monthly === x.monthly;
+    const inAll = plain ? '' : ` (in all ${from.map((st) => `${formatMoney(st.monthly)} from ${monthName(st.fromYm)}`).join(', ')})`;
+    summary[x.line] = `${x.debt.name}: extra ${formatMoney(x.monthly)} a month from ${monthName(start)}${inAll} `
       + (until === undefined ? 'on (not paid off within 30 years)' : `until it is paid off in ${monthName(until)}`);
   }
   return out;

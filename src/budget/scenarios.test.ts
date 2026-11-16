@@ -295,7 +295,7 @@ describe('applyToPlan: what it writes', () => {
     expect(writes).toEqual([
       { op: 'create', table: 'budgetEntries', id: `scenario:${s.id}:0:2027-01`,
         fields: { kind: 'expense', date: '2027-01-01', amount: 200000, categoryId: 'cat-extra', debtId: 'debt-1', note: 'Extra payment: Car loan', status: 'planned', oneOff: true } },
-      { op: 'update', table: 'budgetDebts', id: 'debt-1', patch: { extraMonthly: 10000, extraFromYm: '2026-11' } },
+      { op: 'update', table: 'budgetDebts', id: 'debt-1', patch: { extraSteps: [{ fromYm: '2026-11', monthly: 10000 }] } },
     ]);
     expect(summary).toEqual([
       `Car loan: extra €100.00 a month from November 2026 until it is paid off in ${monthName(row.debtFree!)}`,
@@ -304,10 +304,27 @@ describe('applyToPlan: what it writes', () => {
   });
 
   it('adds a monthly extra to the one the debt already has', () => {
-    const d = data({ budgetDebts: [{ ...LOAN, extraMonthly: 5000, extraFromYm: '2026-01' }] });
+    const d = data({ budgetDebts: [{ ...LOAN, extraSteps: [{ fromYm: '2026-01', monthly: 5000 }] }] });
     const { writes } = applyToPlan(d, SETTINGS, scenario('More', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]), TODAY);
-    expect(writes).toEqual([{ op: 'update', table: 'budgetDebts', id: 'debt-1', patch: { extraMonthly: 15000, extraFromYm: '2026-01' } }]);
+    expect(writes).toEqual([{ op: 'update', table: 'budgetDebts', id: 'debt-1', patch: {
+      extraSteps: [{ fromYm: '2026-01', monthly: 5000 }, { fromYm: '2026-11', monthly: 15000 }] } }]);
     roundTrip(d, SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+  });
+
+  it("keeps the debt's own later extra in its months, and says so", () => {
+    // A stored €50.00 from March 2027, and a scenario's €100.00 from now: €100.00 from November 2026, €150.00 from March 2027.
+    const d = data({ budgetDebts: [{ ...LOAN, extraSteps: [{ fromYm: '2027-03', monthly: 5000 }] }] });
+    const s = scenario('More', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    const { writes, summary } = applyToPlan(d, SETTINGS, s, TODAY);
+    expect(writes).toEqual([{ op: 'update', table: 'budgetDebts', id: 'debt-1', patch: {
+      extraSteps: [{ fromYm: '2026-11', monthly: 10000 }, { fromYm: '2027-03', monthly: 15000 }] } }]);
+    const [, row] = compareScenarios(input(d), [s]);
+    expect(summary).toEqual([`Car loan: extra €100.00 a month from November 2026 (in all €100.00 from November 2026, €150.00 from March 2027) `
+      + `until it is paid off in ${monthName(row.debtFree!)}`]);
+    // The scenario pays exactly €100.00 more each month than the base plan, before March 2027 and after it.
+    const { applied, base } = roundTrip(d, SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(applied.months.slice(0, 8).map(debtPaid)).toEqual(base.months.slice(0, 8).map((m) => debtPaid(m) + 10000));
+    expect(base.months.slice(0, 6).map(debtPaid)).toEqual([20000, 20000, 20000, 20000, 25000, 25000]);
   });
 
   it('leaves out an extra payment to a debt that no longer exists', () => {

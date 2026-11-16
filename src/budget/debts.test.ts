@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amortise, extraDebtLine } from './debts';
+import { addExtra, amortise, extraDebtLine, extraFor } from './debts';
 
 describe('amortise', () => {
   it('pays a 0% loan down by the full instalment, the last one only what is left', () => {
@@ -69,5 +69,29 @@ describe('extraDebtLine', () => {
     expect(extraDebtLine(5000, '2027-02', '2027-01')).toBe("With an extra €50.00/month you'd be debt-free in January 2027 (1 month sooner)");
     expect(extraDebtLine(5000, undefined, '2027-01')).toBe("With an extra €50.00/month you'd be debt-free in January 2027");
     expect(extraDebtLine(5000, '2027-02', undefined)).toBeUndefined();
+  });
+});
+
+describe('extra steps', () => {
+  const steps = [{ fromYm: '2027-03', monthly: 5000 }, { fromYm: '2026-11', monthly: 2000 }];
+
+  it('pays in each month the latest step at or before it, and nothing before the first', () => {
+    expect(extraFor(steps, '2026-10')).toBe(0);
+    expect(extraFor(steps, '2026-11')).toBe(2000);
+    expect(extraFor(steps, '2027-02')).toBe(2000);
+    expect(extraFor(steps, '2027-03')).toBe(5000);
+    expect(extraFor(undefined, '2027-03')).toBe(0);
+  });
+
+  it('adds an amount from a month on without moving the steps already there', () => {
+    // A stored €50.00 from March 2027, and €100.00 more from November 2026.
+    expect(addExtra([{ fromYm: '2027-03', monthly: 5000 }], '2026-11', 10000)).toEqual([
+      { fromYm: '2026-11', monthly: 10000 }, { fromYm: '2027-03', monthly: 15000 },
+    ]);
+    expect(addExtra([{ fromYm: '2026-01', monthly: 5000 }], '2026-11', 10000)).toEqual([
+      { fromYm: '2026-01', monthly: 5000 }, { fromYm: '2026-11', monthly: 15000 },
+    ]);
+    expect(addExtra([{ fromYm: '2026-11', monthly: 5000 }], '2026-11', 10000)).toEqual([{ fromYm: '2026-11', monthly: 15000 }]);
+    expect(addExtra(undefined, '2026-11', 10000)).toEqual([{ fromYm: '2026-11', monthly: 10000 }]);
   });
 });

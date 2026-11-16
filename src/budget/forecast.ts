@@ -2,7 +2,7 @@ import type {
   Assumptions, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
   BudgetRecurring, BudgetScenario, BudgetSettings, Cents, PotId, Ym,
 } from '../domain/types';
-import { monthlyInterest } from './debts';
+import { extraFor, monthlyInterest } from './debts';
 import { fundLedger, fundStatus } from './funds';
 import { balancesByMonth, SAVINGS_GOALS_CATEGORY_ID } from './ledger';
 import { addMonths, monthsBetween, ymOf } from './months';
@@ -55,7 +55,7 @@ import { effectiveMonth, potTargetAmount } from './targets';
  * actual Debts payment that names no debt pays none (the ledger lists it as unassigned, for the user to say which):
  * until then it is counted on top of the instalments.
  *
- * A debt's planned extra (`extraMonthly`, from `extraFromYm`, else its start month) is paid each month on top, while the
+ * A debt's planned extra (its `extraSteps`: in each month the latest step at or before it) is paid on top, while the
  * debt still owes at the start of the month: a planned payment on the debt's own line. A template that pays the debt
  * takes the instalment's place only, never the extra's, and the extra is never covered by a Debts target or a fixed
  * amount. The last payment is only what is left. A what-if extra (`whatIfExtra`) is added to it the same way.
@@ -306,7 +306,7 @@ export function forecast(input: ForecastInput): ForecastResult {
       if (ym < d.startYm) continue;
       const atStart = debtBalance.get(d.id) ?? d.startBalance;
       if (atStart <= 0) continue;
-      const stored = d.extraMonthly !== undefined && d.extraMonthly > 0 && ym >= (d.extraFromYm ?? d.startYm) ? d.extraMonthly : 0;
+      const stored = Math.max(0, extraFor(d.extraSteps, ym));
       const whatIf = input.whatIfExtra?.debtId === d.id ? Math.max(0, input.whatIfExtra.amount) : 0;
       if (stored + whatIf > 0) planned.push({ ...debtLine(d.id), amount: stored + whatIf });
     }

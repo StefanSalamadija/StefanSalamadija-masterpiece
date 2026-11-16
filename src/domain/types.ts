@@ -159,10 +159,11 @@ export interface BudgetFund extends BaseRecord { scope: 'personal'; name: string
 /** The fund record: money set aside into a fund in a month, or a bill paid from it (with the entry that paid it). */
 export interface BudgetFundMove extends BaseRecord { scope: 'personal'; fundId: string; ym: Ym; amount: Cents; kind: 'setaside' | 'paid'; entryId?: string }
 export interface BudgetDebt extends BaseRecord { scope: 'personal'; name: string; startBalance: Cents; yearlyRatePct: number; instalment: Cents; startYm: Ym;
-  /** A planned extra payment each month, on top of the instalment (or the template that pays the debt), until it is paid off. */
-  extraMonthly?: Cents;
-  /** The month the extra starts; absent means the debt's start month. */
-  extraFromYm?: Ym }
+  /**
+   * The planned extra payment each month, on top of the instalment (or the template that pays the debt), until it is
+   * paid off: in each month, the latest step at or before it (none before the first step; a step of 0 stops it).
+   */
+  extraSteps?: { fromYm: Ym; monthly: Cents }[] }
 export interface BudgetGoal extends BaseRecord { scope: 'personal'; name: string; amount: Cents; targetYm: Ym; categoryId?: string }
 export interface BudgetAsset extends BaseRecord { scope: 'personal'; name: string; includeInNetWorth: boolean }
 export type BudgetAccount = 'bank' | 'investments' | 'emergency' | `debt:${string}` | `asset:${string}` | `fund:${string}`;
