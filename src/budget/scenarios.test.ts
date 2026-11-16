@@ -223,19 +223,24 @@ describe('applyToPlan: what it writes', () => {
       month('2027-03', { id: 'm-2', categoryTargets: { 'cat-groc': { thisOnly: 70000 } } }),
       month('2027-06', { id: 'm-3', potTargets: { needs: { fromOn: { kind: 'amount', value: 250000 } }, wants: { fromOn: { kind: 'amount', value: 9000 } } } }),
     ];
+    const history = ['2026-08', '2026-09', '2026-10'].map((ym) => entry(`${ym}-05`, 90000, { categoryId: 'cat-rent' }));
     const s = scenario('Cut', [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 150000 }]);
-    const { writes, summary } = applyToPlan(data({ budgetMonths: months }), { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, needs: 'average' } }, s, TODAY);
+    const { writes, summary } = applyToPlan(data({ budgetMonths: months, budgetEntries: history }), { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, needs: 'average' } }, s, TODAY);
     expect(writes).toEqual([
       { op: 'update', table: 'budgetSettings', id: SETTINGS.id, patch: { forecastMethod: { ...SETTINGS.forecastMethod, needs: 'targets' } } },
+      // November and December keep what the average planned (€900 of rent a month), now as a target.
+      { op: 'update', table: 'budgetMonths', id: 'm-1', patch: { potTargets: { needs: { fromOn: { kind: 'amount', value: 90000 } } },
+        categoryTargets: { 'cat-rent': { fromOn: null }, 'cat-fun': { fromOn: 20000 } } } },
       { op: 'update', table: 'budgetMonths', id: 'm-2', patch: { potTargets: {}, categoryTargets: {} } },
       { op: 'update', table: 'budgetMonths', id: 'm-3', patch: { potTargets: { wants: { fromOn: { kind: 'amount', value: 9000 } } }, categoryTargets: {} } },
-      { op: 'create', table: 'budgetMonths', fields: { ym: '2027-01', potTargets: { needs: { fromOn: { kind: 'amount', value: 150000 } } }, categoryTargets: { 'cat-rent': { fromOn: null } } } },
+      { op: 'create', table: 'budgetMonths', fields: { ym: '2027-01', potTargets: { needs: { fromOn: { kind: 'amount', value: 150000 } } }, categoryTargets: {} } },
     ]);
     expect(summary).toEqual([
       'Needs target: €1,500.00 a month from January 2027 on',
-      'Needs: category targets removed from January 2027 on (Rent / mortgage)',
+      'Needs: category targets removed from November 2026 on (Rent / mortgage)',
       'Needs: later target changes removed (March 2027, June 2027)',
       'Needs: planned by its targets in every month (was the average of past months)',
+      'Needs: €900.00 a month until December 2026, what the average of past months planned',
     ]);
   });
 
@@ -342,7 +347,9 @@ describe('applyToPlan: the plan after Apply is what Compare showed', () => {
 
   it('an investment change with Savings planned by a fixed amount', () => {
     const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, savings: 'fixed' as const }, fixedSpend: { savings: 40000 } };
-    const { applied } = roundTrip(data(), s, [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
+    const { applied, base } = roundTrip(data(), s, [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
+    expect(base.months.slice(0, 2).map((m) => m.contribution)).toEqual([40000, 40000]);
+    expect(applied.months.slice(0, 2)).toEqual(base.months.slice(0, 2));
     expect(from(applied, '2027-01', 12).every((m) => m.contribution === 25000)).toBe(true);
   });
 
@@ -367,13 +374,28 @@ describe('applyToPlan: the plan after Apply is what Compare showed', () => {
     const wants = (m: ForecastResult['months'][number]) => m.spending - m.needs - m.transfers;
     const { applied, base } = roundTrip(data({ budgetEntries: history }), s, [{ kind: 'potTarget', pot: 'wants', fromYm: '2027-01', amount: 50000 }]);
     expect(base.months.slice(0, 4).map(wants)).toEqual([90000, 90000, 90000, 90000]);
+    // Before its month the scenario changes nothing.
+    expect(applied.months.slice(0, 2)).toEqual(base.months.slice(0, 2));
     expect(from(applied, '2027-01', 12).every((m) => wants(m) === 50000)).toBe(true);
   });
 
   it('a pot target on a pot planned by a fixed amount', () => {
+    // The stored Needs target (€2,000) is not what the fixed amount (€1,200) planned before the change.
     const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, needs: 'fixed' as const }, fixedSpend: { needs: 120000 } };
-    const { applied } = roundTrip(data(), s, [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 150000 }]);
-    expect(from(applied, '2027-01', 12).every((m) => m.needs === 150000)).toBe(true);
+    const { applied, base } = roundTrip(data(), s, [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-03', amount: 150000 }]);
+    expect(base.months.slice(0, 4).map((m) => m.needs)).toEqual([120000, 120000, 120000, 120000]);
+    expect(applied.months.slice(0, 4)).toEqual(base.months.slice(0, 4));
+    expect(from(applied, '2027-03', 12).every((m) => m.needs === 150000)).toBe(true);
+  });
+
+  it('a pot target on a fixed pot with templates, a fund and spending this month: the months before it are unchanged', () => {
+    const tpl = recurring({ id: 'tpl-gym', name: 'Gym', amount: 4000, startYm: '2026-01', endYm: '2026-12', categoryId: 'cat-fun' });
+    const spent = entry('2026-11-03', 70000, { categoryId: 'cat-fun' });
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, wants: 'fixed' as const }, fixedSpend: { wants: 30000 } };
+    const { applied, base, row } = roundTrip(data({ budgetRecurring: [tpl], budgetEntries: [spent] }), s, [{ kind: 'potTarget', pot: 'wants', fromYm: '2027-04', amount: 20000 }]);
+    expect(applied.months.slice(0, 5)).toEqual(base.months.slice(0, 5));
+    expect(from(applied, '2027-04', 6).every((m) => m.pots.wants === 20000)).toBe(true);
+    expect(row.series.slice(0, 5).map((m) => m.bank)).toEqual(base.months.slice(0, 5).map((m) => m.bank));
   });
 
   it('an extra debt payment with a Debts target pays the instalment and the extra', () => {

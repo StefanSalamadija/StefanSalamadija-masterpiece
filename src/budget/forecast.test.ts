@@ -426,7 +426,8 @@ describe('forecast: properties over 100 random plans', () => {
       expect(Number.isInteger(r.totalInterest) && Number.isInteger(r.buffer) && Number.isInteger(r.startInvestments), `seed ${seed}`).toBe(true);
       r.months.forEach((m, i) => {
         for (const [field, value] of Object.entries(m)) {
-          if (field !== 'ym' && field !== 'status') expect(Number.isInteger(value), `seed ${seed} ${m.ym} ${field}=${value}`).toBe(true);
+          if (field === 'pots') for (const [pot, v] of Object.entries(m.pots)) expect(Number.isInteger(v), `seed ${seed} ${m.ym} ${pot}=${v}`).toBe(true);
+          else if (field !== 'ym' && field !== 'status') expect(Number.isInteger(value), `seed ${seed} ${m.ym} ${field}=${value}`).toBe(true);
         }
         if (i > 0) {
           const was = r.months[i - 1];
@@ -439,6 +440,8 @@ describe('forecast: properties over 100 random plans', () => {
         expect(m.netWorth - (m.bank + m.investments + m.emergency - m.debts), `seed ${seed} ${m.ym} assets`)
           .toBe(r.months[0].netWorth - (r.months[0].bank + r.months[0].investments + r.months[0].emergency - r.months[0].debts));
         expect(m.freeToSpend, `seed ${seed} ${m.ym}`).toBe(m.bank - m.funds);
+        expect(m.pots.needs, `seed ${seed} ${m.ym} pots`).toBe(m.needs);
+        expect(Object.values(m.pots).reduce((t, v) => t + v, 0), `seed ${seed} ${m.ym} pots`).toBeLessThanOrEqual(m.spending);
         expect(m.spending, `seed ${seed} ${m.ym}`).toBeGreaterThanOrEqual(0);
       });
     }

@@ -101,6 +101,8 @@ export interface ForecastMonth {
   interest: Cents;
   /** Spending in the Needs pot. */
   needs: Cents;
+  /** Spending by pot (savings-goal money, which stays in the bank, and spending in no pot left out). */
+  pots: Record<PotId, Cents>;
   /** Spending that moved into investments, the emergency fund or a debt (the rest of spending is gone). */
   transfers: Cents;
 }
@@ -407,6 +409,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     let toEmergency = 0;
     let toEmergencyActual = 0;
     let needs = 0;
+    const pots: Record<PotId, Cents> = { needs: 0, savings: 0, wants: 0, debts: 0, emergency: 0 };
     for (const [key, l] of lines) {
       const s = spendOf.get(key)!;
       const total = s.actual + s.rest;
@@ -415,6 +418,7 @@ export function forecast(input: ForecastInput): ForecastResult {
       if (l.pot === 'savings') { contribution += total; contributionActual += s.actual; }
       if (l.pot === 'emergency') { toEmergency += total; toEmergencyActual += s.actual; }
       if (l.pot === 'needs') needs += total;
+      if (l.pot !== undefined) pots[l.pot] += total;
     }
 
     const otherIncome = otherActual + Math.max(0, otherPlanned - otherActual);
@@ -431,7 +435,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     const debtsTotal = sum([...debtBalance.values()].map((b) => b ?? 0));
     months.push({
       ym, status: salaryFromPeriods(rotation, periods, ym).onboard, income, spending, bank, freeToSpend: bank - fundsTotal, investments: invested,
-      emergency, debts: debtsTotal, netWorth: bank + invested + emergency + assetsValue - debtsTotal, funds: fundsTotal, contribution, interest, needs,
+      emergency, debts: debtsTotal, netWorth: bank + invested + emergency + assetsValue - debtsTotal, funds: fundsTotal, contribution, interest, needs, pots,
       transfers: contribution + toEmergency + sum([...paidTo.values()].map((p) => p.actual + p.rest)),
     });
   }

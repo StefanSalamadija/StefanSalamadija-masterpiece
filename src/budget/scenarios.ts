@@ -155,10 +155,15 @@ const METHOD_NAMES: Record<ForecastMethod, string> = { targets: 'its targets', a
 /** Lowercase, diacritics removed: enough to find an "Other …" or "Extra …" category by its name. */
 const folded = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '');
 
-/** The live, shown categories of a pot in their order (savings goals aside), the one whose name starts with `prefer` first. */
+/**
+ * The live, shown categories of a pot in their order (savings goals aside; hidden ones when none is shown), the one
+ * whose name starts with `prefer` first.
+ */
 function categoryIn(categories: BudgetCategory[], pot: PotId, prefer: string): string | undefined {
-  const inPot = categories.filter((c) => !c.deleted && !c.hidden && c.pot === pot && c.id !== SAVINGS_GOALS_CATEGORY_ID)
+  const live = categories.filter((c) => !c.deleted && c.pot === pot && c.id !== SAVINGS_GOALS_CATEGORY_ID)
     .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const shown = live.filter((c) => !c.hidden);
+  const inPot = shown.length > 0 ? shown : live;
   return (inPot.find((c) => folded(c.name).startsWith(prefer)) ?? inPot[0])?.id;
 }
 
@@ -171,6 +176,7 @@ function extraPayment(categories: BudgetCategory[], d: BudgetDebt, ym: Ym, amoun
 }
 
 export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: BudgetScenario, today: string): { writes: PlanWrite[]; summary: string[] } {
+  const cur = ymOf(today);
   const summary: string[] = [];
   const potOf = new Map(data.budgetCategories.map((c) => [c.id, c.pot]));
   const debts = data.budgetDebts.filter((d) => !d.deleted);
@@ -194,23 +200,44 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
     for (const u of update) months = months.map((m) => (m.id === u.id ? u : m));
   };
 
-  /** From `fromYm` on, the pot is planned at exactly `amount`. */
+  /** The writes for the edits so far (the monthly extra debt payments aside: they come last). */
+  const assemble = (): PlanWrite[] => {
+    const monthWrites: PlanWrite[] = [];
+    for (const m of months) {
+      if (fresh.has(m.id)) {
+        const { id: _id, createdAt: _c, updatedAt: _u, updatedBy: _b, deleted: _d, scope: _s, ...fields } = m;
+        monthWrites.push({ op: 'create', table: 'budgetMonths', fields });
+      } else {
+        const was = data.budgetMonths.find((x) => x.id === m.id)!;
+        if (!sameMonthPlan(was, m)) monthWrites.push({ op: 'update', table: 'budgetMonths', id: m.id, patch: { potTargets: m.potTargets, categoryTargets: m.categoryTargets } });
+      }
+    }
+    const settingsWrite: PlanWrite[] = Object.keys(patch).length > 0 ? [{ op: 'update', table: 'budgetSettings', id: settings.id, patch: { ...patch } }] : [];
+    return [...settingsWrite, ...monthWrites, ...templateWrites, ...entryWrites];
+  };
+  /** Each month's spending in `pot` in the plan with the edits so far, for the `span` months from the current one. */
+  const potSpending = (pot: PotId, span: number): Cents[] =>
+    forecast({ today, ...planWith(data, settings, assemble(), today), months: span }).months.map((m) => m.pots[pot]);
+
+  /**
+   * From `fromYm` on, the pot is planned at exactly `amount`. A pot planned by the average or a fixed amount moves to
+   * its targets, which hold for every month: the months from the current one to `fromYm` are then given pot targets
+   * that plan what the old method planned there, so the scenario changes nothing before its month.
+   */
   const potExactly = (pot: PotId, fromYm: Ym, amount: Cents) => {
     const label = potLabel(pot);
-    monthEdit(setPotTarget(months, fromYm, pot, { kind: 'amount', value: amount }, 'fromOn'));
-    summary.push(`${label} target: ${formatMoney(amount)} a month from ${monthName(fromYm)} on`);
+    const method = (patch.forecastMethod ?? settings.forecastMethod)[pot] ?? 'targets';
+    const span = method !== 'targets' ? Math.max(0, monthsBetween(cur, fromYm)) : 0;
+    const startYm = span > 0 ? cur : fromYm;
+    const wanted = span > 0 ? potSpending(pot, span) : [];
 
+    // No category targets and no later edits of the pot from `startYm` on: the pot targets alone plan the pot.
     const inPot = new Set(data.budgetCategories.filter((c) => c.pot === pot).map((c) => c.id));
-    const targeted = Object.keys(effectiveMonth(months, fromYm).categoryTargets).filter((id) => inPot.has(id));
-    for (const id of targeted) monthEdit(setCategoryTarget(months, fromYm, id, undefined, 'fromOn'));
-    if (targeted.length > 0) {
-      const names = targeted.map((id) => data.budgetCategories.find((c) => c.id === id)!.name);
-      summary.push(`${label}: category targets removed from ${monthName(fromYm)} on (${names.join(', ')})`);
-    }
-
+    const targeted = Object.keys(effectiveMonth(months, startYm).categoryTargets).filter((id) => inPot.has(id));
+    for (const id of targeted) monthEdit(setCategoryTarget(months, startYm, id, undefined, 'fromOn'));
     const later = new Set<Ym>();
     months = months.map((m) => {
-      if (m.ym <= fromYm) return m;
+      if (m.ym <= startYm) return m;
       const potTargets = { ...m.potTargets };
       const categoryTargets = { ...m.categoryTargets };
       let changed = false;
@@ -220,13 +247,49 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
       later.add(m.ym);
       return { ...m, potTargets, categoryTargets };
     });
-    if (later.size > 0) summary.push(`${label}: later target changes removed (${[...later].sort().map(monthName).join(', ')})`);
+    monthEdit(setPotTarget(months, fromYm, pot, { kind: 'amount', value: amount }, 'fromOn'));
 
-    const method = (patch.forecastMethod ?? settings.forecastMethod)[pot] ?? 'targets';
-    if (method !== 'targets') {
-      patch.forecastMethod = { ...(patch.forecastMethod ?? settings.forecastMethod), [pot]: 'targets' };
-      summary.push(`${label}: planned by its targets in every month (was ${METHOD_NAMES[method]})`);
+    summary.push(`${label} target: ${formatMoney(amount)} a month from ${monthName(fromYm)} on`);
+    if (targeted.length > 0) {
+      const names = targeted.map((id) => data.budgetCategories.find((c) => c.id === id)!.name);
+      summary.push(`${label}: category targets removed from ${monthName(startYm)} on (${names.join(', ')})`);
     }
+    if (later.size > 0) summary.push(`${label}: later target changes removed (${[...later].sort().map(monthName).join(', ')})`);
+    if (method === 'targets') return;
+    patch.forecastMethod = { ...(patch.forecastMethod ?? settings.forecastMethod), [pot]: 'targets' };
+    summary.push(`${label}: planned by its targets in every month (was ${METHOD_NAMES[method]})`);
+    if (wanted.length === 0) return;
+
+    // The months before `fromYm`: a pot target per month that plans what the old method did. A target is what the
+    // pot spends beyond its templates' and funds' cover (never below it), so the amount is found by correcting a
+    // first guess with what the forecast then plans, until the two agree (normally on the first correction).
+    let pins = [...wanted];
+    const pin = () => pins.forEach((v, i) => monthEdit(setPotTarget(months, addMonths(cur, i), pot, { kind: 'amount', value: v }, 'fromOn')));
+    for (let round = 0; round < 8; round += 1) {
+      pin();
+      const off = potSpending(pot, span).map((got, i) => got - wanted[i]);
+      if (off.every((d) => d === 0)) break;
+      pins = pins.map((v, i) => Math.max(0, v - off[i]));
+    }
+    // Keep only the months where the pin changes: "from this month on" carries it to the next.
+    for (let i = 1; i < span; i += 1) {
+      if (pins[i] !== pins[i - 1]) continue;
+      const ym = addMonths(cur, i);
+      months = months.flatMap((m) => {
+        if (m.ym !== ym || m.potTargets[pot] === undefined) return [m];
+        const potTargets = { ...m.potTargets };
+        delete potTargets[pot];
+        const empty = Object.keys(potTargets).length === 0 && Object.keys(m.categoryTargets).length === 0 && m.plannedIncome === undefined && m.notes === undefined;
+        if (fresh.has(m.id) && empty) { fresh.delete(m.id); return []; }
+        return [{ ...m, potTargets }];
+      });
+    }
+    const until = monthName(addMonths(fromYm, -1));
+    const low = Math.min(...pins);
+    const high = Math.max(...pins);
+    summary.push(low === high
+      ? `${label}: ${formatMoney(low)} a month until ${until}, what ${METHOD_NAMES[method]} planned`
+      : `${label}: what ${METHOD_NAMES[method]} planned until ${until}, month by month (${formatMoney(low)} to ${formatMoney(high)})`);
   };
 
   for (const c of s.changes) {
@@ -308,18 +371,7 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
     }
   }
 
-  const monthWrites: PlanWrite[] = [];
-  for (const m of months) {
-    if (fresh.has(m.id)) {
-      const { id: _id, createdAt: _c, updatedAt: _u, updatedBy: _b, deleted: _d, scope: _s, ...fields } = m;
-      monthWrites.push({ op: 'create', table: 'budgetMonths', fields });
-    } else {
-      const was = data.budgetMonths.find((x) => x.id === m.id)!;
-      if (!sameMonthPlan(was, m)) monthWrites.push({ op: 'update', table: 'budgetMonths', id: m.id, patch: { potTargets: m.potTargets, categoryTargets: m.categoryTargets } });
-    }
-  }
-  const settingsWrite: PlanWrite[] = Object.keys(patch).length > 0 ? [{ op: 'update', table: 'budgetSettings', id: settings.id, patch }] : [];
-  const writes = [...settingsWrite, ...monthWrites, ...templateWrites, ...entryWrites];
+  const writes = assemble();
   if (extras.length > 0) writes.push(...extraPayments(data, settings, writes, today, extras, summary));
   return { writes, summary };
 }
