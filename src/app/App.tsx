@@ -17,7 +17,6 @@ import { FirstShip } from '../ui/screens/FirstShip';
 import { FormSetup } from '../ui/screens/FormSetup';
 import { Forms } from '../ui/screens/Forms';
 import { Home } from '../ui/screens/Home';
-import { ImportBackup } from '../ui/screens/ImportBackup';
 import { LockScreen } from '../ui/screens/LockScreen';
 import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
@@ -33,6 +32,9 @@ import { useRoute } from './router';
 import type { RoutePath } from './router';
 import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
 import { useAppLock } from './useAppLock';
+
+/** Importing a backup: its screen, the backup service and the import review are a chunk of their own, loaded on demand. */
+const ImportBackup = lazyScreen(() => import('../ui/screens/ImportBackup').then((m) => m.ImportBackup));
 
 type BudgetScreens = typeof import('../ui/screens/budget');
 /** A Budget screen: every one is in the budget chunk, loaded on demand, so the budget's code stays out of the main chunk. */

@@ -164,19 +164,25 @@ function ChangeForm({ data, onAdd }: { data: PlanData; onAdd: (c: ScenarioChange
 function ApplyDialog({ data, scenario, onDone, onCancel }: { data: PlanData; scenario: BudgetScenario; onDone: () => void; onCancel: () => void }) {
   const { db, shipToday } = useAppState();
   const [busy, setBusy] = useState(false);
-  // Worked out once, when the dialog opens: what is listed is what is written.
-  const [plan] = useState(() => applyToPlan(budgetDataOf(data), data.settings, scenario, shipToday));
+  const [changed, setChanged] = useState(false);
+  const planNow = () => applyToPlan(budgetDataOf(data), data.settings, scenario, shipToday);
+  // Worked out when the dialog opens, and again on Apply: if the plan changed meanwhile (a sync, say), the new list
+  // is shown to confirm again, so what is written is always what was listed.
+  const [plan, setPlan] = useState(planNow);
   return (
     <ConfirmDialog
       title={`Apply ${scenario.name} to the plan?`} confirmLabel="Apply" busy={busy} onCancel={onCancel}
       onConfirm={() => {
+        const fresh = planNow();
+        if (JSON.stringify(fresh.writes) !== JSON.stringify(plan.writes)) { setPlan(fresh); setChanged(true); return; }
         setBusy(true);
         takeSnapshot(db, 'manual', `Before applying the scenario ${scenario.name}`)
-          .then(() => applyPlanWrites(db, plan.writes))
+          .then(() => applyPlanWrites(db, fresh.writes))
           .then(onDone, (e) => { setBusy(false); reportError(e); });
       }}
       body={(
         <>
+          {changed && <p class="field-warning" role="alert">The plan changed while this was open. Check the changes again.</p>}
           <p>These changes are written to the plan:</p>
           <ul class="budget-lines">{plan.summary.filter((l) => l !== '').map((l, i) => <li key={i}>{l}</li>)}</ul>
           <p class="helper-text">A snapshot is taken first, so the plan as it is now can be restored from Settings.</p>

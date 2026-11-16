@@ -5,9 +5,9 @@ import { getBudgetSettings, listBudget } from './budget';
 import type { MasterpieceDB } from './schema';
 
 /*
- * The budget's Home alerts, kept up to date. Home imports this module on demand (it is a chunk of its own), so the
- * budget's code stays out of the main chunk: only the tiny hook in Home is there. A budget never opened (no settings)
- * has nothing to say.
+ * The budget's Home alerts, kept up to date. It is re-exported by the Budget screens' chunk, which Home loads on
+ * demand once a budget exists, so the budget's code stays out of the main chunk: only the tiny hook in Home is there.
+ * A budget never opened (no settings) has nothing to say.
  */
 
 /** Calls `onChange` with the alerts for ship's `today`, and again whenever the budget changes; returns the way to stop. */

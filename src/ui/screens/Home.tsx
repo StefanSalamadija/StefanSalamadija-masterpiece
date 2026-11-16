@@ -109,7 +109,7 @@ function BudgetAlerts() {
     let stop: (() => void) | undefined;
     let live = true;
     // The budget's chunk is loaded only once the budget has been set up: before that it has nothing to say.
-    db.budgetSettings.count()
+    db.budgetSettings.filter((r) => !r.deleted).count()
       .then((n) => (n > 0 && live ? import('./budget') : undefined))
       .then((m) => { if (m && live) stop = m.watchBudgetAlerts(db, shipToday, setAlerts, reportError); }, () => {});
     return () => { live = false; stop?.(); };
