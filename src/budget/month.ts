@@ -47,6 +47,16 @@ export function targetsWarning(targetsPctTotal: number): string | undefined {
   return total === 100 ? undefined : `Targets add up to ${total}% — adjust to 100%.`;
 }
 
+/**
+ * The targets warning for a month, as the month, the Plan and the alerts show it: only when the month has planned
+ * income and a pot target. Without planned income a % cannot be worked out, and without targets there is nothing to
+ * add up, so "Targets add up to 0%" would say nothing (a fresh budget, or an imported past month).
+ */
+export function monthTargetsWarning(summary: MonthSummary, plan: MonthPlan): string | undefined {
+  if (summary.plannedIncome <= 0 || !Object.values(plan.potTargets).some((t) => t !== undefined)) return undefined;
+  return targetsWarning(summary.targetsPctTotal);
+}
+
 export function summariseMonth(input: {
   /** The month's plan, from `effectiveMonth`. */
   month: MonthPlan; entries: BudgetEntry[]; categories: BudgetCategory[]; fundMoves: BudgetFundMove[]; funds: BudgetFund[];

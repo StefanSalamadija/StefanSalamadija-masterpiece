@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PotId } from '../domain/types';
 import { category, correction, entry, fund, move, plan } from '../test/budgetRecords';
-import { categoryBand, summariseMonth, targetsWarning } from './month';
+import { categoryBand, monthTargetsWarning, summariseMonth, targetsWarning } from './month';
 
 const categories = [
   category('rent', 'needs'), category('food', 'needs'), category('registration', 'needs'),
@@ -83,6 +83,14 @@ describe('summariseMonth', () => {
     expect(pot(s, 'wants')).toEqual({ pot: 'wants', target: 0, targetPct: 0, spent: 2500, spentPct: 0, unused: -2500, planned: 0 });
     expect(s.targetsPctTotal).toBe(0);
     expect(s.surplus).toBe(-2500);
+    // T2 M-5: no planned income or no targets, so the total says nothing yet: no "Targets add up to 0%".
+    expect(monthTargetsWarning(s, empty)).toBeUndefined();
+    const amountOnly = plan('2026-11', { potTargets: { needs: { kind: 'amount', value: 90000, inherited: false } } });
+    expect(monthTargetsWarning(summariseMonth({ month: amountOnly, categories, funds: [], fundMoves: [], entries: [] }), amountOnly)).toBeUndefined();
+    const incomeOnly = plan('2026-11', { plannedIncome: 300000 });
+    expect(monthTargetsWarning(summariseMonth({ month: incomeOnly, categories, funds: [], fundMoves: [], entries: [] }), incomeOnly)).toBeUndefined();
+    const half = plan('2026-11', { plannedIncome: 300000, potTargets: { needs: { kind: 'pct', value: 50, inherited: false } } });
+    expect(monthTargetsWarning(summariseMonth({ month: half, categories, funds: [], fundMoves: [], entries: [] }), half)).toBe('Targets add up to 50% — adjust to 100%.');
   });
 
   describe('sinking funds', () => {

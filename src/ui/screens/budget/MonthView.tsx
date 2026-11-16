@@ -5,7 +5,7 @@ import { useRoute } from '../../../app/router';
 import { POTS } from '../../../budget/catalog';
 import { balancesByMonth } from '../../../budget/ledger';
 import { formatMoney, parseMoney } from '../../../budget/money';
-import { summariseMonth, targetsWarning } from '../../../budget/month';
+import { monthTargetsWarning, summariseMonth } from '../../../budget/month';
 import type { CategoryBand } from '../../../budget/month';
 import { addMonths } from '../../../budget/months';
 import { plannedItemsFor } from '../../../budget/planned';
@@ -224,7 +224,8 @@ export function MonthView() {
     if (!data) return undefined;
     const plan = effectiveMonth(data.months, ym);
     const summary = summariseMonth({ month: plan, entries: data.entries, categories: data.categories, fundMoves: data.fundMoves, funds: data.funds, corrections: data.corrections });
-    const setAsides = ym <= currentYm
+    // Set-asides are offered in the current month only (T2 M-1): a past month's is no longer to be done, a later one not yet.
+    const setAsides = ym === currentYm
       ? plannedItemsFor(ym, { recurring: [], funds: data.funds, fundMoves: data.fundMoves, existing: [], debts: [], debtBalances: {}, corrections: data.corrections }).setAsides
       : [];
     const { unassignedDebtPayments } = balancesByMonth({
@@ -243,7 +244,7 @@ export function MonthView() {
   const fundsById = new Map<string, BudgetFund>(data.funds.map((f) => [f.id, f]));
   const planned = data.entries.filter((e) => e.status === 'planned').sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const actual = data.entries.filter((e) => e.status === 'actual').sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1));
-  const warning = targetsWarning(summary.targetsPctTotal);
+  const warning = monthTargetsWarning(summary, plan);
   const shownCategories = summary.categories.filter((c) => c.spent !== 0 || c.target !== undefined);
   const unassignedEntries = unassigned.map((u) => data.entries.find((e) => e.id === u.entryId)).filter((e): e is BudgetEntry => e !== undefined);
   const dayOf = (date: string) => { const [, m, d] = date.split('-'); return `${Number(d)}.${Number(m)}.`; };

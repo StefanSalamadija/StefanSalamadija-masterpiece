@@ -4,7 +4,7 @@ import type { BudgetData } from './forecast';
 import { fundLedger, fundStatus } from './funds';
 import { goalProgress } from './goals';
 import { formatMoney } from './money';
-import { summariseMonth, targetsWarning } from './month';
+import { monthTargetsWarning, summariseMonth } from './month';
 import { monthLabel, ymOf } from './months';
 import { plannedItemsFor } from './planned';
 import { effectiveMonth } from './targets';
@@ -113,9 +113,8 @@ export function budgetAlerts(input: { data: BudgetData; settings: BudgetSettings
     }
   }
 
-  const warning = targetsWarning(summary.targetsPctTotal);
-  // Without planned income a % cannot be worked out, so the total says nothing yet.
-  if (warning !== undefined && summary.plannedIncome > 0 && Object.values(plan.potTargets).some((t) => t !== undefined)) {
+  const warning = monthTargetsWarning(summary, plan);
+  if (warning !== undefined) {
     out.push({ key: 'targets', text: warning, href: '#/budget/plan/targets' });
   }
   return out;

@@ -2,7 +2,7 @@ import { useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { POTS } from '../../../budget/catalog';
 import { formatMoney } from '../../../budget/money';
-import { summariseMonth, targetsWarning } from '../../../budget/month';
+import { monthTargetsWarning, summariseMonth } from '../../../budget/month';
 import { addMonths, monthLabel } from '../../../budget/months';
 import { editOrigin, effectiveMonth, setCategoryTarget, setPlannedIncome, setPotTarget } from '../../../budget/targets';
 import type { MonthChanges, PlanScope, Planned } from '../../../budget/targets';
@@ -95,7 +95,7 @@ export function PlanTargets({ data }: { data: PlanData }) {
   const plan = effectiveMonth(data.months, ym);
   const plannedIncome = plan.plannedIncome ?? 0;
   const summary = summariseMonth({ month: plan, entries: [], categories: data.categories, fundMoves: [], funds: [] });
-  const warning = targetsWarning(summary.targetsPctTotal);
+  const warning = monthTargetsWarning(summary, plan);
   const income = incomeText ?? inputText(plan.plannedIncome);
   const incomeValue = typedMoney(income);
   const categoryName = new Map(data.categories.map((c) => [c.id, c.name]));

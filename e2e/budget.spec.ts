@@ -212,6 +212,21 @@ test('budget: a recurring item and a fund set-aside to confirm move from planned
   expect((await storedEntries(page)).filter((e) => e.recurringId === 'rec-netflix')).toHaveLength(1);
 });
 
+test('budget: a month without targets shows no targets total, and only the current month offers a set-aside', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget/month/2026-10');
+  await expect(potCard(page, 'Needs')).toBeVisible();                // the month is drawn, not loading
+  await expect(page.getByText(/Targets add up to/)).toHaveCount(0);
+  await seed(page, 'budgetFunds', [{ id: 'fund-car', name: 'Car insurance', amount: 60000, dueYm: '2027-03', categoryId: 'budget-cat:needs:registration-insurance', startBalance: 0 }]);
+  await page.reload();
+  await expect(toConfirm(page).filter({ hasText: 'Car insurance' })).toContainText('€100.00');
+  await page.goto('./#/budget/month/2026-09');
+  await expect(page.getByRole('heading', { name: 'September 2026' })).toBeVisible();
+  await expect(potCard(page, 'Needs')).toBeVisible();
+  await expect(page.getByText('Car insurance')).toHaveCount(0);
+  await expect(page.getByText(/Targets add up to/)).toHaveCount(0);
+});
+
 test('budget: an entry saved as a favourite is a chip on the pad', async ({ page }) => {
   await openQuickAdd(page);
   await typeAmount(page, '2,5');
