@@ -90,7 +90,11 @@ function EmergencyTarget({ data }: { data: PlanData }) {
   const target = average * months;
   const balance = balancesAt(data, currentYm).emergency;
   const plan = effectiveMonth(data.months, currentYm);
-  const contribution = potTargetAmount(plan.potTargets.emergency, plan.plannedIncome ?? 0);
+  // The current contribution: the Emergency fund pot target, else the templates paying into an Emergency fund category.
+  const emergencyCategories = new Set(data.categories.filter((c) => c.pot === 'emergency').map((c) => c.id));
+  const templates = data.recurring.filter((t) => t.incomeSource === undefined && t.categoryId !== undefined && emergencyCategories.has(t.categoryId)
+    && t.startYm <= currentYm && (t.endYm === undefined || t.endYm >= currentYm)).reduce((sum, t) => sum + t.amount, 0);
+  const contribution = Math.max(potTargetAmount(plan.potTargets.emergency, plan.plannedIncome ?? 0), templates);
   const outlook = emergencyOutlook({ balance, target, monthlyContribution: contribution, ym: currentYm });
   return (
     <section class="card budget-row budget-section" aria-label="Emergency fund target">

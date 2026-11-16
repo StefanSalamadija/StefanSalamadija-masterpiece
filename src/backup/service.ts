@@ -150,7 +150,7 @@ function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): bool
     case 'budgetFundMoves': return typeof r.fundId === 'string' && isYm(r.ym) && isCents(r.amount) && (r.kind === 'setaside' || r.kind === 'paid');
     case 'budgetDebts':
       return typeof r.name === 'string' && isCents(r.startBalance) && typeof r.yearlyRatePct === 'number' && Number.isFinite(r.yearlyRatePct)
-        && isCents(r.instalment) && isYm(r.startYm);
+        && isCents(r.instalment) && isYm(r.startYm) && (r.extraFromYm === undefined || isYm(r.extraFromYm));
     case 'budgetGoals': return typeof r.name === 'string' && isCents(r.amount) && isYm(r.targetYm);
     case 'budgetAssets': return typeof r.name === 'string' && typeof r.includeInNetWorth === 'boolean';
     case 'budgetCorrections': return typeof r.account === 'string' && isYm(r.ym) && isCents(r.balance);

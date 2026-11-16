@@ -47,13 +47,18 @@ function CategoryRow({ category, siblings, all }: { category: BudgetCategory; si
   const [editing, setEditing] = useState(false);
   const [busy, run] = useBusy();
   const at = siblings.indexOf(category);
-  /** Swaps the order with the neighbour `by` places away in the same pot. */
+  /**
+   * Moves it `by` places in its pot: the pot's categories, in their new order, take the pot's order numbers in turn
+   * (made distinct first, should two records hold the same one, so that the move always shows).
+   */
   const move = (by: number) => {
-    const other = siblings[at + by];
-    if (!other) return;
+    if (!siblings[at + by]) return;
+    const next = [...siblings];
+    [next[at], next[at + by]] = [next[at + by], next[at]];
+    const sorted = siblings.map((c) => c.order).sort((a, b) => a - b);
+    const orders = sorted.every((o, i) => i === 0 || o > sorted[i - 1]) ? sorted : sorted.map((_, i) => sorted[0] + i);
     run(async () => {
-      await updateBudgetRecord(db, 'budgetCategories', category.id, { order: other.order });
-      await updateBudgetRecord(db, 'budgetCategories', other.id, { order: category.order });
+      for (const [i, c] of next.entries()) if (c.order !== orders[i]) await updateBudgetRecord(db, 'budgetCategories', c.id, { order: orders[i] });
     });
   };
   const toPot = (pot: PotId) => {
@@ -81,9 +86,11 @@ function CategoryRow({ category, siblings, all }: { category: BudgetCategory; si
         </button>
       </div>
       <div class="field">
-        <select aria-label={`Move ${category.name} to`} value={category.pot} disabled={busy} onChange={(e) => toPot(e.currentTarget.value as PotId)}>
+        <select aria-label={`Move ${category.name} to`} aria-describedby={`move-${category.id}`} value={category.pot} disabled={busy}
+          onChange={(e) => toPot(e.currentTarget.value as PotId)}>
           {POTS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
+        <p id={`move-${category.id}`} class="helper-text">Moving it moves its past months too.</p>
       </div>
     </li>
   );

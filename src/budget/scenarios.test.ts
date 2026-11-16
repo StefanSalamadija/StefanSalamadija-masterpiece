@@ -48,7 +48,9 @@ const CAR: ScenarioChange = { kind: 'oneOff', ym: '2027-05', amount: 1800000, la
 
 /** Carries the writes out on a copy of the data and settings, as the db layer would (written apart from `planWith`). */
 function perform(d: BudgetData, s: BudgetSettings, writes: PlanWrite[]): { data: BudgetData; settings: BudgetSettings } {
-  const out: BudgetData = { ...d, budgetMonths: [...d.budgetMonths], budgetRecurring: [...d.budgetRecurring], budgetEntries: [...d.budgetEntries] };
+  const out: BudgetData = {
+    ...d, budgetMonths: [...d.budgetMonths], budgetRecurring: [...d.budgetRecurring], budgetEntries: [...d.budgetEntries], budgetDebts: [...d.budgetDebts],
+  };
   let st = s;
   let id = 0;
   const stamp = (): BaseRecord => {
@@ -57,7 +59,7 @@ function perform(d: BudgetData, s: BudgetSettings, writes: PlanWrite[]): { data:
   };
   for (const w of writes) {
     if (w.table === 'budgetSettings') st = { ...st, ...w.patch };
-    else if (w.op === 'create') (out[w.table] as unknown[]).push({ ...w.fields, ...stamp() });
+    else if (w.op === 'create') (out[w.table] as unknown[]).push({ ...w.fields, ...stamp(), ...('id' in w && w.id !== undefined && { id: w.id }) });
     else {
       const list = out[w.table] as { id: string; deleted: boolean }[];
       const at = list.findIndex((r) => r.id === w.id);
@@ -286,22 +288,26 @@ describe('applyToPlan: what it writes', () => {
     ]);
   });
 
-  it('makes an extra debt payment planned payments on the debt, each month until it is paid off, and the lump sum', () => {
+  it('stores a monthly extra on the debt, from now until it is paid off, and makes the lump sum a planned payment', () => {
     const s = scenario('Pay off', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000, lumpYm: '2027-01', lump: 200000 }]);
     const { writes, summary } = applyToPlan(data(), SETTINGS, s, TODAY);
     const [, row] = compareScenarios(input(), [s]);
-    const pay = (date: string, amount: number) => ({ op: 'create', table: 'budgetEntries',
-      fields: { kind: 'expense', date, amount, categoryId: 'cat-extra', debtId: 'debt-1', note: 'Extra payment: Car loan', status: 'planned', oneOff: true } });
-    const monthly = writes.slice(1);
-    expect(writes[0]).toEqual(pay('2027-01-01', 200000));
-    expect(monthly.length).toBeGreaterThan(12);
-    expect(monthly).toEqual(monthly.map((_, i) => pay(`${addMonths('2026-11', i)}-01`, 10000)));
-    // The last one is in the month the debt is paid off.
-    expect(addMonths('2026-11', monthly.length - 1)).toBe(row.debtFree);
+    expect(writes).toEqual([
+      { op: 'create', table: 'budgetEntries', id: `scenario:${s.id}:0:2027-01`,
+        fields: { kind: 'expense', date: '2027-01-01', amount: 200000, categoryId: 'cat-extra', debtId: 'debt-1', note: 'Extra payment: Car loan', status: 'planned', oneOff: true } },
+      { op: 'update', table: 'budgetDebts', id: 'debt-1', patch: { extraMonthly: 10000, extraFromYm: '2026-11' } },
+    ]);
     expect(summary).toEqual([
-      `Car loan: extra €100.00 a month from November 2026 to ${monthName(row.debtFree!)}, ${monthly.length} planned payments to confirm`,
+      `Car loan: extra €100.00 a month from November 2026 until it is paid off in ${monthName(row.debtFree!)}`,
       'Car loan: extra payment of €2,000.00 in January 2027',
     ]);
+  });
+
+  it('adds a monthly extra to the one the debt already has', () => {
+    const d = data({ budgetDebts: [{ ...LOAN, extraMonthly: 5000, extraFromYm: '2026-01' }] });
+    const { writes } = applyToPlan(d, SETTINGS, scenario('More', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]), TODAY);
+    expect(writes).toEqual([{ op: 'update', table: 'budgetDebts', id: 'debt-1', patch: { extraMonthly: 15000, extraFromYm: '2026-01' } }]);
+    roundTrip(d, SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
   });
 
   it('leaves out an extra payment to a debt that no longer exists', () => {

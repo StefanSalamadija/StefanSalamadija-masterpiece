@@ -55,6 +55,11 @@ import { effectiveMonth, potTargetAmount } from './targets';
  * actual Debts payment that names no debt pays none (the ledger lists it as unassigned, for the user to say which):
  * until then it is counted on top of the instalments.
  *
+ * A debt's planned extra (`extraMonthly`, from `extraFromYm`, else its start month) is paid each month on top, while the
+ * debt still owes at the start of the month: a planned payment on the debt's own line. A template that pays the debt
+ * takes the instalment's place only, never the extra's, and the extra is never covered by a Debts target or a fixed
+ * amount. The last payment is only what is left. A what-if extra (`whatIfExtra`) is added to it the same way.
+ *
  * Transfers (§3.9.1): spending in the Savings & investments pot raises investments (the contribution), in the
  * Emergency fund pot raises the emergency fund, and in the Debts pot lowers the debt it pays: the one the entry names,
  * or the one its template pays off, else the only debt, else none (the bank still pays it). A debt is charged a
@@ -87,6 +92,8 @@ export interface ForecastInput {
   today: string; data: BudgetData; settings: BudgetSettings;
   /** How many months to forecast, instead of the settings' horizon (a scenario comparison looks 10 years ahead). */
   months?: number;
+  /** "With an extra €X/month": a what-if amount paid to one debt each month from now on, on top of its stored extra. */
+  whatIfExtra?: { debtId: string; amount: Cents };
 }
 
 export interface ForecastMonth {
@@ -110,7 +117,10 @@ export interface ForecastMonth {
 export interface ForecastResult {
   months: ForecastMonth[]; lowest?: { ym: Ym; freeToSpend: Cents; status: string }; warnings: { kind: 'belowBuffer' | 'negativeBank'; ym: Ym }[];
   /** Each debt's last payment month within the forecast (the month before it, for one already paid off); undefined if not paid off in it. */
-  debtFree: Record<string, Ym | undefined>; totalInterest: Cents; needsBankStart: boolean;
+  debtFree: Record<string, Ym | undefined>; totalInterest: Cents;
+  /** Each debt's interest within the forecast (they add up to `totalInterest`). */
+  interestByDebt: Record<string, Cents>;
+  needsBankStart: boolean;
   /** The buffer the warnings use. */
   buffer: Cents;
   /** Investments at the end of the month before the first forecast month. */
@@ -135,7 +145,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const cur = ymOf(input.today);
   const prev = addMonths(cur, -1);
   const corrections = data.budgetCorrections.filter((c) => !c.deleted);
-  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, investmentsCorrectedNow: false, assumptions };
+  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, interestByDebt: {}, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, investmentsCorrectedNow: false, assumptions };
   if (!corrections.some((c) => c.account === 'bank' && c.ym <= cur)) return empty;
 
   const count = Math.max(1, Math.floor(input.months ?? settings.horizon));
@@ -214,6 +224,7 @@ export function forecast(input: ForecastInput): ForecastResult {
 
   const months: ForecastMonth[] = [];
   let totalInterest = 0;
+  const interestByDebt: Record<string, Cents> = Object.fromEntries(debts.map((d) => [d.id, 0]));
 
   for (let i = 0; i < count; i += 1) {
     const ym = addMonths(cur, i);
@@ -287,6 +298,17 @@ export function forecast(input: ForecastInput): ForecastResult {
       if (paidByTemplate) continue;
       planned.push({ ...debtLine(d.id), amount: d.instalment });
       autoInstalments += d.instalment;
+    }
+
+    // Each debt still owing is paid its planned extra (and a what-if extra) on top, from its from-month: on the debt's
+    // own line, never given way to by a template, and never covered by a target or a fixed amount.
+    for (const d of debts) {
+      if (ym < d.startYm) continue;
+      const atStart = debtBalance.get(d.id) ?? d.startBalance;
+      if (atStart <= 0) continue;
+      const stored = d.extraMonthly !== undefined && d.extraMonthly > 0 && ym >= (d.extraFromYm ?? d.startYm) ? d.extraMonthly : 0;
+      const whatIf = input.whatIfExtra?.debtId === d.id ? Math.max(0, input.whatIfExtra.amount) : 0;
+      if (stored + whatIf > 0) planned.push({ ...debtLine(d.id), amount: stored + whatIf });
     }
 
     // Funds: the set-aside (earmarked) and the bill when due.
@@ -397,6 +419,7 @@ export function forecast(input: ForecastInput): ForecastResult {
       }
       paidTo.set(d.id, { actual: paidActual, rest: paidRest });
       interest += charged;
+      interestByDebt[d.id] = (interestByDebt[d.id] ?? 0) + charged;
       const end = isCur && correctedNow(`debt:${d.id}`) ? atCur[`debt:${d.id}`] - paidRest : owed - paidActual - paidRest;
       debtBalance.set(d.id, end);
       if (debtFree[d.id] === undefined && end <= 0 && balance > 0) debtFree[d.id] = ym;
@@ -448,6 +471,6 @@ export function forecast(input: ForecastInput): ForecastResult {
     if (m.bank < 0) warnings.push({ kind: 'negativeBank', ym: m.ym });
     if (lowest === undefined || m.freeToSpend < lowest.freeToSpend) lowest = { ym: m.ym, freeToSpend: m.freeToSpend, status: m.status };
   }
-  return { months, lowest, warnings, debtFree, totalInterest, needsBankStart: false, buffer, startInvestments: before.investments,
+  return { months, lowest, warnings, debtFree, totalInterest, interestByDebt, needsBankStart: false, buffer, startInvestments: before.investments,
     investmentsCorrectedNow: correctedNow('investments'), assumptions };
 }

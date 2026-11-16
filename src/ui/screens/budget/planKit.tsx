@@ -2,6 +2,7 @@ import type { ComponentChildren } from 'preact';
 import { useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
+import type { BudgetData } from '../../../budget/forecast';
 import { balancesByMonth } from '../../../budget/ledger';
 import type { Account } from '../../../budget/ledger';
 import { parseMoney } from '../../../budget/money';
@@ -32,6 +33,15 @@ export function usePlanData() {
 }
 
 export type PlanData = NonNullable<ReturnType<typeof usePlanData>>;
+
+/** The Plan's data as the forecast takes it. */
+export function budgetDataOf(data: PlanData): BudgetData {
+  return {
+    budgetCategories: data.categories, budgetEntries: data.entries, budgetMonths: data.months, budgetRecurring: data.recurring, budgetFunds: data.funds,
+    budgetFundMoves: data.fundMoves, budgetDebts: data.debts, budgetGoals: data.goals, budgetAssets: data.assets, budgetCorrections: data.corrections,
+    budgetScenarios: [],
+  };
+}
 
 /** Every account's balance at the end of `ym`. */
 export function balancesAt(data: PlanData, ym: Ym): Record<Account, Cents> {

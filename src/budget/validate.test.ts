@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entryLinksOk } from './validate';
+import { budgetMoneyOk, entryLinksOk } from './validate';
 
 describe('entryLinksOk', () => {
   it('accepts an entry whose links are absent or text', () => {
@@ -13,5 +13,14 @@ describe('entryLinksOk', () => {
       expect(entryLinksOk({ [key]: 7 })).toBe(false);
       expect(entryLinksOk({ [key]: null })).toBe(false);
     }
+  });
+});
+
+describe('budgetMoneyOk', () => {
+  it("checks a debt's planned extra payment is whole cents", () => {
+    expect(budgetMoneyOk({ instalment: 20000, extraMonthly: 5000 })).toBe(true);
+    expect(budgetMoneyOk({ instalment: 20000 })).toBe(true);
+    expect(budgetMoneyOk({ extraMonthly: 50.5 })).toBe(false);
+    expect(budgetMoneyOk({ extraMonthly: '5000' })).toBe(false);
   });
 });

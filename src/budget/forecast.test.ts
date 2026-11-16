@@ -337,6 +337,58 @@ describe('forecast: transfers, funds and debts', () => {
     const r = run({ budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0 })] });
     expect(r.debtFree).toEqual({ 'debt-1': undefined });
   });
+
+  describe('a planned extra payment stored on the debt', () => {
+    const loan = (fields = {}) => debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0, instalment: 30000, extraMonthly: 10000, ...fields });
+
+    it('is paid on top of the instalment, the last payment only what is left', () => {
+      const r = run({ budgetDebts: [loan()] });
+      expect(r.months.slice(0, 4).map((m) => [m.spending, m.debts])).toEqual([[240000, 60000], [240000, 20000], [220000, 0], [200000, 0]]);
+      expect(r.debtFree).toEqual({ 'debt-1': '2027-01' });
+    });
+
+    it('starts in its from-month', () => {
+      const r = run({ budgetDebts: [loan({ extraFromYm: '2026-12' })] });
+      expect(r.months.slice(0, 3).map((m) => m.debts)).toEqual([70000, 30000, 0]);
+    });
+
+    it('is paid on top of a template that pays the debt (only the instalment gives way to it)', () => {
+      const r = run({
+        budgetDebts: [loan()],
+        budgetRecurring: [recurring({ id: 'tpl-loan', amount: 25000, startYm: '2026-11', categoryId: 'cat-loan', untilDebtId: 'debt-1' })],
+      });
+      expect(r.months.slice(0, 2).map((m) => [m.spending, m.debts])).toEqual([[235000, 65000], [235000, 30000]]);
+    });
+
+    it('is never covered by a Debts target or a fixed amount', () => {
+      const big = loan({ startBalance: 1000000 });
+      const target = run({ budgetDebts: [big], budgetMonths: [needs200({ potTargets: {
+        needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 50000 } } } })] });
+      expect(target.months[0]).toMatchObject({ spending: 260000, debts: 940000 });
+      const fixed = run({ budgetDebts: [big] }, { forecastMethod: { needs: 'targets', savings: 'targets', wants: 'targets', debts: 'fixed', emergency: 'targets' },
+        fixedSpend: { debts: 50000 } });
+      expect(fixed.months[0]).toMatchObject({ spending: 260000, debts: 940000 });
+    });
+
+    it('counts an actual extra payment this month against it, never twice', () => {
+      const r = run({ budgetDebts: [loan()], budgetEntries: [entry('2026-11-05', 40000, { categoryId: 'cat-loan', debtId: 'debt-1' })] });
+      expect(r.months[0]).toMatchObject({ spending: 240000, debts: 60000 });
+    });
+
+    it('takes a what-if extra on top, and gives each debt its own interest', () => {
+      const withRate = loan({ yearlyRatePct: 12 });
+      const base = run({ budgetDebts: [withRate] });
+      const more = forecast({
+        today: TODAY, months: 12, whatIfExtra: { debtId: 'debt-1', amount: 20000 },
+        data: budgetData({ budgetCategories: CATEGORIES, budgetCorrections: [correction('bank', '2026-10', 500000)], budgetMonths: [needs200()], budgetDebts: [withRate] }),
+        settings: settings({ rotation: ROTATION, horizon: 12 }),
+      });
+      expect(more.months[0].debts).toBe(base.months[0].debts - 20000);
+      expect(more.debtFree['debt-1']! < base.debtFree['debt-1']!).toBe(true);
+      expect(base.interestByDebt).toEqual({ 'debt-1': base.totalInterest });
+      expect(more.interestByDebt['debt-1']).toBeLessThan(base.interestByDebt['debt-1']);
+    });
+  });
 });
 
 /** A small seeded PRNG (mulberry32), so that the random plans are the same on every run. */

@@ -80,7 +80,8 @@ function StartBody() {
       <p class="helper-text">
         What each account held at the end of a month, as your bank and statements show it. Later months go on from these balances.
       </p>
-      <TextField label="Balances at the end of" type="month" value={ym} onInput={(v) => { if (YM.test(v)) setYm(v); }} />
+      <TextField label="Balances at the end of" type="month" value={ym} onInput={(v) => { if (YM.test(v) && v <= currentYm) setYm(v); }}
+        hint="This month at the latest: the forecast starts from a balance it already has." />
       <BalancesForm key={ym} data={data} ym={ym} />
     </>
   );

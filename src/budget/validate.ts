@@ -6,7 +6,7 @@
 
 const POT_IDS: ReadonlySet<string> = new Set(['needs', 'savings', 'wants', 'debts', 'emergency']);
 /** The top-level fields that hold money, in any budget table. */
-const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'bufferCents'] as const;
+const MONEY_FIELDS = ['amount', 'balance', 'startBalance', 'instalment', 'extraMonthly', 'bufferCents'] as const;
 /** The money fields of a scenario change. */
 const CHANGE_MONEY_FIELDS = ['amount', 'monthly', 'lump'] as const;
 

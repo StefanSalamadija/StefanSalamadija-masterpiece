@@ -551,15 +551,27 @@ test('budget plan: a debt at 6% shows its debt-free month and what an extra woul
   await add.getByLabel('Balance').fill('1000');
   await add.getByLabel('Yearly rate (%)').fill('6');
   await add.getByLabel('Instalment').fill('100');
-  await expect(add.getByLabel('From month')).toHaveValue('2026-10');
+  await expect(add.getByLabel('From month', { exact: true })).toHaveValue('2026-10');
   await add.getByRole('button', { name: 'Add debt' }).click();
   const debt = page.getByRole('list', { name: 'Debts' }).getByRole('listitem').filter({ hasText: 'Car loan' });
   // €1,000.00 at 0.5% a month, €100.00 a month: 11 payments, October 2026 to August 2027.
   await expect(debt).toContainText('Debt-free in August 2027');
   await expect(debt).toContainText("With an extra €50.00/month you'd be debt-free in April 2027 (4 months sooner)");
-  await debt.getByLabel('Extra per month').fill('200');
+  await debt.getByLabel('Try an extra per month').fill('200');
   await expect(debt).toContainText("With an extra €200.00/month you'd be debt-free in January 2027 (7 months sooner)");
   expect(await stored(page, 'budgetDebts')).toMatchObject([{ name: 'Car loan', startBalance: 100000, yearlyRatePct: 6, instalment: 10000, startYm: '2026-10' }]);
+
+  // A planned extra of €50.00 a month is stored on the debt: the plan (and the forecast) pay it off in April 2027, and the
+  // what-if goes on top of it.
+  await debt.getByRole('button', { name: 'Edit' }).click();
+  const edit = page.getByRole('form', { name: 'Edit Car loan' });
+  await edit.getByLabel('Extra each month').fill('50');
+  await edit.getByRole('button', { name: 'Save' }).click();
+  await expect(debt).toContainText('Extra €50.00 a month from October 2026');
+  await expect(debt).toContainText('Debt-free in April 2027');
+  await debt.getByLabel('Try an extra per month').fill('150');
+  await expect(debt).toContainText("With an extra €150.00/month you'd be debt-free in January 2027 (3 months sooner)");
+  expect(await stored(page, 'budgetDebts')).toMatchObject([{ extraMonthly: 5000 }]);
 });
 
 test('budget plan: a goal suggests a monthly amount; the emergency fund target is 6 × Needs', async ({ page }) => {

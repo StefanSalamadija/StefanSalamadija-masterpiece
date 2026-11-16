@@ -1,14 +1,16 @@
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
-import { debtOutlook, extraDebtLine } from '../../../budget/debts';
+import { debtPayoffs } from '../../../budget/debtPlan';
+import type { DebtPayoff } from '../../../budget/debtPlan';
+import { extraDebtLine } from '../../../budget/debts';
 import { formatMoney } from '../../../budget/money';
-import { addMonths, monthLabel, ymOf } from '../../../budget/months';
+import { addMonths, monthLabel } from '../../../budget/months';
 import { createBudgetRecord, deleteBudgetRecord, updateBudgetRecord } from '../../../db/budget';
 import type { BudgetFields } from '../../../db/budget';
 import type { BudgetDebt, Cents } from '../../../domain/types';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useCurrentYm } from './Frame';
-import { AMOUNT_ERROR, RATE_ERROR, TextField, balancesAt, inputText, typedMoney, typedRate, useBusy } from './planKit';
+import { AMOUNT_ERROR, RATE_ERROR, TextField, balancesAt, budgetDataOf, inputText, typedMoney, typedRate, useBusy } from './planKit';
 import type { PlanData } from './planKit';
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -23,20 +25,26 @@ function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: s
   const [rate, setRate] = useState(debt ? String(debt.yearlyRatePct).replace('.', ',') : '');
   const [instalment, setInstalment] = useState(inputText(debt?.instalment));
   const [startYm, setStartYm] = useState(debt?.startYm ?? currentYm);
+  const [extra, setExtra] = useState(inputText(debt?.extraMonthly));
+  const [extraFromYm, setExtraFromYm] = useState(debt?.extraFromYm ?? '');
   const [busy, run] = useBusy();
 
   const balanceCents = typedMoney(balance);
   const rateValue = typedRate(rate);
   const instalmentCents = typedMoney(instalment);
-  const ok = name.trim() !== '' && typeof balanceCents === 'number' && rateValue !== 'invalid' && typeof instalmentCents === 'number' && YM.test(startYm);
+  const extraCents = typedMoney(extra);
+  const ok = name.trim() !== '' && typeof balanceCents === 'number' && rateValue !== 'invalid' && typeof instalmentCents === 'number' && YM.test(startYm)
+    && extraCents !== 'invalid' && (extraFromYm === '' || YM.test(extraFromYm));
 
   const save = () => {
     if (!ok) return;
     const fields: BudgetFields<'budgetDebts'> = {
       name: name.trim(), startBalance: balanceCents as number, yearlyRatePct: rateValue ?? 0, instalment: instalmentCents as number, startYm,
+      ...(typeof extraCents === 'number' && extraCents > 0 && { extraMonthly: extraCents, ...(extraFromYm !== '' && { extraFromYm }) }),
     };
-    if (debt) run(() => updateBudgetRecord(db, 'budgetDebts', debt.id, fields), onDone);
-    else run(() => createBudgetRecord(db, 'budgetDebts', fields), () => { setName(''); setBalance(''); setRate(''); setInstalment(''); });
+    // A field left out is removed, so that clearing the extra takes it away.
+    if (debt) run(() => updateBudgetRecord(db, 'budgetDebts', debt.id, { extraMonthly: undefined, extraFromYm: undefined, ...fields }), onDone);
+    else run(() => createBudgetRecord(db, 'budgetDebts', fields), () => { setName(''); setBalance(''); setRate(''); setInstalment(''); setExtra(''); setExtraFromYm(''); });
   };
 
   return (
@@ -50,6 +58,12 @@ function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: s
       <TextField label="Instalment" value={instalment} onInput={setInstalment} inputMode="decimal" hint="The monthly payment, interest included."
         error={instalmentCents === 'invalid' ? AMOUNT_ERROR : undefined} />
       <TextField label="From month" type="month" value={startYm} onInput={setStartYm} />
+      <TextField label="Extra each month" value={extra} onInput={setExtra} inputMode="decimal"
+        hint="A planned extra payment on top of the instalment, until the debt is paid off (optional)."
+        error={extraCents === 'invalid' ? AMOUNT_ERROR : undefined} />
+      {typeof extraCents === 'number' && extraCents > 0 && (
+        <TextField label="Extra from month" type="month" value={extraFromYm} onInput={setExtraFromYm} hint="Empty: from the From month." />
+      )}
       <div class="row-actions">
         <button type="submit" class="btn btn-primary btn-small" disabled={busy || !ok}>{submit}</button>
         {onDone && <button type="button" class="btn btn-outline btn-small" onClick={onDone}>Cancel</button>}
@@ -58,40 +72,42 @@ function DebtForm({ debt, label, submit, onDone }: { debt?: BudgetDebt; label: s
   );
 }
 
-function DebtRow({ debt, data, before, onDelete }: { debt: BudgetDebt; data: PlanData; before: Cents; onDelete: () => void }) {
+function DebtRow({ debt, data, balance, payoff, onDelete }: { debt: BudgetDebt; data: PlanData; balance: Cents; payoff: DebtPayoff; onDelete: () => void }) {
+  const { shipToday } = useAppState();
   const currentYm = useCurrentYm();
   const [editing, setEditing] = useState(false);
   const [extraText, setExtraText] = useState(inputText(DEFAULT_EXTRA));
+  const extra = typedMoney(extraText);
+  // The what-if: the plan as it stands, with the extra on top from this month.
+  const withExtra = useMemo(() => (typeof extra === 'number' && extra > 0 && !editing
+    ? debtPayoffs({ today: shipToday, data: budgetDataOf(data), settings: data.settings, whatIfExtra: { debtId: debt.id, amount: extra } })[debt.id]
+    : undefined), [extra, data, debt.id, shipToday, editing]);
   if (editing) return <li class="budget-row"><DebtForm debt={debt} label={`Edit ${debt.name}`} submit="Save" onDone={() => setEditing(false)} /></li>;
 
-  // What was paid to this debt this month already (a payment naming it, or the only debt's).
-  const paidThisMonth = data.entries
-    .filter((e) => e.kind === 'expense' && e.status === 'actual' && ymOf(e.date) === currentYm
-      && (e.debtId === debt.id || (e.debtId === undefined && data.debts.length === 1 && data.categories.find((c) => c.id === e.categoryId)?.pot === 'debts')))
-    .reduce((sum, e) => sum + e.amount, 0);
-  const input = { debt, ym: currentYm, balanceBefore: before, paidThisMonth, recurring: data.recurring };
-  const outlook = debtOutlook(input);
-  const extra = typedMoney(extraText);
-  const withExtra = typeof extra === 'number' && extra > 0 ? debtOutlook({ ...input, extra }) : undefined;
-  const line = withExtra && typeof extra === 'number' ? extraDebtLine(extra, outlook.debtFreeYm, withExtra.debtFreeYm) : undefined;
-  const done = outlook.debtFreeYm !== undefined && outlook.debtFreeYm < outlook.fromYm;
+  const line = withExtra && typeof extra === 'number' ? extraDebtLine(extra, payoff.debtFreeYm, withExtra.debtFreeYm) : undefined;
+  const done = payoff.debtFreeYm !== undefined && payoff.debtFreeYm < currentYm;
+  const hasExtra = debt.extraMonthly !== undefined && debt.extraMonthly > 0;
 
   return (
     <li class="card budget-row">
       <div class="budget-row-head">
         <span class="budget-row-name">{debt.name}</span>
-        <span class="budget-amount">{formatMoney(outlook.balance)}</span>
+        <span class="budget-amount">{formatMoney(balance)}</span>
       </div>
       <span class="budget-row-detail">
         {debt.yearlyRatePct}% a year · {formatMoney(debt.instalment)} a month · from {monthLabel(debt.startYm)}
       </span>
+      {hasExtra && (
+        <span class="budget-row-detail">Extra {formatMoney(debt.extraMonthly!)} a month from {monthLabel(debt.extraFromYm ?? debt.startYm)}</span>
+      )}
       <p class="budget-debt-free">
-        {done ? 'Paid off.' : outlook.debtFreeYm === undefined ? 'Not paid off at this payment.' : `Debt-free in ${monthLabel(outlook.debtFreeYm)}`}
+        {done ? 'Paid off.' : payoff.debtFreeYm === undefined ? 'Not paid off at this payment.' : `Debt-free in ${monthLabel(payoff.debtFreeYm)}`}
       </p>
-      {!done && outlook.totalInterest > 0 && <span class="budget-row-detail">Interest still to pay {formatMoney(outlook.totalInterest)}</span>}
+      {!done && payoff.totalInterest > 0 && <span class="budget-row-detail">Interest still to pay {formatMoney(payoff.totalInterest)}</span>}
       {!done && (
         <>
-          <TextField label="Extra per month" value={extraText} onInput={setExtraText} inputMode="decimal"
+          <TextField label="Try an extra per month" value={extraText} onInput={setExtraText} inputMode="decimal"
+            hint={hasExtra ? 'On top of the planned extra. Nothing is saved.' : 'Nothing is saved.'}
             error={extra === 'invalid' ? AMOUNT_ERROR : undefined} />
           {line && <p class="budget-row-detail" role="status">{line}</p>}
         </>
@@ -105,16 +121,18 @@ function DebtRow({ debt, data, before, onDelete }: { debt: BudgetDebt; data: Pla
 }
 
 /**
- * Plan → Debts (base §3.7, v2 §3.9.2): each debt's balance now, rate and instalment, the month it is paid off as the
- * plan pays it (its templates, else its instalment), the interest still to pay, and what an extra amount each month
- * would do ("With an extra €X/month…", X editable).
+ * Plan → Debts (base §3.7, v2 §3.9.2): each debt's balance now, rate, instalment and planned extra; the month it is
+ * paid off and the interest still to pay, both read from the forecast (`debtPayoffs`), so they are what the Forecast
+ * shows; and what an extra amount each month would do on top ("With an extra €X/month…", X editable, not saved).
  */
 export function PlanDebts({ data }: { data: PlanData }) {
-  const { db } = useAppState();
+  const { db, shipToday } = useAppState();
   const currentYm = useCurrentYm();
   const [deleting, setDeleting] = useState<BudgetDebt>();
   const [, run] = useBusy();
   const before: Partial<Record<string, Cents>> = data.debts.length > 0 ? balancesAt(data, addMonths(currentYm, -1)) : {};
+  const payoffs = useMemo(
+    () => (data.debts.length > 0 ? debtPayoffs({ today: shipToday, data: budgetDataOf(data), settings: data.settings }) : {}), [data, shipToday]);
   return (
     <>
       <DebtForm label="New debt" submit="Add debt" />
@@ -123,7 +141,10 @@ export function PlanDebts({ data }: { data: PlanData }) {
         {data.debts.length === 0 ? <p class="empty">No debts.</p> : (
           <ul class="budget-list" aria-label="Debts">
             {data.debts.map((d) => (
-              <DebtRow key={d.id} debt={d} data={data} before={before[`debt:${d.id}`] ?? d.startBalance} onDelete={() => setDeleting(d)} />
+              <DebtRow
+                key={d.id} debt={d} data={data} payoff={payoffs[d.id] ?? { totalInterest: 0 }} onDelete={() => setDeleting(d)}
+                balance={d.startYm >= currentYm ? d.startBalance : before[`debt:${d.id}`] ?? d.startBalance}
+              />
             ))}
           </ul>
         )}

@@ -1,4 +1,4 @@
-import type { BudgetDebt, BudgetRecurring, Cents, Ym } from '../domain/types';
+import type { Cents, Ym } from '../domain/types';
 import { formatMoney } from './money';
 import { addMonths, monthLabel, monthsBetween } from './months';
 
@@ -44,40 +44,6 @@ export function amortise(
     if (balance <= 0) return { months, debtFreeYm: ym, totalInterest };
   }
   return { months, totalInterest };
-}
-
-/** A debt's payoff as the plan stands (see `debtOutlook`). */
-export interface DebtOutlook {
-  /** The month the payoff starts: this month, or the debt's start month when that is later. */
-  fromYm: Ym;
-  /** The balance at the start of `fromYm`. */
-  balance: Cents;
-  debtFreeYm?: Ym;
-  totalInterest: Cents;
-}
-
-/**
- * A debt's payoff from the month `ym` on, paid as the forecast pays it: each month the templates that pay it off
- * (`untilDebtId`) and run in that month, or else its instalment, plus `extra`. A debt that started before `ym` starts
- * from `balanceBefore` (its balance at the end of last month); one that starts in `ym` or later from its start balance,
- * in its start month. What was paid to it this month already counts: when it is more than the plan's payment, the
- * month's payment is what was paid.
- */
-export function debtOutlook(input: {
-  debt: Pick<BudgetDebt, 'id' | 'startBalance' | 'yearlyRatePct' | 'instalment' | 'startYm'>; ym: Ym; balanceBefore: Cents; paidThisMonth: Cents;
-  recurring: Pick<BudgetRecurring, 'id' | 'deleted' | 'amount' | 'startYm' | 'endYm' | 'untilDebtId'>[]; extra?: Cents;
-}): DebtOutlook {
-  const { debt, ym } = input;
-  const fromYm = debt.startYm > ym ? debt.startYm : ym;
-  const balance = debt.startYm >= ym ? debt.startBalance : input.balanceBefore;
-  const templates = input.recurring.filter((t) => !t.deleted && t.untilDebtId === debt.id);
-  const payment = (m: Ym): Cents => {
-    const running = templates.filter((t) => m >= t.startYm && (t.endYm === undefined || m <= t.endYm));
-    const planned = running.length > 0 ? running.reduce((sum, t) => sum + t.amount, 0) : debt.instalment;
-    return (m === ym ? Math.max(planned, input.paidThisMonth) : planned) + (input.extra ?? 0);
-  };
-  const plan = amortise({ balance, yearlyRatePct: debt.yearlyRatePct, instalment: 0, extra: payment }, fromYm);
-  return { fromYm, balance, debtFreeYm: plan.debtFreeYm, totalInterest: plan.totalInterest };
 }
 
 /** "With an extra €X/month you'd be debt-free in <month> (<n> months sooner)"; none when the extra never pays it off. */
