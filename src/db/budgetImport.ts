@@ -1,8 +1,7 @@
 import { importWrites, norm } from '../budget/excel/import';
 import type { Choice, ImportChoices, SheetMonth } from '../budget/excel/import';
 import type { BudgetCategory } from '../domain/types';
-import { addEntry, createBudgetRecord, deleteBudgetRecord, listBudget, listCategories, updateBudgetRecord } from './budget';
-import type { BudgetFields } from './budget';
+import { addEntry, createBudgetRecord, deleteBudgetRecord, listBudget, listCategories, updateBudgetRecord, writeMonth } from './budget';
 import type { MasterpieceDB } from './schema';
 import { takeSnapshot } from './snapshots';
 import { guardWrite } from './storage';
@@ -60,10 +59,9 @@ export async function importBudget(
       const w = importWrites({ months, choices: resolved, categories: all, entries, budgetMonths, corrections, currentYm });
       for (const id of w.deleteEntryIds) await deleteBudgetRecord(db, 'budgetEntries', id);
       for (const e of w.entries) await addEntry(db, e);
-      for (const m of w.months.create) await createBudgetRecord(db, 'budgetMonths', m);
+      for (const { ym, ...slots } of w.months.create) await writeMonth(db, ym, slots);
       for (const m of w.months.update) {
-        const patch: Partial<BudgetFields<'budgetMonths'>> = { plannedIncome: m.plannedIncome, potTargets: m.potTargets, categoryTargets: m.categoryTargets, notes: m.notes };
-        await updateBudgetRecord(db, 'budgetMonths', m.id, patch);
+        await writeMonth(db, m.ym, { plannedIncome: m.plannedIncome, potTargets: m.potTargets, categoryTargets: m.categoryTargets, notes: m.notes });
       }
       for (const c of w.corrections.create) await createBudgetRecord(db, 'budgetCorrections', c);
       for (const u of w.corrections.update) await updateBudgetRecord(db, 'budgetCorrections', u.id, { balance: u.balance });

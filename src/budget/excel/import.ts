@@ -4,7 +4,7 @@ import type { BaseRecord, BudgetAccount, BudgetCategory, BudgetCorrection, Budge
 import { POTS } from '../catalog';
 import { correctionChanges } from '../corrections';
 import { parseMoney } from '../money';
-import { setPlannedIncome, setPotTarget } from '../targets';
+import { setPlannedIncome, setPotTarget, storedMonths } from '../targets';
 import type { MonthChanges, NewBudgetMonth } from '../targets';
 
 /*
@@ -425,7 +425,7 @@ export function importWrites(input: {
     }
   }
 
-  const live = input.budgetMonths.filter((m) => !m.deleted).sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  const live = storedMonths(input.budgetMonths);
   const planChanges: MonthChanges = { create: [], update: [] };
   for (const m of months) {
     const changes = monthChanges(live.find((b) => b.ym === m.ym), m);

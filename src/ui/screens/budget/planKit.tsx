@@ -102,13 +102,7 @@ export function useBusy(): [boolean, (work: () => Promise<unknown>, done?: () =>
   return [busy, run];
 }
 
-/** Writes what a target edit changes (see `targets.ts`): the month record to add, or the one to change. */
-export async function saveMonthChanges(db: MasterpieceDB, changes: MonthChanges): Promise<void> {
-  for (const c of changes.create) await createBudgetRecord(db, 'budgetMonths', c);
-  for (const u of changes.update) {
-    await updateBudgetRecord(db, 'budgetMonths', u.id, { plannedIncome: u.plannedIncome, potTargets: u.potTargets, categoryTargets: u.categoryTargets });
-  }
-}
+export { saveMonthChanges } from '../../../db/budget';
 
 /** A Plan section's screen: the budget's frame, with the way back to the Plan. */
 export function PlanFrame({ title, children }: { title: string; children: ComponentChildren }) {

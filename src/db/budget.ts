@@ -3,12 +3,16 @@ import { balancesByMonth } from '../budget/ledger';
 import { addMonths } from '../budget/months';
 import { plannedItemsFor } from '../budget/planned';
 import type { PlanWrite } from '../budget/scenarios';
+import { foldMonthRecords, monthRecordId } from '../budget/targets';
+import type { MonthChanges, NewBudgetMonth } from '../budget/targets';
 import { budgetMoneyOk, entryLinksOk } from '../budget/validate';
 import type {
   BaseRecord, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
   BudgetRecurring, BudgetScenario, BudgetSettings, BudgetTableName, Ym,
 } from '../domain/types';
 import { createRecord, softDelete, updateRecord } from './records';
+
+export { monthRecordId };
 import { syncTable } from './schema';
 import type { MasterpieceDB } from './schema';
 import { guardWrite } from './storage';
@@ -188,9 +192,56 @@ export function entriesInMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetEntry[]
   return db.budgetEntries.where('date').between(`${ym}-01`, `${addMonths(ym, 1)}-01`, true, false).filter((e) => !e.deleted).toArray();
 }
 
-/** The plan of a month, if one was saved for it. */
-export function getMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetMonth | undefined> {
-  return db.budgetMonths.where('ym').equals(ym).filter((m) => !m.deleted).first();
+/** The plan of a month, if one was saved for it: its live records folded into one (see `foldMonthRecords`). */
+export async function getMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetMonth | undefined> {
+  const live = await db.budgetMonths.where('ym').equals(ym).filter((m) => !m.deleted).toArray();
+  return live.length === 0 ? undefined : foldMonthRecords(live);
+}
+
+type MonthSlots = Pick<NewBudgetMonth, 'plannedIncome' | 'potTargets' | 'categoryTargets' | 'notes'>;
+const slotsKey = (m: MonthSlots) => JSON.stringify([m.plannedIncome ?? null, m.potTargets, m.categoryTargets, m.notes ?? null]);
+
+/**
+ * Writes a month's plan: `patch` over what the month holds now (its live records folded), into the one record with
+ * `monthRecordId(ym)`. Any other live record of the month (made under a random id by an older version, or by another
+ * device) is moved into it and left as a tombstone, so the move reaches the other device too. A key of `patch` set to
+ * `undefined` removes that value. A month with no record is not given one for an empty plan. One transaction.
+ */
+export function writeMonth(db: MasterpieceDB, ym: Ym, patch: Partial<MonthSlots>): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.budgetMonths, db.settings], async () => {
+      const live = await db.budgetMonths.where('ym').equals(ym).filter((m) => !m.deleted).toArray();
+      const held = live.length > 0 ? foldMonthRecords(live) : undefined;
+      const next: MonthSlots = {
+        plannedIncome: held?.plannedIncome, potTargets: held?.potTargets ?? {}, categoryTargets: held?.categoryTargets ?? {}, notes: held?.notes,
+        ...patch,
+      };
+      assertCents(next);
+      const id = monthRecordId(ym);
+      const canonical = live.find((m) => m.id === id);
+      if (canonical) {
+        if (slotsKey(canonical) !== slotsKey(next)) await updateRecord<BudgetMonth>(db, 'budgetMonths', id, next);
+      } else {
+        const empty = next.plannedIncome === undefined && next.notes === undefined
+          && Object.keys(next.potTargets).length === 0 && Object.keys(next.categoryTargets).length === 0;
+        if (empty && live.length === 0) return;
+        const fields = Object.fromEntries(Object.entries({ ym, ...next }).filter(([, v]) => v !== undefined)) as NewBudgetMonth;
+        await createRecord<BudgetMonth>(db, 'budgetMonths', fields, { scope: 'personal', id });
+      }
+      for (const m of live) if (m.id !== id) await softDelete(db, 'budgetMonths', m.id);
+    }),
+  );
+}
+
+/** Writes what a target edit changes (see `targets.ts`), each month into its one record (`writeMonth`). */
+export async function saveMonthChanges(db: MasterpieceDB, changes: MonthChanges): Promise<void> {
+  for (const c of changes.create) {
+    const { ym, ...slots } = c;
+    await writeMonth(db, ym, slots);
+  }
+  for (const u of changes.update) {
+    await writeMonth(db, u.ym, { plannedIncome: u.plannedIncome, potTargets: u.potTargets, categoryTargets: u.categoryTargets });
+  }
 }
 
 /** The id of the planned entry a template makes in a month: the same on every device (see `generatePlannedEntries`). */
@@ -274,12 +325,7 @@ export function confirmSetAside(db: MasterpieceDB, fundId: string, ym: Ym, amoun
 /** Saves a month's notes in its plan record; empty notes remove them. A month without a record gets one only for notes. */
 export async function saveMonthNotes(db: MasterpieceDB, ym: Ym, notes: string): Promise<void> {
   const text = notes.trim();
-  const month = await getMonth(db, ym);
-  if (month) {
-    if ((month.notes ?? '') !== text) await updateBudgetRecord(db, 'budgetMonths', month.id, { notes: text === '' ? undefined : text });
-  } else if (text !== '') {
-    await createBudgetRecord(db, 'budgetMonths', { ym, potTargets: {}, categoryTargets: {}, notes: text });
-  }
+  await writeMonth(db, ym, { notes: text === '' ? undefined : text });
 }
 
 /**
@@ -295,8 +341,14 @@ export function applyPlanWrites(db: MasterpieceDB, writes: PlanWrite[]): Promise
         if (w.table === 'budgetSettings') {
           await updateBudgetRecord(db, 'budgetSettings', w.id, w.patch);
         } else if (w.table === 'budgetMonths') {
-          if (w.op === 'create') await createBudgetRecord(db, 'budgetMonths', w.fields);
-          else await updateBudgetRecord(db, 'budgetMonths', w.id, { potTargets: w.patch.potTargets, categoryTargets: w.patch.categoryTargets });
+          if (w.op === 'create') {
+            const { ym, ...slots } = w.fields;
+            await writeMonth(db, ym, slots);
+          } else {
+            const held = await db.budgetMonths.get(w.id);
+            if (!held) throw new Error(`There is no budgetMonths record with id ${w.id}.`);
+            await writeMonth(db, held.ym, { potTargets: w.patch.potTargets, categoryTargets: w.patch.categoryTargets });
+          }
         } else if (w.table === 'budgetRecurring') {
           if (w.op === 'create') await createBudgetRecord(db, 'budgetRecurring', w.fields);
           else if (w.op === 'update') await updateBudgetRecord(db, 'budgetRecurring', w.id, w.patch);

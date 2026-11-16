@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetMonth } from '../domain/types';
 import { month } from '../test/budgetRecords';
-import { editOrigin, effectiveMonth, potTargetAmount, setCategoryTarget, setPlannedIncome, setPotTarget } from './targets';
+import { editOrigin, effectiveMonth, monthRecordId, potTargetAmount, setCategoryTarget, setPlannedIncome, setPotTarget } from './targets';
 import type { MonthChanges } from './targets';
 
 /** Saves the changes the way the app does: a new record is added with a fresh id, a changed one replaced. */
@@ -204,5 +204,42 @@ describe('editOrigin', () => {
     expect(editOrigin(months, '2026-12', needs)).toEqual({ scope: 'this', ym: '2026-12' });
     expect(editOrigin(months, '2027-01', needs)).toEqual({ scope: 'fromOn', ym: '2026-10' });
     expect(editOrigin([{ ...months[0], deleted: true }], '2026-11', needs)).toBeUndefined();
+  });
+});
+
+describe('duplicate month records (I2)', () => {
+  const older = (fields: Partial<BudgetMonth> = {}) => month('2026-12', { id: 'dev-a', createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-01T10:00:00.000Z', ...fields });
+  const newer = (fields: Partial<BudgetMonth> = {}) => month('2026-12', { id: 'dev-b', createdAt: '2026-11-02T10:00:00.000Z', updatedAt: '2026-11-03T10:00:00.000Z', ...fields });
+
+  it('folds two records of one month: each one\'s edits survive', () => {
+    const months = [
+      newer({ notes: 'Winter tyres' }),
+      older({ potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } } }),
+    ];
+    const plan = effectiveMonth(months, '2026-12');
+    expect(plan.potTargets.wants).toEqual({ kind: 'amount', value: 30000, inherited: false });
+    expect(plan.notes).toBe('Winter tyres');
+    expect(effectiveMonth(months, '2027-01').potTargets.wants).toEqual({ kind: 'amount', value: 30000, inherited: true });
+  });
+
+  it('takes the later-updated record for a value both set, and its notes', () => {
+    const months = [
+      older({ potTargets: { needs: { fromOn: { kind: 'amount', value: 100 } } }, notes: 'old' }),
+      newer({ potTargets: { needs: { fromOn: { kind: 'amount', value: 200 } } }, notes: 'new' }),
+    ];
+    const plan = effectiveMonth(months, '2026-12');
+    expect(plan.potTargets.needs?.value).toBe(200);
+    expect(plan.notes).toBe('new');
+  });
+
+  it('reads the canonical record, and an edit of a folded month carries every record\'s values', () => {
+    const months = [
+      older({ notes: 'Winter tyres' }),
+      newer({ id: monthRecordId('2026-12'), potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } } }),
+    ];
+    expect(effectiveMonth(months, '2026-12').record?.id).toBe('budget-month:2026-12');
+    const { update } = setPlannedIncome(months, '2026-12', 400000, 'fromOn');
+    expect(update).toHaveLength(1);
+    expect(update[0]).toMatchObject({ id: 'budget-month:2026-12', notes: 'Winter tyres', potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } } });
   });
 });

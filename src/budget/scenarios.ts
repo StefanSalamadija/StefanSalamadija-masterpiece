@@ -12,7 +12,7 @@ import type { ExtraStep } from './debts';
 import { formatMoney } from './money';
 import { addMonths, monthsBetween, ymOf } from './months';
 import type { ScenarioChange } from './scenarioTypes';
-import { effectiveMonth, setCategoryTarget, setPotTarget } from './targets';
+import { effectiveMonth, setCategoryTarget, setPotTarget, storedMonths } from './targets';
 import type { MonthChanges, NewBudgetMonth } from './targets';
 
 export type { ScenarioChange };
@@ -111,7 +111,15 @@ export function planWith(data: BudgetData, settings: BudgetSettings, writes: Pla
     if (w.table === 'budgetSettings') next = { ...next, ...w.patch };
     else if (w.table === 'budgetMonths') {
       if (w.op === 'create') out.budgetMonths.push({ ...w.fields, ...record() } as BudgetMonth);
-      else change(out.budgetMonths, w.id, (r) => ({ ...r, ...w.patch }));
+      else {
+        // As `writeMonth` does: the month's records folded into one, with the patch, the others moved into it.
+        const ym = out.budgetMonths.find((r) => r.id === w.id)?.ym;
+        const folded = storedMonths(out.budgetMonths).find((r) => r.ym === ym);
+        if (folded) {
+          out.budgetMonths = out.budgetMonths.filter((r) => r.ym !== ym || r.deleted);
+          out.budgetMonths.push({ ...folded, ...w.patch, id: w.id });
+        }
+      }
     } else if (w.table === 'budgetRecurring') {
       if (w.op === 'create') out.budgetRecurring.push({ ...w.fields, ...record() } as BudgetRecurring);
       else if (w.op === 'update') change(out.budgetRecurring, w.id, (r) => ({ ...r, ...w.patch }));
@@ -194,7 +202,9 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
   // The settings edits so far, made into one change at the end.
   const patch: SettingsPatch = {};
   // The month plans with the edits so far; `fresh` holds the ids of the months this apply creates.
-  let months = data.budgetMonths.filter((m) => !m.deleted);
+  // One record per month (duplicates folded, as the db writes them), so the writes start from what every view reads.
+  const initialMonths = storedMonths(data.budgetMonths);
+  let months = initialMonths;
   const fresh = new Set<string>();
   let recurring = data.budgetRecurring.filter((t) => !t.deleted);
   const templateWrites: PlanWrite[] = [];
@@ -218,7 +228,7 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
         const { id: _id, createdAt: _c, updatedAt: _u, updatedBy: _b, deleted: _d, scope: _s, ...fields } = m;
         monthWrites.push({ op: 'create', table: 'budgetMonths', fields });
       } else {
-        const was = data.budgetMonths.find((x) => x.id === m.id)!;
+        const was = initialMonths.find((x) => x.id === m.id)!;
         if (!sameMonthPlan(was, m)) monthWrites.push({ op: 'update', table: 'budgetMonths', id: m.id, patch: { potTargets: m.potTargets, categoryTargets: m.categoryTargets } });
       }
     }

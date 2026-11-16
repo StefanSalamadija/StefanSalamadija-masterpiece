@@ -3,9 +3,10 @@ import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import type { BudgetCategory, BudgetEntry, BudgetSettings } from '../domain/types';
 import {
   addEntry, applyPlanWrites, confirmSetAside, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, generatePlannedEntries, getBudgetSettings,
-  getMonth, listBudget, listCategories, plannedEntryId, saveMonthNotes, setAsideId, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
+  getMonth, listBudget, listCategories, plannedEntryId, saveMonthChanges, saveMonthNotes, setAsideId, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
 } from './budget';
 import { computeMerge, resolveMerge } from '../domain/merge';
+import { effectiveMonth, setPotTarget } from '../budget/targets';
 import { allTables } from './records';
 import { syncTable } from './schema';
 import type { MasterpieceDB } from './schema';
@@ -269,6 +270,45 @@ describe('saveMonthNotes', () => {
     expect(await db.budgetMonths.count()).toBe(1);
     await saveMonthNotes(db, '2026-11', '');
     expect(await db.budgetMonths.count()).toBe(1);
+    db.close();
+  });
+});
+
+describe('month records: one per month (I2)', () => {
+  it('writes a month under budget-month:<ym>', async () => {
+    const db = freshDb();
+    await saveMonthNotes(db, '2026-10', 'Paid the car tax.');
+    await saveMonthChanges(db, setPotTarget(await listBudget(db, 'budgetMonths'), '2026-11', 'wants', { kind: 'amount', value: 30000 }, 'fromOn'));
+    expect((await listBudget(db, 'budgetMonths')).map((m) => m.id).sort()).toEqual(['budget-month:2026-10', 'budget-month:2026-11']);
+    db.close();
+  });
+
+  it('folds duplicates on read and migrates them into the canonical record on the next write', async () => {
+    const db = freshDb();
+    // Two records of December, as two devices made them before month ids were fixed.
+    await createBudgetRecord(db, 'budgetMonths', { ym: '2026-12', potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } }, categoryTargets: {} });
+    vi.setSystemTime(new Date('2026-11-15T10:00:00Z'));
+    await createBudgetRecord(db, 'budgetMonths', { ym: '2026-12', potTargets: {}, categoryTargets: {}, notes: 'Winter tyres' });
+    expect(await getMonth(db, '2026-12')).toMatchObject({ notes: 'Winter tyres', potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } } });
+
+    vi.setSystemTime(new Date('2026-11-15T11:00:00Z'));
+    await saveMonthNotes(db, '2026-12', 'Winter tyres, fitted');
+    const live = await listBudget(db, 'budgetMonths');
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({
+      id: 'budget-month:2026-12', notes: 'Winter tyres, fitted', potTargets: { wants: { fromOn: { kind: 'amount', value: 30000 } } },
+    });
+    expect(await db.budgetMonths.count()).toBe(3); // the two duplicates stay as tombstones, so the move reaches the other device
+    expect(effectiveMonth(live, '2026-12').notes).toBe('Winter tyres, fitted');
+    db.close();
+  });
+
+  it('an Apply-to-plan month write lands in the canonical record too', async () => {
+    const db = freshDb();
+    const legacy = await createBudgetRecord(db, 'budgetMonths', { ym: '2026-12', potTargets: {}, categoryTargets: {}, notes: 'Winter tyres' });
+    await applyPlanWrites(db, [{ op: 'update', table: 'budgetMonths', id: legacy.id, patch: { potTargets: { needs: { fromOn: { kind: 'amount', value: 100 } } }, categoryTargets: {} } }]);
+    const live = await listBudget(db, 'budgetMonths');
+    expect(live).toMatchObject([{ id: 'budget-month:2026-12', notes: 'Winter tyres', potTargets: { needs: { fromOn: { kind: 'amount', value: 100 } } } }]);
     db.close();
   });
 });

@@ -44,12 +44,47 @@ export interface MonthChanges { create: NewBudgetMonth[]; update: BudgetMonth[] 
 
 export type PlanScope = 'this' | 'fromOn';
 
-const byYm = (a: BudgetMonth, b: BudgetMonth) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
+/** The id of a month's record, the same on every device, so that two devices that each plan a month hold one record. */
+export function monthRecordId(ym: Ym): string {
+  return `budget-month:${ym}`;
+}
 
-/** The live stored months, one per month (the oldest, should two devices each have stored one), in month order. */
-function storedMonths(months: BudgetMonth[]): BudgetMonth[] {
-  const seen = new Set<Ym>();
-  return months.filter((m) => !m.deleted).sort(byYm).filter((m) => (seen.has(m.ym) ? false : (seen.add(m.ym), true)));
+const byUpdated = (a: BudgetMonth, b: BudgetMonth) =>
+  (a.updatedAt < b.updatedAt ? -1 : a.updatedAt > b.updatedAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byCreated = (a: BudgetMonth, b: BudgetMonth) =>
+  (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
+ * One record out of several live records of the same month (two devices that each made one before month ids were
+ * fixed, or the same record edited on both): each slot (planned income, each pot target, each category target, the
+ * notes) is taken from the latest-updated record that holds it, so every device's edits survive. The result keeps the
+ * canonical record's identity (`monthRecordId`) when one of them is it, else the oldest's, and the latest `updatedAt`.
+ */
+export function foldMonthRecords(records: BudgetMonth[]): BudgetMonth {
+  if (records.length === 1) return records[0];
+  const base = records.find((m) => m.id === monthRecordId(m.ym)) ?? [...records].sort(byCreated)[0];
+  const ordered = [...records].sort(byUpdated);
+  const { plannedIncome: _p, notes: _n, ...rest } = base;
+  const folded: BudgetMonth = { ...rest, potTargets: {}, categoryTargets: {}, updatedAt: ordered[ordered.length - 1].updatedAt };
+  for (const m of ordered) {
+    if (m.plannedIncome !== undefined) folded.plannedIncome = m.plannedIncome;
+    if (m.notes !== undefined) folded.notes = m.notes;
+    Object.assign(folded.potTargets, m.potTargets);
+    Object.assign(folded.categoryTargets, m.categoryTargets);
+  }
+  return folded;
+}
+
+/** The live stored months, one per month (duplicates folded, see `foldMonthRecords`), in month order. */
+export function storedMonths(months: BudgetMonth[]): BudgetMonth[] {
+  const byMonth = new Map<Ym, BudgetMonth[]>();
+  for (const m of months) {
+    if (m.deleted) continue;
+    const list = byMonth.get(m.ym);
+    if (list) list.push(m);
+    else byMonth.set(m.ym, [m]);
+  }
+  return [...byMonth.values()].map(foldMonthRecords).sort((a, b) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0));
 }
 
 /**

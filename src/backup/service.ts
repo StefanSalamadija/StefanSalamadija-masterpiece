@@ -5,11 +5,12 @@ import { getSettings, updateSettings } from '../db/settings';
 import { listShips, liveActiveShipId } from '../db/ships';
 import { takeSnapshot } from '../db/snapshots';
 import { guardWrite } from '../db/storage';
-import { computeMerge, resolveMerge } from '../domain/merge';
-import type { MergeDecisions, MergePlan } from '../domain/merge';
+import { computeMerge, resolveMerge, sameContent } from '../domain/merge';
+import type { MergeDecisions, MergeItem, MergePlan } from '../domain/merge';
+import { foldMonthRecords } from '../budget/targets';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { BUDGET_TABLES, TABLE_NAMES } from '../domain/types';
-import type { BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
+import type { BudgetMonth, BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
 import { budgetMoneyOk, entryLinksOk, isCents } from '../budget/validate';
 import { isBase64 } from './crypto';
 import {
@@ -207,12 +208,40 @@ function assertWellFormed(tables: Tables): void {
   }
 }
 
+/**
+ * A month's plan changed on both devices is one record (`budget-month:<ym>`) that holds separate edits, such as a target
+ * set on one device and notes written on the other: instead of a conflict that would lose one of them, the two are
+ * folded (`foldMonthRecords`: each value from the later-updated side that holds it) and the result comes in as an
+ * update, stamped as changed now by this device so that the other device takes it on the next exchange. A fold that
+ * gives this device's version is no change here. A deleted side keeps the usual conflict.
+ */
+function foldMonthConflicts(plan: MergePlan, now: string, deviceId: string): MergePlan {
+  const items: MergeItem[] = [];
+  for (const item of plan.items) {
+    if (item.table !== 'budgetMonths' || item.kind !== 'conflict' || !item.local || item.local.deleted || item.incoming.deleted) {
+      items.push(item);
+      continue;
+    }
+    const local = item.local as BudgetMonth;
+    const folded: BudgetMonth = { ...foldMonthRecords([local, item.incoming as BudgetMonth]), id: item.id, updatedAt: now, updatedBy: deviceId };
+    if (sameContent(folded, local)) continue;
+    items.push({ ...item, kind: 'update', incoming: folded });
+  }
+  const summary = { ...plan.summary };
+  for (const item of plan.items) if (item.kind === 'conflict' && !items.some((i) => i.table === item.table && i.id === item.id && i.kind === 'conflict')) {
+    summary.conflicts -= 1;
+    if (items.some((i) => i.table === item.table && i.id === item.id)) summary.updated += 1;
+  }
+  return { items, summary };
+}
+
 /** Opens a backup file and works out what importing it would change. Writes nothing. Throws the envelope's errors, or `DamagedFileError`. */
 export async function prepareImport(db: MasterpieceDB, text: string, password: string): Promise<PreparedImport> {
   const { header, payload } = await openBackup(text, password);
   assertWellFormed(payload.tables);
   const [local, settings] = await Promise.all([allTables(db), getSettings(db)]);
-  return { header, plan: computeMerge(local, payload.tables, settings.lastSync[header.deviceId]) };
+  const plan = computeMerge(local, payload.tables, settings.lastSync[header.deviceId]);
+  return { header, plan: foldMonthConflicts(plan, new Date().toISOString(), settings.deviceId) };
 }
 
 /** The later of two instants; an `existing` that is missing or unreadable gives way to `incoming`. */

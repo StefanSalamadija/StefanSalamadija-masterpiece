@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPhoto, closeDraft, openDraft, saveTemplate } from '../db/forms';
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
-import { addEntry, createBudgetRecord, ensureBudgetSetup, listCategories, undoEntry, updateBudgetRecord, updateEntry } from '../db/budget';
+import { addEntry, createBudgetRecord, ensureBudgetSetup, getBudgetSettings, listBudget, listCategories, saveMonthChanges, saveMonthNotes, undoEntry, updateBudgetRecord, updateEntry } from '../db/budget';
+import { forecast } from '../budget/forecast';
+import type { BudgetData } from '../budget/forecast';
+import { effectiveMonth, setPotTarget } from '../budget/targets';
 import { allTables, createRecord, softDelete, updateRecord } from '../db/records';
 import { openDb } from '../db/schema';
 import type { MasterpieceDB } from '../db/schema';
@@ -1496,5 +1499,46 @@ describe('the budget in a backup', () => {
     await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
     for (const name of BUDGET_TABLES) expect((await allTables(b))[name], name).toEqual([]);
     expect((await allTables(b)).ships).toHaveLength(2);
+  });
+});
+
+describe('budget months on two devices (I2)', () => {
+  it('a target set on one device and notes on the other both survive the merge, and the forecast uses the target', async () => {
+    const a = freshDb();
+    const b = freshDb();
+    at('2026-11-15T08:00:00.000Z');
+    const ship = await createShip(a, 'M/V Ocean Star', 120);
+    await ensureBudgetSetup(a);
+    await ensureBudgetSetup(b);
+    at('2026-11-15T09:00:00.000Z');
+    await saveMonthChanges(a, setPotTarget(await listBudget(a, 'budgetMonths'), '2026-12', 'wants', { kind: 'amount', value: 30000 }, 'fromOn'));
+    at('2026-11-15T09:05:00.000Z');
+    await saveMonthNotes(b, '2026-12', 'Winter tyres');
+    await createBudgetRecord(b, 'budgetCorrections', { account: 'bank', ym: '2026-10', balance: 500000 });
+
+    at('2026-11-15T10:00:00.000Z');
+    const { text } = await exportBackup(a, 'full', PW, { shipId: ship.id, ...FAST });
+    const prepared = await prepareImport(b, text, PW);
+    expect(prepared.plan.summary.conflicts).toBe(0);
+    await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
+
+    const months = await listBudget(b, 'budgetMonths');
+    expect(months.map((m) => m.id)).toEqual(['budget-month:2026-12']);
+    const plan = effectiveMonth(months, '2026-12');
+    expect(plan.notes).toBe('Winter tyres');
+    expect(plan.potTargets.wants).toMatchObject({ kind: 'amount', value: 30000 });
+    const tables = await allTables(b);
+    const settings = await getBudgetSettings(b);
+    const r = forecast({ today: '2026-11-15', data: tables as unknown as BudgetData, settings, months: 3 });
+    expect(r.months.find((m) => m.ym === '2026-12')?.pots.wants).toBe(30000);
+
+    // And back: the other device ends with the same record, with no conflict either.
+    at('2026-11-15T11:00:00.000Z');
+    const back = await exportBackup(b, 'full', PW, { shipId: ship.id, ...FAST });
+    const again = await prepareImport(a, back.text, PW);
+    expect(again.plan.summary.conflicts).toBe(0);
+    await applyImport(a, again, { conflicts: {}, applyDeletions: true });
+    expect(effectiveMonth(await listBudget(a, 'budgetMonths'), '2026-12')).toMatchObject({ notes: 'Winter tyres', potTargets: { wants: { value: 30000 } } });
+    a.close(); b.close();
   });
 });
