@@ -272,10 +272,25 @@ test('budget: "Same as last time" on an entry starts quick add from it', async (
   await expect(entries(page)).toHaveCount(2);
 });
 
-test('budget: typing on a keyboard keeps the pad rules, and the shorthand keeps a typed note', async ({ page }) => {
+test('budget: a typed or pasted amount is read by the money rules, and a minus is refused', async ({ page }) => {
   await openQuickAdd(page);
-  await page.getByLabel('Amount', { exact: true }).fill('12.345');
-  await expect(page.getByLabel('Amount', { exact: true })).toHaveValue('12,34');
+  const amount = page.getByLabel('Amount', { exact: true });
+  await amount.fill('-5');
+  await expect(page.getByRole('alert')).toContainText('can’t be below zero');
+  await category(page, 'Groceries, food & drink').click();
+  await expect(save(page)).toBeDisabled();
+  await amount.fill('1.234,56');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await save(page).click();
+  await expect(page.getByRole('status').getByText('Saved €1,234.56 to Groceries, food & drink.')).toBeVisible();
+  await expect(entries(page).first()).toContainText('€1,234.56');
+  expect((await storedEntries(page)).map((e) => e.amount)).toEqual([123456]);
+});
+
+test('budget: typing on a keyboard drops what is not an amount, and the shorthand keeps a typed note', async ({ page }) => {
+  await openQuickAdd(page);
+  await page.getByLabel('Amount', { exact: true }).fill('€ 12,5x');
+  await expect(page.getByLabel('Amount', { exact: true })).toHaveValue('12,5');
   await page.getByLabel('Note').fill('for the trip');
   await page.getByLabel('Type it').fill('fuel 60');
   await expect(page.getByLabel('Note')).toHaveValue('for the trip');

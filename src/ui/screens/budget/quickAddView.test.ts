@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetCategory, BudgetEntry } from '../../../domain/types';
 import {
-  dateChips, DEFAULT_TOP, entryLabel, lastExpense, monthLabel, normaliseAmount, padPress, padText, topCategories,
+  dateChips, DEFAULT_TOP, entryLabel, lastExpense, monthLabel, normaliseAmount, padPress, padText, readAmount, tidyAmount, topCategories,
 } from './quickAddView';
 
 const stamp = { createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'd', deleted: false, scope: 'personal' as const };
@@ -38,13 +38,40 @@ describe('padPress', () => {
   });
 });
 
-describe('normaliseAmount', () => {
-  it('holds keyboard typing to the pad rules', () => {
-    expect(normaliseAmount('12.5')).toBe('12,5');
-    expect(normaliseAmount('12.345')).toBe('12,34');
-    expect(normaliseAmount('123456789')).toBe('1234567');
+describe('normaliseAmount and readAmount', () => {
+  it('keeps what can be part of an amount and drops the rest', () => {
     expect(normaliseAmount('€ 1,5x')).toBe('1,5');
+    expect(normaliseAmount('1.234,56')).toBe('1.234,56');
     expect(normaliseAmount('')).toBe('');
+  });
+  it('reads typed or pasted amounts by the parseMoney rules (Review Focus strings)', () => {
+    expect(readAmount(normaliseAmount('1.234,56'))).toEqual({ cents: 123456 });
+    expect(readAmount(normaliseAmount('1,234.56'))).toEqual({ cents: 123456 });
+    expect(readAmount(normaliseAmount('1.234'))).toEqual({ cents: 123400 });
+    expect(readAmount(normaliseAmount('12.5'))).toEqual({ cents: 1250 });
+    expect(readAmount(normaliseAmount('€ 60'))).toEqual({ cents: 6000 });
+    expect(readAmount(normaliseAmount('12,'))).toEqual({ cents: 1200 });
+    expect(readAmount('')).toEqual({});
+  });
+  it('refuses a minus with a message, never reading -5 as 5', () => {
+    const read = readAmount(normaliseAmount('-5'));
+    expect(read.cents).toBeUndefined();
+    expect(read.error).toMatch(/below zero/);
+    expect(readAmount(normaliseAmount('−5')).error).toMatch(/below zero/);
+  });
+  it('refuses what is not an amount and more than 7 whole digits', () => {
+    expect(readAmount('1.2.3').error).toMatch(/Not an amount/);
+    expect(readAmount('12345678').error).toMatch(/€9,999,999.99/);
+    expect(readAmount('0').cents).toBeUndefined();
+  });
+  it('tidies a read amount into the pad form, so the pad keeps working on it', () => {
+    expect(tidyAmount('1.234,56')).toBe('1234,56');
+    expect(tidyAmount('1,234.56')).toBe('1234,56');
+    expect(tidyAmount('1.234')).toBe('1234');
+    expect(tidyAmount('-5')).toBe('-5');
+    expect(tidyAmount('1.2.3')).toBe('1.2.3');
+    expect(tidyAmount('18,')).toBe('18,');
+    expect(tidyAmount('0,05')).toBe('0,05');
   });
 });
 

@@ -3,7 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { navigate, useRoute } from '../../../app/router';
 import { POTS } from '../../../budget/catalog';
-import { formatMoney, parseMoney } from '../../../budget/money';
+import { formatMoney } from '../../../budget/money';
 import { ymOf } from '../../../budget/months';
 import { parseShorthand } from '../../../budget/shorthand';
 import { addEntry, getBudgetSettings, listBudget, listCategories, undoEntry } from '../../../db/budget';
@@ -11,19 +11,13 @@ import { addDays } from '../../../domain/dates';
 import type { BudgetCategory, BudgetEntry, IncomeSource } from '../../../domain/types';
 import { useLive } from '../../useLive';
 import { BudgetFrame } from './Frame';
-import { dateChips, entryLabel, INCOME_SOURCES, lastExpense, normaliseAmount, padPress, padText, topCategories } from './quickAddView';
+import { dateChips, entryLabel, INCOME_SOURCES, lastExpense, normaliseAmount, padPress, padText, readAmount, tidyAmount, topCategories } from './quickAddView';
 import { offerUndo } from './undoToast';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'back'];
 
 /** How far back quick add looks for the categories used most and the last expense. */
 const LOOKBACK_DAYS = 90;
-
-/** The amount the pad's text stands for, in cents, when it is one above zero. A trailing comma (`12,`) reads as `12`. */
-function amountOf(text: string): number | undefined {
-  const value = parseMoney(text.replace(/,$/, ''));
-  return typeof value === 'number' && value > 0 ? value : undefined;
-}
 
 function useQuickAddData() {
   const { db, shipToday } = useAppState();
@@ -99,7 +93,7 @@ export function EntryPad({ onSaved, onUndone, income = false, sameAs }: EntryPad
   const asksDebt = !isIncome && category?.pot === 'debts' && debts.length >= 2;
   const assets = data?.assets ?? [];
   const asksAsset = isIncome && source === 'property' && assets.length > 0;
-  const cents = amountOf(amount);
+  const { cents, error: amountError } = readAmount(amount);
   const canSave = data !== undefined && cents !== undefined
     && (isIncome ? source !== undefined : category !== undefined && (!asksDebt || debtId !== ''));
 
@@ -207,19 +201,23 @@ export function EntryPad({ onSaved, onUndone, income = false, sameAs }: EntryPad
         <label for="qa-amount">Amount</label>
         <input
           id="qa-amount" type="text" inputMode="none" autocomplete="off" placeholder="0" value={amount}
+          aria-invalid={amountError !== undefined ? 'true' : undefined} aria-describedby={amountError !== undefined ? 'qa-amount-error' : undefined}
           onInput={(e) => {
-            // Held to the pad's rules; the field is set back at once, so a refused key does not stay on screen.
+            // Read by the parseMoney rules, so `1.234,56` is €1,234.56; a character that is never part of an amount
+            // is dropped at once, so it does not stay on screen.
             const text = normaliseAmount(e.currentTarget.value);
             e.currentTarget.value = text;
             setAmount(text);
           }}
+          onBlur={() => setAmount(tidyAmount)}
         />
+        {amountError !== undefined && <p id="qa-amount-error" class="field-error" role="alert">{amountError}</p>}
       </div>
       <div class="qa-pad" role="group" aria-label="Amount pad">
         {KEYS.map((k) => (
           <button
             key={k} type="button" class="qa-key" aria-label={k === 'back' ? 'Delete last digit' : undefined}
-            onClick={() => setAmount((text) => padPress(text, k))}
+            onClick={() => setAmount((text) => padPress(tidyAmount(text), k))}
           >
             {k === 'back' ? '⌫' : k}
           </button>

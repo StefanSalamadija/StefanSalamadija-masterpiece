@@ -1,4 +1,5 @@
 import { addDays } from '../../../domain/dates';
+import { parseMoney } from '../../../budget/money';
 import type { BudgetCategory, BudgetEntry, Cents, IncomeSource } from '../../../domain/types';
 
 /*
@@ -29,13 +30,40 @@ export function padPress(text: string, key: string): string {
 }
 
 /**
- * What is typed into the amount field on a keyboard, held to the pad's rules (`padPress`, key by key): a dot or a comma
- * is the decimal comma, anything else that is not a digit is dropped.
+ * What is typed or pasted into the amount field on a keyboard: the digits, `.` and `,` and a minus are kept (so that a
+ * minus can be refused with a message, never dropped), anything else (`€`, spaces, letters) is dropped. The text is
+ * read by `readAmount`, by the `parseMoney` rules, not key by key: `1.234,56` and `1,234.56` are €1,234.56 and `1.234`
+ * is €1,234.00.
  */
 export function normaliseAmount(typed: string): string {
-  let text = '';
-  for (const c of typed) text = padPress(text, c === '.' ? ',' : c);
-  return text;
+  return typed.replace(/[^\d.,\-−]/g, '').replace(/−/g, '-');
+}
+
+/** The most the field takes: 7 whole digits (€9,999,999.99), as on the pad. */
+const MAX_CENTS = 10 ** MAX_WHOLE_DIGITS * 100 - 1;
+
+/**
+ * The amount the field's text stands for, by the `parseMoney` rules; a trailing separator (`12,`, as the pad leaves
+ * it while typing) reads as `12`. `cents` is set only for an amount above zero; `error` says why a text is refused.
+ */
+export function readAmount(text: string): { cents?: Cents; error?: string } {
+  if (text === '') return {};
+  if (/[-−]/.test(text)) return { error: 'An amount can’t be below zero. For money that came back, choose Income.' };
+  const value = parseMoney(text.replace(/[.,]$/, ''));
+  if (value === 'invalid') return { error: 'Not an amount. Type it like 1234,56 or 1.234,56.' };
+  if (value === undefined || value <= 0) return {};
+  if (value > MAX_CENTS) return { error: 'At most €9,999,999.99.' };
+  return { cents: value };
+}
+
+/**
+ * The field's text in the pad's form (`1.234,56` → `1234,56`) once it reads as an amount; text already in the pad's
+ * form (`18,` while typing) and text that is refused are kept as they are.
+ */
+export function tidyAmount(text: string): string {
+  if (/^\d*(,\d{0,2})?$/.test(text)) return text;
+  const { cents } = readAmount(text);
+  return cents === undefined ? text : padText(cents);
 }
 
 /** The sources of income, with their exact labels (base §3.4). */
