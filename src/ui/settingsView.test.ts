@@ -123,7 +123,7 @@ describe('snapshotCountsText', () => {
     ({
       ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0,
       formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
-    budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0, budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0, ...over,
+    budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0, budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0, draftSurveyShips: 0, hydroTables: 0, draftSurveys: 0, surveyTemplates: 0, ...over,
     });
 
   it('lists what the snapshot holds, with the right plural', () => {
@@ -147,6 +147,9 @@ describe('snapshotCountsText', () => {
   it('counts the budget by its categories and entries, after the rest', () => {
     expect(snapshotCountsText(counts({ ships: 1, budgetCategories: 43, budgetEntries: 1, budgetSettings: 1 }))).toBe('1 ship · 43 budget categories · 1 budget entry');
     expect(snapshotCountsText(counts({ budgetCategories: 1, budgetEntries: 2 }))).toBe('1 budget category · 2 budget entries');
+    // The draft surveys are counted; the ship's survey data, table and workbook come with them.
+    expect(snapshotCountsText(counts({ ships: 1, draftSurveys: 2, hydroTables: 1, draftSurveyShips: 1, surveyTemplates: 1 }))).toBe('1 ship · 2 draft surveys');
+    expect(snapshotCountsText(counts({ draftSurveys: 1 }))).toBe('1 draft survey');
   });
 
   it('leaves out what it does not hold', () => {

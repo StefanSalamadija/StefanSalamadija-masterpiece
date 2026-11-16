@@ -27,8 +27,8 @@ test('another tab upgrades the database: this one stops, says so, and a reload b
   await other.evaluate(
     () =>
       new Promise<void>((resolve, reject) => {
-        // Above the app's own IndexedDB version (Dexie version 5 is 50), so that this is an upgrade.
-        const request = indexedDB.open('masterpiece', 60);
+        // Above the app's own IndexedDB version (Dexie version 6 is 60), so that this is an upgrade.
+        const request = indexedDB.open('masterpiece', 70);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           request.result.close();

@@ -27,14 +27,15 @@ afterEach(() => {
 });
 
 describe('database', () => {
-  it('declares schema version 5 with the syncable tables, settings and snapshots', () => {
+  it('declares schema version 6 with the syncable tables, settings and snapshots', () => {
     const db = freshDb();
-    expect(db.verno).toBe(5);
+    expect(db.verno).toBe(6);
     expect(db.tables.map((t) => t.name).sort()).toEqual([
       'budgetAssets', 'budgetCategories', 'budgetCorrections', 'budgetDebts', 'budgetEntries', 'budgetFundMoves', 'budgetFunds', 'budgetGoals',
-      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings',
-      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFiles', 'libraryFolders', 'libraryOpened', 'libraryText',
-      'settings', 'ships', 'snapshots', 'voyages',
+      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings', 'certificates', 'clockChanges', 'crew', 'crewDocuments',
+      'draftSurveyShips', 'draftSurveys', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'hydroTables', 'libraryDocs',
+      'libraryFiles', 'libraryFolders', 'libraryOpened', 'libraryText', 'settings', 'ships', 'snapshots', 'surveyTemplates',
+      'voyages',
     ]);
     expect(db.crewDocuments.schema.primKey.name).toBe('id');
     expect(db.crewDocuments.schema.idxByName).toHaveProperty('crewId');
@@ -264,8 +265,9 @@ describe('allTables, putRecords and replaceAllTables', () => {
     expect(Object.keys(t)).toEqual([...TABLE_NAMES]);
     expect(Object.keys(t).sort()).toEqual([
       'budgetAssets', 'budgetCategories', 'budgetCorrections', 'budgetDebts', 'budgetEntries', 'budgetFundMoves', 'budgetFunds', 'budgetGoals',
-      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings',
-      'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFolders', 'ships', 'voyages',
+      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings', 'certificates', 'clockChanges', 'crew', 'crewDocuments',
+      'draftSurveyShips', 'draftSurveys', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'hydroTables', 'libraryDocs',
+      'libraryFolders', 'ships', 'surveyTemplates', 'voyages',
     ]);
     expect(t.ships.map((r) => r.id)).toEqual([ship.id]);
     expect(t.crew.map((r) => r.id)).toEqual(crew.map((m) => m.id).sort());
@@ -311,7 +313,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
     const incoming: Tables = {
       ships: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
       formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
-    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [],
       crew: [{ id: 'm-1', createdAt: 'x', updatedAt: 'x', updatedBy: 'x', deleted: true, scope: 'ship', shipId: 'gone', ...draft } as CrewMember],
     };
     await replaceAllTables(db, incoming);

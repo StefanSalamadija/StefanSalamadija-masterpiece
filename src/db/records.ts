@@ -72,10 +72,12 @@ export async function updateRecord<T extends SyncRecord>(
 
 /**
  * The tombstone of a live record: marked deleted, stamped with `stamp`. A photo's tombstone keeps no image (`jpegBase64`
- * is emptied): the deletion has to reach other devices, the picture does not.
+ * is emptied), nor a draft survey template its workbook (`fileBase64`): the deletion has to reach other devices, the
+ * file does not.
  */
 export function tombstoneOf<T extends SyncRecord>(table: TableName, record: T, stamp: Pick<BaseRecord, 'updatedAt' | 'updatedBy'>): T {
-  return { ...record, deleted: true, ...(table === 'formPhotos' ? { jpegBase64: '' } : {}), ...stamp };
+  const emptied = table === 'formPhotos' ? { jpegBase64: '' } : table === 'surveyTemplates' ? { fileBase64: '' } : {};
+  return { ...record, deleted: true, ...emptied, ...stamp };
 }
 
 /**

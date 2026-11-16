@@ -3,8 +3,8 @@ import type { Table } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type {
   BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth, BudgetRecurring,
-  BudgetScenario, BudgetSettings, Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, LibraryDoc, LibraryFileRow, LibraryFolder, LibraryOpenedRow, LibraryTextRow, Settings, ShipProfile, Snapshot,
-  SyncRecord, TableName, Voyage,
+  BudgetScenario, BudgetSettings, Certificate, ClockChange, CrewDocument, CrewMember, DraftSurvey, DraftSurveyShip, FormDraft, FormLastValues, FormPhoto, FormTemplate, LibraryDoc, LibraryFileRow, LibraryFolder, LibraryOpenedRow, LibraryTextRow, Settings, ShipProfile, Snapshot,
+  HydroTable, SurveyTemplate, SyncRecord, TableName, Voyage,
 } from '../domain/types';
 import { connectionWatch } from './connection';
 import { snapshotInUpgrade } from './snapshots';
@@ -48,6 +48,10 @@ export class MasterpieceDB extends Dexie {
   declare budgetCorrections: Table<BudgetCorrection, string>;
   declare budgetScenarios: Table<BudgetScenario, string>;
   declare budgetSettings: Table<BudgetSettings, string>;
+  declare draftSurveyShips: Table<DraftSurveyShip, string>;
+  declare hydroTables: Table<HydroTable, string>;
+  declare draftSurveys: Table<DraftSurvey, string>;
+  declare surveyTemplates: Table<SurveyTemplate, string>;
   declare settings: Table<Settings, 'device'>;
   declare snapshots: Table<Snapshot, string>;
 
@@ -101,6 +105,16 @@ export class MasterpieceDB extends Dexie {
       budgetCorrections: 'id, account, ym',
       budgetScenarios: 'id',
       budgetSettings: 'id, key',
+    }).upgrade(async (tx) => {
+      await snapshotInUpgrade(tx);
+    });
+    // Draft surveys: each ship's survey data, hydrostatic table, surveys and company workbook. All belong to the ship
+    // (indexed by `shipId`), so they go into handovers as well as full backups. A final or interim survey is found from its initial one.
+    this.version(6).stores({
+      draftSurveyShips: 'id, shipId',
+      hydroTables: 'id, shipId',
+      draftSurveys: 'id, shipId, initialId',
+      surveyTemplates: 'id, shipId',
     }).upgrade(async (tx) => {
       await snapshotInUpgrade(tx);
     });

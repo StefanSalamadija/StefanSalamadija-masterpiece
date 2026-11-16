@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addPhoto, closeDraft, openDraft, saveTemplate } from '../db/forms';
+import {
+  deleteSurvey, getSurveyShip, getTemplate, listSurveys, saveHydro, saveSurvey, saveSurveyShip, saveTemplate as saveSurveyTemplate,
+} from '../db/survey';
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import { addEntry, createBudgetRecord, ensureBudgetSetup, getBudgetSettings, listBudget, listCategories, saveMonthChanges, saveMonthNotes, undoEntry, updateBudgetRecord, updateEntry } from '../db/budget';
 import { forecast } from '../budget/forecast';
@@ -61,6 +64,7 @@ const emptyTables = (): Tables => ({
   formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
   budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [],
   budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
+  draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [],
 });
 
 /** Device A as the tests use it: two ships, and on the first one crew (one of them deleted), a voyage, a certificate and a personal-scope record. */
@@ -583,6 +587,7 @@ describe('prepareImport and applyImport between two devices', () => {
       ships: 0, crew: 0, voyages: 0, certificates: 0, clockChanges: 0, crewDocuments: 0, formTemplates: 0, formDrafts: 0, formLastValues: 0, formPhotos: 0, libraryDocs: 0, libraryFolders: 0,
       budgetCategories: 0, budgetEntries: 0, budgetMonths: 0, budgetRecurring: 0, budgetFunds: 0, budgetFundMoves: 0, budgetDebts: 0, budgetGoals: 0,
       budgetAssets: 0, budgetCorrections: 0, budgetScenarios: 0, budgetSettings: 0,
+      draftSurveyShips: 0, hydroTables: 0, draftSurveys: 0, surveyTemplates: 0,
     });
   });
 
@@ -1149,6 +1154,24 @@ describe('prepareImport rejects what it cannot trust', () => {
       assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30 },
       forecastMethod: { needs: 'targets', savings: 'targets', wants: 'targets', debts: 'targets', emergency: 'targets' },
     },
+    // Made-up figures only.
+    draftSurveyShips: {
+      ...base, id: 'dss-1', shipId: 'ship-1', lbp: 100, dF: -1.5, dM: 0, dA: 3, beam: 18, keelPlateCorr: 0, lightShip: 3000, summerDraught: 8,
+      lcfSource: 'workbook', ranges: { initial: { dispTpcMtcFrom: 2, lcfFrom: 2 }, final: { dispTpcMtcFrom: 2, lcfFrom: 2.1 } }, sourceName: 'x.xlsx',
+    },
+    hydroTables: {
+      ...base, id: 'hyd-1', shipId: 'ship-1', rows: [
+        { draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5 },
+        { draft: 2.1, displacement: 3650, tpc: 15.1, mtc: 101, lcbMid: 1.01, lcfMid: 0.49, lcfTabledMid: 0.6 },
+      ],
+    },
+    draftSurveys: {
+      ...base, id: 'ds-1', shipId: 'ship-1', kind: 'final', initialId: 'ds-0', operation: 'loading', port: 'Port A', windBft: 3, swell: 0.5,
+      drafts: { fP: 5.1, fS: 5.12, mP: 5.5, mS: 5.52, aP: 6, aS: 6.02 }, density: 1.025, deductibles: { ballast: 1200, other: 0 }, comparedQty: 5000,
+    },
+    surveyTemplates: {
+      ...base, id: 'stp-1', shipId: 'ship-1', fileName: 'survey.xlsx', fileBase64: 'AAECAw==', cellMap: { INITIAL: { port: 'C5' }, FINAL: { finalOwnDA: 'F3' } },
+    },
   };
 
   /** A correctly sealed file in which one record of `table` carries `patch`; a key set to undefined is left out of the file. */
@@ -1270,6 +1293,46 @@ describe('prepareImport rejects what it cannot trust', () => {
       rotation: { salaryFrom: [{ ym: '2026-01', amount: 4500.5 }], periods: [], patternOn: 8, patternOff: 4, paidNextMonth: false, paidAtHomePct: 0 },
     }],
     ['a scenario has a change that is not whole cents', 'budgetScenarios', { changes: [{ kind: 'salary', fromYm: '2027-01', amount: 4500.5 }] }],
+    ['draft survey ship data have no shipId', 'draftSurveyShips', { shipId: undefined }],
+    ['draft survey ship data have an LBP that is text', 'draftSurveyShips', { lbp: '100' }],
+    ['draft survey ship data have no light ship', 'draftSurveyShips', { lightShip: undefined }],
+    ['draft survey ship data have a summer draught that is not a number', 'draftSurveyShips', { summerDraught: null }],
+    ['draft survey ship data have an LCF source that is not one', 'draftSurveyShips', { lcfSource: 'booklet' }],
+    ['draft survey ship data have no ranges', 'draftSurveyShips', { ranges: undefined }],
+    ['draft survey ship data have a range that is not a number', 'draftSurveyShips', { ranges: { initial: { dispTpcMtcFrom: 2, lcfFrom: 2 }, final: { dispTpcMtcFrom: '2', lcfFrom: 2 } } }],
+    ['draft survey ship data have a source name that is not text', 'draftSurveyShips', { sourceName: 3 }],
+    ['a hydrostatic table has no shipId', 'hydroTables', { shipId: undefined }],
+    ['a hydrostatic table has rows that are not a list', 'hydroTables', { rows: {} }],
+    ['a hydrostatic table has unsorted rows', 'hydroTables', { rows: [
+      { draft: 2.1, displacement: 3650, tpc: 15.1, mtc: 101, lcbMid: 1.01, lcfMid: 0.49 }, { draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5 },
+    ] }],
+    ['a hydrostatic table has two rows at the same draft', 'hydroTables', { rows: [
+      { draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5 }, { draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5 },
+    ] }],
+    ['a hydrostatic row has a TPC that is not a number', 'hydroTables', { rows: [{ draft: 2, displacement: 3500, tpc: null, mtc: 100, lcbMid: 1, lcfMid: 0.5 }] }],
+    ['a hydrostatic row has no LCF', 'hydroTables', { rows: [{ draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1 }] }],
+    ['a hydrostatic row has a tabled LCF that is text', 'hydroTables', { rows: [{ draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5, lcfTabledMid: '0.6' }] }],
+    ['a draft survey has no shipId', 'draftSurveys', { shipId: undefined }],
+    ['a draft survey has a kind that is not one', 'draftSurveys', { kind: 'intermediate' }],
+    ['a draft survey has no kind', 'draftSurveys', { kind: undefined }],
+    ['a draft survey has an operation that is not one', 'draftSurveys', { operation: 'bunkering' }],
+    ['a draft survey has an initial survey id that is not text', 'draftSurveys', { initialId: 7 }],
+    ['a draft survey has no drafts', 'draftSurveys', { drafts: undefined }],
+    ['a draft survey has a draft that is text', 'draftSurveys', { drafts: { fP: '5.1' } }],
+    ['a draft survey has a draft that is not a number', 'draftSurveys', { drafts: { aS: null } }],
+    ['a draft survey has no deductibles', 'draftSurveys', { deductibles: undefined }],
+    ['a draft survey has a deductible that is text', 'draftSurveys', { deductibles: { ballast: '1200' } }],
+    ['a draft survey has a density that is text', 'draftSurveys', { density: '1,025' }],
+    ['a draft survey has a compared quantity that is not a number', 'draftSurveys', { comparedQty: null }],
+    ['a draft survey has a port that is not text', 'draftSurveys', { port: 5 }],
+    ['a draft survey has a wind force that is text', 'draftSurveys', { windBft: '3' }],
+    ['a survey template has no shipId', 'surveyTemplates', { shipId: undefined }],
+    ['a survey template has no file', 'surveyTemplates', { fileBase64: undefined }],
+    ['a survey template has a file that is not base64', 'surveyTemplates', { fileBase64: 'not base64!' }],
+    ['a survey template has no file name', 'surveyTemplates', { fileName: undefined }],
+    ['a survey template has no cell map', 'surveyTemplates', { cellMap: undefined }],
+    ['a survey template has a cell map without its FINAL sheet', 'surveyTemplates', { cellMap: { INITIAL: {} } }],
+    ['a survey template has a cell that is not text', 'surveyTemplates', { cellMap: { INITIAL: { port: 5 }, FINAL: {} } }],
   ] as [string, TableName, object][])('throws DamagedFileError when %s', async (_label, table, patch) => {
     const b = freshDb();
     await expect(prepareImport(b, await fileWith(table, patch), PW)).rejects.toThrow(DamagedFileError);
@@ -1300,6 +1363,21 @@ describe('prepareImport rejects what it cannot trust', () => {
     await expect(prepareImport(b, await fileWith('budgetSettings', {
       favourites: [{ name: 'Coffee', amount: 320, categoryId: 'bc-1' }], fixedSpend: { wants: 10000 },
     }), PW)).resolves.toBeDefined();
+  });
+
+  it('takes draft survey records without their optional fields, the tabled LCF, and a template tombstone without its file', async () => {
+    const b = freshDb();
+    await expect(prepareImport(b, await fileWith('draftSurveyShips', {
+      summerDraught: undefined, sourceName: undefined, lcfSource: 'tabled',
+    }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('draftSurveys', {
+      kind: 'constant', operation: 'discharging', initialId: undefined, port: undefined, density: undefined, drafts: {}, deductibles: {},
+    }), PW)).resolves.toBeDefined();
+    for (const kind of ['initial', 'interim']) {
+      await expect(prepareImport(b, await fileWith('draftSurveys', { kind }), PW), kind).resolves.toBeDefined();
+    }
+    await expect(prepareImport(b, await fileWith('hydroTables', { rows: [] }), PW)).resolves.toBeDefined();
+    await expect(prepareImport(b, await fileWith('surveyTemplates', { deleted: true, fileBase64: '' }), PW)).resolves.toBeDefined();
   });
 
   it('does not ask for a shipId on a ship', async () => {
@@ -1588,5 +1666,75 @@ describe('budget months on two devices (I2, N1)', () => {
     await applyImport(b, prepared, { conflicts: {}, applyDeletions: true });
     expect(effectiveMonth(await listBudget(b, 'budgetMonths'), '2026-12')).toMatchObject({ notes: 'Winter tyres', potTargets: { wants: { value: 30000 } } });
     a.close(); b.close();
+  });
+});
+
+describe('draft surveys in a backup', () => {
+  /** Device A with draft survey records on both ships, one survey deleted. Made-up figures only. */
+  async function deviceAWithSurveys() {
+    const a = await deviceA();
+    const ranges = { initial: { dispTpcMtcFrom: 2, lcfFrom: 2 }, final: { dispTpcMtcFrom: 2, lcfFrom: 2 } };
+    const shipData = { lbp: 100, dF: -1.5, dM: 0, dA: 3, beam: 18, keelPlateCorr: 0, lightShip: 3000, lcfSource: 'workbook' as const, ranges };
+    await saveSurveyShip(a.db, a.ship.id, shipData);
+    await saveSurveyShip(a.db, a.other.id, { ...shipData, lbp: 120 });
+    await saveHydro(a.db, a.ship.id, [{ draft: 2, displacement: 3500, tpc: 15, mtc: 100, lcbMid: 1, lcfMid: 0.5 }]);
+    const initial = await saveSurvey(a.db, a.ship.id, { kind: 'initial', operation: 'loading', drafts: { fP: 5 }, deductibles: { ballast: 100 } });
+    const removed = await saveSurvey(a.db, a.ship.id, { kind: 'constant', operation: 'loading', drafts: {}, deductibles: {} });
+    await deleteSurvey(a.db, removed.id);
+    const theirs = await saveSurvey(a.db, a.other.id, { kind: 'initial', operation: 'discharging', drafts: {}, deductibles: {} });
+    await saveSurveyTemplate(a.db, a.ship.id, { fileName: 'survey.xlsx', bytes: new Uint8Array([1, 2, 3]), cellMap: { INITIAL: {}, FINAL: {} } });
+    return { ...a, initial, removed, theirs };
+  }
+
+  const SURVEY_TABLES = ['draftSurveyShips', 'hydroTables', 'draftSurveys', 'surveyTemplates'] as const;
+
+  it("go into a handover with that ship's records and tombstones only", async () => {
+    const a = await deviceAWithSurveys();
+    const { text } = await exportBackup(a.db, 'handover', PW, { shipId: a.ship.id, ...FAST });
+    const { payload } = await openBackup(text, PW);
+    expect(payload.tables.draftSurveys.map((r) => r.id).sort()).toEqual([a.initial.id, a.removed.id].sort());
+    for (const name of SURVEY_TABLES) {
+      expect(payload.tables[name].length, name).toBeGreaterThan(0);
+      expect(payload.tables[name].every((r) => (r as { shipId: string }).shipId === a.ship.id), name).toBe(true);
+    }
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    expect(await getSurveyShip(b, a.ship.id)).toEqual(await getSurveyShip(a.db, a.ship.id));
+    expect((await listSurveys(b, a.ship.id)).map((s) => s.id)).toEqual([a.initial.id]);
+    expect(await getTemplate(b, a.ship.id)).toEqual(await getTemplate(a.db, a.ship.id));
+  });
+
+  it('go into a full backup for every ship, and come out on the other device exactly', async () => {
+    const a = await deviceAWithSurveys();
+    const b = await deviceBSyncedWith(a.db);
+    const [mine, theirs] = [await allTables(a.db), await allTables(b)];
+    for (const name of SURVEY_TABLES) expect(theirs[name], name).toEqual(mine[name]);
+    expect(theirs.draftSurveys.map((r) => r.id)).toContain(a.theirs.id);
+  });
+
+  it('merge by id: a survey edited on one device comes in as an update', async () => {
+    const a = await deviceAWithSurveys();
+    at('2026-10-25T09:00:00.000Z');
+    const b = await deviceBSyncedWith(a.db);
+    at('2026-10-25T10:00:00.000Z');
+    await saveSurvey(a.db, a.ship.id, { kind: 'initial', operation: 'loading', drafts: { fP: 5.25 }, deductibles: {} }, a.initial.id);
+    at('2026-10-25T11:00:00.000Z');
+    const p = await prepareImport(b, (await exportBackup(a.db, 'full', PW, { shipId: a.ship.id, ...FAST })).text, PW);
+    expect(p.plan.items.map((i) => [i.table, i.id, i.kind])).toEqual([['draftSurveys', a.initial.id, 'update']]);
+  });
+
+  it('are empty after importing an older backup that has no draft survey tables', async () => {
+    const a = await deviceA();
+    const tables = await allTables(a.db);
+    const old: Record<string, unknown> = { ...tables };
+    for (const name of SURVEY_TABLES) delete old[name];
+    const header: BackupHeader = {
+      format: 'masterpiece-backup', version: 1, kind: 'full', deviceId: 'dev-old', deviceName: 'Old', exportedAt: '2026-10-25T10:00:00.000Z',
+    };
+    const text = await sealBackup(header, { tables: old as unknown as Tables }, PW, FAST);
+    const b = freshDb();
+    await applyImport(b, await prepareImport(b, text, PW), { conflicts: {}, applyDeletions: true });
+    expect((await listShips(b)).map((s) => s.id).sort()).toEqual([a.ship.id, a.other.id].sort());
+    for (const name of SURVEY_TABLES) expect(await b[name].count(), name).toBe(0);
   });
 });

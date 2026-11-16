@@ -2,6 +2,8 @@
 import type { DraftValues, FormKind, FormSchema, FormSetup } from '../forms/types';
 // Type-only, as above: the budget's code is loaded on demand by the Budget screens.
 import type { ScenarioChange } from '../budget/scenarioTypes';
+// Type-only, as above: the draft survey's code is loaded on demand by its screens.
+import type { CellMap } from '../survey/workbook/types';
 
 export type Scope = 'ship' | 'personal';
 export interface BaseRecord { id: string; createdAt: string; updatedAt: string; updatedBy: string; deleted: boolean; scope: Scope }
@@ -196,14 +198,60 @@ export interface BudgetSettings extends BaseRecord { scope: 'personal'; key: 'bu
   meCrewId?: string;
   favourites: { name: string; amount: Cents; categoryId: string }[];
   bufferCents?: Cents; forecastMethod: Record<PotId, ForecastMethod>; fixedSpend?: Partial<Record<PotId, Cents>>; horizon: 12 | 24 | 36 | 60 }
+/**
+ * A row of a ship's hydrostatic table, as the company workbook's HYDRO sheet holds it: draft (m), displacement (t), TPC
+ * (t/cm), MTC (t·m/cm), and LCB and LCF from midships (m, forward negative). `lcfTabledMid` is the LCF from the sheet's
+ * "LCF Tabled" column, turned into a distance from midships, for the `'tabled'` LCF source.
+ */
+export interface HydroRow { draft: number; displacement: number; tpc: number; mtc: number; lcbMid: number; lcfMid: number; lcfTabledMid?: number }
+/** Where a survey sheet's look-ups start in the hydrostatic table: the first draft (m) of each look-up range. */
+export interface SheetRanges { dispTpcMtcFrom: number; lcfFrom: number }
+/** Which LCF the trim correction uses: the workbook's "LCF from midship" column, or the one from "LCF Tabled". */
+export type LcfSource = 'workbook' | 'tabled';
+/**
+ * A ship's fixed data for draft surveys, one record per ship (its id is `surveyShipId(shipId)`): lengths in metres, the
+ * draft-mark distances from the perpendiculars signed as in the workbook, weights in tonnes.
+ */
+export interface DraftSurveyShip extends BaseRecord { shipId: string; lbp: number; dF: number; dM: number; dA: number; beam: number;
+  keelPlateCorr: number; lightShip: number; summerDraught?: number; summerDwt?: number; depth?: number; gt?: number;
+  lcfSource: LcfSource; ranges: { initial: SheetRanges; final: SheetRanges };
+  /** The workbook the data was imported from, and when. */
+  sourceName?: string; importedAt?: string }
+/** A ship's hydrostatic table, one record per ship (its id is `hydroTableId(shipId)`). Rows are in strictly increasing draft order. */
+export interface HydroTable extends BaseRecord { shipId: string; rows: HydroRow[] }
+export type SurveyKind = 'initial' | 'interim' | 'final' | 'constant';
+export type SurveyOperation = 'loading' | 'discharging';
+/** The six draft readings (m): forward, midships and aft, port and starboard. */
+export interface SurveyDrafts { fP?: number; fS?: number; mP?: number; mS?: number; aP?: number; aS?: number }
+/** The deductibles, in tonnes per item. */
+export interface SurveyDeductibles { ballast?: number; freshWater?: number; vlsfo?: number; lsmgo?: number; lubOil?: number; other?: number }
+/**
+ * One draft survey of a ship. An interim or final survey links to its initial survey (`initialId`). `density` is the
+ * dock water's (t/m³); `comparedQty` is what the result is compared with (shore figure), `blQty` the B/L quantity.
+ */
+export interface DraftSurvey extends BaseRecord { shipId: string; kind: SurveyKind; initialId?: string; operation: SurveyOperation;
+  port?: string; terminal?: string; cargo?: string; holds?: string; date?: string; timeFrom?: string; timeTill?: string;
+  windBft?: number; swell?: number; drafts: SurveyDrafts; density?: number; deductibles: SurveyDeductibles;
+  comparedQty?: number; blQty?: number; remarks?: string; surveyor?: string; chiefOfficer?: string }
+/**
+ * The company's draft survey workbook as imported for a ship, one record per ship (its id is `surveyTemplateId(shipId)`):
+ * the file's bytes as standard base64, as the forms library keeps its files (a deleted one keeps no file: `''`), and the
+ * input cells found in it.
+ */
+export interface SurveyTemplate extends BaseRecord { shipId: string; fileName: string; fileBase64: string; cellMap: CellMap }
 export type SyncRecord = ShipProfile | CrewMember | CrewDocument | Voyage | Certificate | ClockChange
   | FormTemplate | FormDraft | FormLastValues | FormPhoto | LibraryDoc | LibraryFolder
   | BudgetCategory | BudgetEntry | BudgetMonth | BudgetRecurring | BudgetFund | BudgetFundMove | BudgetDebt | BudgetGoal | BudgetAsset
-  | BudgetCorrection | BudgetScenario | BudgetSettings;
+  | BudgetCorrection | BudgetScenario | BudgetSettings
+  | DraftSurveyShip | HydroTable | DraftSurvey | SurveyTemplate;
 export type BudgetTableName = 'budgetCategories' | 'budgetEntries' | 'budgetMonths' | 'budgetRecurring' | 'budgetFunds' | 'budgetFundMoves'
   | 'budgetDebts' | 'budgetGoals' | 'budgetAssets' | 'budgetCorrections' | 'budgetScenarios' | 'budgetSettings';
 export type TableName = 'ships' | 'crew' | 'voyages' | 'certificates' | 'clockChanges' | 'crewDocuments'
-  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos' | 'libraryDocs' | 'libraryFolders' | BudgetTableName;
+  | 'formTemplates' | 'formDrafts' | 'formLastValues' | 'formPhotos' | 'libraryDocs' | 'libraryFolders' | BudgetTableName
+  | SurveyTableName;
+/** The draft survey's tables (all ship-scope), in `TABLE_NAMES` order. */
+export type SurveyTableName = 'draftSurveyShips' | 'hydroTables' | 'draftSurveys' | 'surveyTemplates';
+export const SURVEY_TABLES: readonly SurveyTableName[] = ['draftSurveyShips', 'hydroTables', 'draftSurveys', 'surveyTemplates'];
 /** The budget's tables, in `TABLE_NAMES` order. */
 export const BUDGET_TABLES: readonly BudgetTableName[] = [
   'budgetCategories', 'budgetEntries', 'budgetMonths', 'budgetRecurring', 'budgetFunds', 'budgetFundMoves', 'budgetDebts', 'budgetGoals',
@@ -212,7 +260,7 @@ export const BUDGET_TABLES: readonly BudgetTableName[] = [
 /** Every syncable table. A table added later goes last: it is the order of the snapshot, and an old backup file may lack it. */
 export const TABLE_NAMES: readonly TableName[] = [
   'ships', 'crew', 'voyages', 'certificates', 'clockChanges', 'crewDocuments', 'formTemplates', 'formDrafts', 'formLastValues', 'formPhotos',
-  'libraryDocs', 'libraryFolders', ...BUDGET_TABLES,
+  'libraryDocs', 'libraryFolders', ...BUDGET_TABLES, ...SURVEY_TABLES,
 ];
 /** The syncable tables that belong to the person, not to a ship: the forms library, the knowledge library and the budget. */
 export const PERSONAL_TABLES: readonly TableName[] = ['formTemplates', 'libraryDocs', 'libraryFolders', ...BUDGET_TABLES];

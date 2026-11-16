@@ -62,7 +62,7 @@ describe('upgrading a version-4 database to version 5', () => {
     expect(await db.libraryFiles.count()).toBe(1);
     for (const name of BUDGET_TABLES) expect(tables[name]).toEqual([]);
     expect((await getSettings(db)).deviceId).toBe('dev-1');
-    expect(db.backendDB().version).toBe(50);
+    expect(db.backendDB().version).toBe(60);
     db.close();
   });
 
@@ -91,9 +91,10 @@ describe('upgrading a version-4 database to version 5', () => {
 });
 
 describe('the budget tables', () => {
-  it('come last among the syncable tables, and are personal, not a ship\'s', async () => {
+  it('come after the library among the syncable tables, and are personal, not a ship\'s', async () => {
     const { PERSONAL_TABLES, SHIP_TABLES } = await import('../domain/types');
-    expect(TABLE_NAMES.slice(-BUDGET_TABLES.length)).toEqual([...BUDGET_TABLES]);
+    const from = TABLE_NAMES.indexOf('libraryFolders') + 1;
+    expect(TABLE_NAMES.slice(from, from + BUDGET_TABLES.length)).toEqual([...BUDGET_TABLES]);
     for (const name of BUDGET_TABLES) {
       expect(PERSONAL_TABLES).toContain(name);
       expect(SHIP_TABLES).not.toContain(name);
