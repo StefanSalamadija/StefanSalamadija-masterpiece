@@ -1,7 +1,7 @@
 # Masterpiece — Draft Survey (Piece 6) Design
 
 Date: 2026-11-16
-Status: draft for user review. A builder check was done; findings marked *(builder check)*.
+Status: approved by the user (2026-11-16). A builder check was done; findings marked *(builder check)*.
 
 > Confidentiality: the company's draft-survey workbook, the ship's hydrostatic table and any real survey figures are used **only locally** for checking. They are never committed or published. Tests use a made-up hydrostatic table and made-up surveys.
 
