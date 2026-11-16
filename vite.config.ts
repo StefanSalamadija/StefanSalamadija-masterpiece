@@ -69,6 +69,8 @@ export default defineConfig({
         display: 'standalone',
         start_url: '.',
         scope: '.',
+        // A long press on the installed app's icon offers quick add (v2 §3.6).
+        shortcuts: [{ name: 'Add expense', url: './#/budget/add' }],
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },

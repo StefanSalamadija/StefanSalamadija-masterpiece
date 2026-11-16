@@ -34,6 +34,14 @@ describe('matchRoute', () => {
     for (const hash of ['#/forms/abc', '#/forms/abc/other', '#/forms/abc/setup/x']) expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
   });
 
+  it('knows the budget routes', () => {
+    for (const path of ['/budget', '/budget/add', '/budget/catch-up', '/budget/forecast', '/budget/net-worth', '/budget/scenarios', '/budget/plan',
+      '/budget/trends', '/budget/import', '/budget/export']) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
+    expect(matchRoute('#/budget/month/2026-10')).toEqual({ path: '/budget/month/:ym', params: { ym: '2026-10' } });
+    expect(matchRoute('#/budget/scenarios/s1')).toEqual({ path: '/budget/scenarios/:id', params: { id: 's1' } });
+    expect(matchRoute('#/budget/month')).toEqual({ path: '/', params: {} });
+  });
+
   it('knows the Expiring route', () => {
     expect(matchRoute('#/ship/expiring')).toEqual({ path: '/ship/expiring', params: {} });
   });

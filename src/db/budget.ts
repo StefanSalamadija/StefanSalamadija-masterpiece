@@ -1,5 +1,7 @@
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
+import { balancesByMonth } from '../budget/ledger';
 import { addMonths } from '../budget/months';
+import { plannedItemsFor } from '../budget/planned';
 import { budgetMoneyOk, entryLinksOk } from '../budget/validate';
 import type {
   BaseRecord, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
@@ -188,4 +190,55 @@ export function entriesInMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetEntry[]
 /** The plan of a month, if one was saved for it. */
 export function getMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetMonth | undefined> {
   return db.budgetMonths.where('ym').equals(ym).filter((m) => !m.deleted).first();
+}
+
+/**
+ * Opening a month: writes a planned entry, to confirm, for each recurring template due in it (`plannedItemsFor`). It
+ * is idempotent: a template with an entry in the month, a deleted one included, is skipped, and the reads and writes are
+ * one transaction, so two opens at once still write each entry once. A template that pays off a debt stops once the
+ * debt's balance at the start of the month is 0. The funds' set-asides are not entries: they are confirmed with
+ * `confirmSetAside`.
+ */
+export function generatePlannedEntries(db: MasterpieceDB, ym: Ym): Promise<void> {
+  const tables = [
+    db.budgetEntries, db.budgetRecurring, db.budgetFunds, db.budgetFundMoves, db.budgetDebts, db.budgetCorrections, db.budgetAssets,
+    db.budgetCategories, db.settings,
+  ];
+  return guardWrite(() =>
+    db.transaction('rw', tables, async () => {
+      const [all, recurring, funds, fundMoves, debts, corrections, assets, categories] = await Promise.all([
+        db.budgetEntries.toArray(), listBudget(db, 'budgetRecurring'), listBudget(db, 'budgetFunds'), listBudget(db, 'budgetFundMoves'),
+        listBudget(db, 'budgetDebts'), listBudget(db, 'budgetCorrections'), listBudget(db, 'budgetAssets'), listBudget(db, 'budgetCategories'),
+      ]);
+      if (recurring.length === 0) return;
+      const before = addMonths(ym, -1);
+      const { balances } = balancesByMonth({
+        entries: all, corrections, debts, assets, categories, fundMoves, funds, recurring, fromYm: before, toYm: before,
+      });
+      const atStart = balances.get(before);
+      const debtBalances: Record<string, number> = {};
+      for (const d of debts) {
+        const balance = atStart?.[`debt:${d.id}`];
+        if (balance !== undefined) debtBalances[d.id] = balance;
+      }
+      const { entries } = plannedItemsFor(ym, { recurring, funds, fundMoves, existing: all, debts, debtBalances, corrections });
+      for (const e of entries) await addEntry(db, e);
+    }),
+  );
+}
+
+/** Confirms a fund's set-aside for the month: a fund record, never a bank entry (§3.9.6). */
+export function confirmSetAside(db: MasterpieceDB, fundId: string, ym: Ym, amount: number): Promise<BudgetFundMove> {
+  return createBudgetRecord(db, 'budgetFundMoves', { fundId, ym, amount, kind: 'setaside' });
+}
+
+/** Saves a month's notes in its plan record; empty notes remove them. A month without a record gets one only for notes. */
+export async function saveMonthNotes(db: MasterpieceDB, ym: Ym, notes: string): Promise<void> {
+  const text = notes.trim();
+  const month = await getMonth(db, ym);
+  if (month) {
+    if ((month.notes ?? '') !== text) await updateBudgetRecord(db, 'budgetMonths', month.id, { notes: text === '' ? undefined : text });
+  } else if (text !== '') {
+    await createBudgetRecord(db, 'budgetMonths', { ym, potTargets: {}, categoryTargets: {}, notes: text });
+  }
 }

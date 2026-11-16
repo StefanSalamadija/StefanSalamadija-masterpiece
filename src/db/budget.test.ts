@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import type { BudgetCategory, BudgetEntry, BudgetSettings } from '../domain/types';
 import {
-  addEntry, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, getBudgetSettings, listBudget, listCategories,
-  undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
+  addEntry, confirmSetAside, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, generatePlannedEntries, getBudgetSettings,
+  getMonth, listBudget, listCategories, saveMonthNotes, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
 } from './budget';
 import { allTables } from './records';
 import { openDb } from './schema';
@@ -200,6 +200,72 @@ describe('the other budget tables', () => {
     await expect(createBudgetRecord(db, 'budgetGoals', { name: 'Boat', amount: 100.5, targetYm: '2030-01' })).rejects.toThrow();
     const goal = await createBudgetRecord(db, 'budgetGoals', { name: 'Boat', amount: 1000000, targetYm: '2030-01' });
     await expect(updateBudgetRecord(db, 'budgetGoals', goal.id, { amount: 0.1 })).rejects.toThrow();
+    db.close();
+  });
+});
+
+describe('generatePlannedEntries', () => {
+  const netflix = { name: 'Netflix', amount: 1299, categoryId: 'budget-cat:wants:subscriptions', day: 31, startYm: '2026-10' };
+
+  it("writes a planned entry for each template due in the month, once, however often or at once it is called", async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    const t = await createBudgetRecord(db, 'budgetRecurring', netflix);
+    await Promise.all([generatePlannedEntries(db, '2026-11'), generatePlannedEntries(db, '2026-11')]);
+    await generatePlannedEntries(db, '2026-11');
+    const made = await entriesInMonth(db, '2026-11');
+    expect(made).toHaveLength(1);
+    expect(made[0]).toMatchObject({ kind: 'expense', date: '2026-11-30', amount: 1299, status: 'planned', recurringId: t.id, note: 'Netflix', scope: 'personal' });
+    expect(await entriesInMonth(db, '2026-09')).toEqual([]);
+    db.close();
+  });
+
+  it('does not bring back a planned entry the user deleted', async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    await createBudgetRecord(db, 'budgetRecurring', netflix);
+    await generatePlannedEntries(db, '2026-11');
+    const [made] = await entriesInMonth(db, '2026-11');
+    await undoEntry(db, made.id);
+    await generatePlannedEntries(db, '2026-11');
+    expect(await entriesInMonth(db, '2026-11')).toEqual([]);
+    db.close();
+  });
+
+  it('stops a template once the debt it pays off is paid, using the balance at the start of the month', async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    const debt = await createBudgetRecord(db, 'budgetDebts', { name: 'Car', startBalance: 10000, yearlyRatePct: 0, instalment: 10000, startYm: '2026-10' });
+    await createBudgetRecord(db, 'budgetRecurring', { name: 'Car loan', amount: 10000, categoryId: 'budget-cat:debts:loan-instalment', day: 1, startYm: '2026-10', untilDebtId: debt.id });
+    await addEntry(db, { kind: 'expense', date: '2026-10-01', amount: 10000, categoryId: 'budget-cat:debts:loan-instalment', status: 'actual', debtId: debt.id });
+    await generatePlannedEntries(db, '2026-11');
+    expect(await entriesInMonth(db, '2026-11')).toEqual([]);
+    db.close();
+  });
+});
+
+describe('confirmSetAside', () => {
+  it("records a fund's set-aside in the month", async () => {
+    const db = freshDb();
+    const fund = await createBudgetRecord(db, 'budgetFunds', { name: 'Insurance', amount: 60000, dueYm: '2027-03', startBalance: 0 });
+    await confirmSetAside(db, fund.id, '2026-10', 12000);
+    expect(await listBudget(db, 'budgetFundMoves')).toMatchObject([{ fundId: fund.id, ym: '2026-10', amount: 12000, kind: 'setaside', scope: 'personal' }]);
+    await expect(confirmSetAside(db, fund.id, '2026-10', 0.5)).rejects.toThrow();
+    db.close();
+  });
+});
+
+describe('saveMonthNotes', () => {
+  it("keeps a month's notes in its plan record, making one only when needed", async () => {
+    const db = freshDb();
+    await saveMonthNotes(db, '2026-10', 'Paid the car tax.');
+    expect(await getMonth(db, '2026-10')).toMatchObject({ ym: '2026-10', notes: 'Paid the car tax.', potTargets: {}, categoryTargets: {} });
+    await saveMonthNotes(db, '2026-10', '');
+    const month = await getMonth(db, '2026-10');
+    expect(month?.notes).toBeUndefined();
+    expect(await db.budgetMonths.count()).toBe(1);
+    await saveMonthNotes(db, '2026-11', '');
+    expect(await db.budgetMonths.count()).toBe(1);
     db.close();
   });
 });

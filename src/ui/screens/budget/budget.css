@@ -1,0 +1,62 @@
+/* ---- Budget (lazy chunk) ---- */
+
+.budget-nav .chips { padding: 0 0 12px; margin: 0 0 4px; }
+
+/* Quick add: everything a thumb taps is at least the theme's target, the pad keys bigger. */
+.quick-add { display: flex; flex-direction: column; gap: 14px; margin: 0 0 16px; }
+.qa-links { margin: 0 0 12px; overflow-wrap: anywhere; }
+.qa-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.qa-chip { cursor: pointer; font-family: inherit; }
+.qa-chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.qa-amount input { font-size: 32px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; min-height: 64px; }
+.qa-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.qa-key {
+  min-height: 60px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  font-family: inherit; font-size: 26px; font-weight: 600; cursor: pointer; touch-action: manipulation;
+}
+.qa-key:active { background: var(--line); }
+.qa-categories { display: flex; flex-direction: column; gap: 8px; }
+.qa-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.qa-cat {
+  min-height: 56px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  color: var(--text); font-family: inherit; font-size: 15px; font-weight: 500; text-align: left; overflow-wrap: anywhere; cursor: pointer;
+  touch-action: manipulation;
+}
+.qa-cat[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+:root[data-theme='contrast'] .qa-cat, :root[data-theme='contrast'] .qa-key { border-width: 2px; }
+.qa-more summary { min-height: var(--target); display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.qa-pot h3 { margin: 12px 0 8px; font-size: 14px; color: var(--muted); }
+.qa-chosen { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.qa-save { width: 100%; touch-action: manipulation; }
+
+/* The Undo toast: above the bottom bar, in the accent colours (it is news, not an error). */
+.budget-toast {
+  position: fixed; left: 0; right: 0; bottom: 88px; z-index: 20; width: calc(100% - 32px); max-width: 520px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: var(--radius);
+  background: var(--bar-bg); color: var(--bar-text); font-size: 14px; line-height: 1.35; box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+}
+.budget-toast-undo { flex: none; background: transparent; border-color: var(--bar-text); color: var(--bar-text); }
+
+/* The month. */
+.budget-months { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin: 0 0 12px; }
+.budget-months a { min-height: var(--target); display: inline-flex; align-items: center; }
+.budget-warning, .budget-income, .budget-surplus { margin: 0 0 12px; overflow-wrap: anywhere; }
+.budget-surplus { font-size: 18px; font-weight: 600; }
+.budget-pots { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 0 0 12px; }
+.budget-pot h3 { margin: 0 0 6px; font-size: 16px; }
+.budget-figures { margin: 0; padding: 0; list-style: none; font-size: 14px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+.budget-over { color: var(--red); font-weight: 600; }
+.budget-section { margin: 20px 0 0; }
+.budget-section h3 { margin: 0 0 8px; font-size: 18px; }
+.budget-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.budget-row { display: flex; flex-direction: column; gap: 6px; }
+.budget-row-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.budget-row-name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.budget-row-detail { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.budget-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.budget-cat { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.budget-edit { display: flex; flex-direction: column; gap: 10px; }
+
+@media print {
+  .budget-toast { display: none; }
+}

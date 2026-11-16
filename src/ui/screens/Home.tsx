@@ -95,7 +95,11 @@ function FormsInProgress({ shipId }: { shipId: string }) {
   );
 }
 
-/** The first screen: a backup reminder when one is due, the alerts of the ship, its forms in progress and the next clock change. */
+/**
+ * The first screen: a backup reminder when one is due, the alerts of the ship, its forms in progress and the next clock
+ * change, then the ways into Tools, the Budget (with "+ Expense", straight to quick add) and the Library. Nothing of the
+ * budget's own code is imported here: it is a chunk of its own.
+ */
 export function Home() {
   const { settings, activeShip, nowUtc, persistence, clockChanges } = useAppState();
   // Taken once, when this screen opens. The status stays on the page and only its text changes, so that it is announced.
@@ -134,6 +138,15 @@ export function Home() {
           </a>
         </li>
       </ul>
+      <ul class="alert-list no-print" role="list" aria-label="Budget">
+        <li class="card alert-row">
+          <a class="alert-link" href="#/budget">
+            <span class="alert-title">Budget</span>
+            <span class="alert-detail">Your money: this month, plan and forecast</span>
+          </a>
+        </li>
+      </ul>
+      <p class="no-print"><a class="btn btn-primary btn-large" href="#/budget/add">+ Expense</a></p>
       <ul class="alert-list no-print" role="list" aria-label="Library">
         <li class="card alert-row">
           <a class="alert-link" href="#/library">

@@ -34,6 +34,10 @@ import type { RoutePath } from './router';
 import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
 import { useAppLock } from './useAppLock';
 
+type BudgetScreens = typeof import('../ui/screens/budget');
+/** A Budget screen: every one is in the budget chunk, loaded on demand, so the budget's code stays out of the main chunk. */
+const budget = (name: keyof BudgetScreens) => lazyScreen(() => import('../ui/screens/budget').then((m) => m[name]));
+
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
@@ -66,6 +70,18 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/library/deleted': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryDeleted)),
   '/library/files': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryFiles)),
   '/library/doc/:id': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryDoc)),
+  '/budget': budget('Dashboard'),
+  '/budget/add': budget('QuickAdd'),
+  '/budget/catch-up': budget('CatchUp'),
+  '/budget/month/:ym': budget('MonthView'),
+  '/budget/forecast': budget('Forecast'),
+  '/budget/net-worth': budget('NetWorth'),
+  '/budget/scenarios': budget('Scenarios'),
+  '/budget/scenarios/:id': budget('Scenarios'),
+  '/budget/plan': budget('Plan'),
+  '/budget/trends': budget('Trends'),
+  '/budget/import': budget('ImportBudget'),
+  '/budget/export': budget('ExportBudget'),
   '/profiles': Profiles,
   '/settings': Settings,
   '/settings/import': ImportBackup,
