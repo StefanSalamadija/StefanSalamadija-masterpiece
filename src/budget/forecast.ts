@@ -1,6 +1,6 @@
 import type {
   Assumptions, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
-  BudgetRecurring, BudgetScenario, BudgetSettings, Cents, PotId, RotationSettings, Ym,
+  BudgetRecurring, BudgetScenario, BudgetSettings, Cents, PotId, Ym,
 } from '../domain/types';
 import { monthlyInterest } from './debts';
 import { fundLedger, fundStatus } from './funds';
@@ -8,7 +8,6 @@ import { balancesByMonth, SAVINGS_GOALS_CATEGORY_ID } from './ledger';
 import { addMonths, monthsBetween, ymOf } from './months';
 import { rotationPeriods, salaryFromPeriods } from './rotation';
 import type { MonthStatus } from './rotation';
-import type { ScenarioChange } from './scenarioTypes';
 import { effectiveMonth, potTargetAmount } from './targets';
 
 /*
@@ -25,7 +24,7 @@ import { effectiveMonth, potTargetAmount } from './targets';
  *    salary that lands in the month (paid the same month, or the next). Planned salary entries and salary templates
  *    are left out: the rule is the salary, so it is never counted twice;
  *  - other income: actual + max(0, planned − actual), planned being the other income templates running in the month,
- *    the planned income entries made by hand, and one-off income of a scenario.
+ *    and the planned income entries made by hand.
  *
  * Spending is what leaves the bank. It is worked out per line ("key"), each the actual entries of the month plus
  * max(0, planned − actual), so the current month blends what was spent with what is still planned and nothing is
@@ -34,7 +33,7 @@ import { effectiveMonth, potTargetAmount } from './targets';
  *    with no live entry left, is left out; a template that pays off a debt stops once the debt is paid);
  *  - sinking funds: the set-aside each fund asks for is earmarked inside the bank, so it leaves nothing; the bill
  *    leaves the bank, in full, in the month it is due (an overdue bill in the current month);
- *  - planned expense entries made by hand (one-off purchases to confirm), and a scenario's one-off purchases;
+ *  - planned expense entries made by hand (one-off purchases and extra debt payments to confirm);
  *  - everything else by the pot's method:
  *      - targets: a category with a target forecasts max(0, target − its templates and fund set-asides); the pot
  *        target covers the categories without one: max(0, pot target − the targeted categories' forecasts − what the
@@ -72,13 +71,8 @@ import { effectiveMonth, potTargetAmount } from './targets';
  * the forecast's average monthly Needs spending) and `negativeBank` in each month the bank is below zero. The lowest
  * point is the month with the least free to spend (the first, on a tie).
  *
- * Overrides (a scenario's changes) change only this forecast (§3.9.9):
- *  - rotation: periods and pattern; salary: the salary from a month on; rates: the expected return (and the other
- *    rates, passed on in `assumptions`);
- *  - one-off: a purchase (moving the pot's account, as above) or income in its month;
- *  - extra debt: a monthly extra payment from the current month, and a lump sum in a month, both lowering the debt;
- *  - investment: from its month on the Savings & investments pot contributes exactly that a month (goals aside);
- *  - pot target: from its month on the pot is planned by the targets method at that amount, without category targets.
+ * A scenario (§3.5) is forecast as the plan it would make: `scenarios.ts` carries "Apply to plan" out on a copy of the
+ * data and settings and forecasts that, so what is compared is what applying gives.
  */
 
 /** Every budget table but the settings, as the db holds them (deleted records included: they are left out here). */
@@ -90,7 +84,7 @@ export interface BudgetData {
 
 export interface ForecastInput {
   /** Ship's today, `YYYY-MM-DD`: its month is the first forecast month. */
-  today: string; data: BudgetData; settings: BudgetSettings; overrides?: ScenarioChange[];
+  today: string; data: BudgetData; settings: BudgetSettings;
   /** How many months to forecast, instead of the settings' horizon (a scenario comparison looks 10 years ahead). */
   months?: number;
 }
@@ -124,7 +118,7 @@ export interface ForecastResult {
    * still to come), not `startInvestments` grown by a month.
    */
   investmentsCorrectedNow: boolean;
-  /** The assumptions in force, a scenario's rates included. */
+  /** The assumptions in force. */
   assumptions: Assumptions;
 }
 
@@ -133,35 +127,9 @@ interface Line { key: string; pot?: PotId; debtId?: string; amount: Cents }
 const POT_IDS: PotId[] = ['needs', 'savings', 'wants', 'debts', 'emergency'];
 const sum = (xs: Iterable<number>) => { let s = 0; for (const x of xs) s += x; return s; };
 
-/** The settings with a scenario's rotation, salary and rate changes. */
-function withOverrides(settings: BudgetSettings, overrides: ScenarioChange[]): { rotation: RotationSettings; assumptions: Assumptions } {
-  let rotation: RotationSettings = { ...settings.rotation, salaryFrom: [...settings.rotation.salaryFrom], periods: [...settings.rotation.periods] };
-  let assumptions: Assumptions = { ...settings.assumptions };
-  for (const c of overrides) {
-    if (c.kind === 'rotation') {
-      rotation = { ...rotation, ...(c.periods !== undefined && { periods: c.periods }), ...(c.patternOn !== undefined && { patternOn: c.patternOn }),
-        ...(c.patternOff !== undefined && { patternOff: c.patternOff }) };
-    } else if (c.kind === 'salary') {
-      rotation = { ...rotation, salaryFrom: [...rotation.salaryFrom.filter((s) => s.ym !== c.fromYm), { ym: c.fromYm, amount: c.amount }] };
-    } else if (c.kind === 'rates') {
-      assumptions = { ...assumptions, ...(c.yearlyReturnPct !== undefined && { yearlyReturnPct: c.yearlyReturnPct }),
-        ...(c.withdrawalRatePct !== undefined && { withdrawalRatePct: c.withdrawalRatePct }), ...(c.inflationPct !== undefined && { inflationPct: c.inflationPct }) };
-    }
-  }
-  return { rotation, assumptions };
-}
-
-/** The latest override of `kind` from a month at or before `ym`. */
-function latestFrom<T extends { fromYm: Ym }>(changes: T[], ym: Ym): T | undefined {
-  let best: T | undefined;
-  for (const c of changes) if (c.fromYm <= ym && (best === undefined || c.fromYm >= best.fromYm)) best = c;
-  return best;
-}
-
 export function forecast(input: ForecastInput): ForecastResult {
   const { data, settings } = input;
-  const overrides = input.overrides ?? [];
-  const { rotation, assumptions } = withOverrides(settings, overrides);
+  const { rotation, assumptions } = settings;
   const cur = ymOf(input.today);
   const prev = addMonths(cur, -1);
   const corrections = data.budgetCorrections.filter((c) => !c.deleted);
@@ -217,11 +185,6 @@ export function forecast(input: ForecastInput): ForecastResult {
   }
   for (const [id, total] of average) average.set(id, Math.round(total / tracked.length));
 
-  const oneOffs = overrides.filter((c): c is Extract<ScenarioChange, { kind: 'oneOff' }> => c.kind === 'oneOff');
-  const extras = overrides.filter((c): c is Extract<ScenarioChange, { kind: 'extraDebt' }> => c.kind === 'extraDebt' && debtIds.has(c.debtId));
-  const investments = overrides.filter((c): c is Extract<ScenarioChange, { kind: 'investment' }> => c.kind === 'investment');
-  const potChanges = overrides.filter((c): c is Extract<ScenarioChange, { kind: 'potTarget' }> => c.kind === 'potTarget');
-
   const periods = rotationPeriods(rotation, last);
   const growth = assumptions.yearlyReturnPct !== undefined ? (1 + assumptions.yearlyReturnPct / 100) ** (1 / 12) : 1;
 
@@ -257,19 +220,13 @@ export function forecast(input: ForecastInput): ForecastResult {
     const plannedIncome = plan.plannedIncome ?? 0;
     const entries = byMonth.get(ym) ?? [];
     const removed = tombstones.get(ym);
-    const investFrom = latestFrom(investments, ym);
-    const potFrom = new Map<PotId, Cents>();
-    for (const p of POT_IDS) {
-      const c = latestFrom(potChanges.filter((x) => x.pot === p), ym);
-      if (c) potFrom.set(p, c.amount);
-    }
 
     // Income.
     const salaryEntries = entries.filter((e) => e.kind === 'income' && e.status === 'actual' && e.incomeSource === 'salary');
     const earned = salaryFromPeriods(rotation, periods, rotation.paidNextMonth ? addMonths(ym, -1) : ym).amount;
     const salary = salaryEntries.length > 0 ? sum(salaryEntries.map((e) => e.amount)) : earned;
     const otherActual = sum(entries.filter((e) => e.kind === 'income' && e.status === 'actual' && e.incomeSource !== 'salary').map((e) => e.amount));
-    let otherPlanned = sum(oneOffs.filter((c) => c.income === true && c.ym === ym).map((c) => c.amount));
+    let otherPlanned = 0;
     for (const e of entries) {
       if (e.kind === 'income' && e.status === 'planned' && e.incomeSource !== 'salary' && !(e.recurringId !== undefined && templateById.has(e.recurringId))) otherPlanned += e.amount;
     }
@@ -280,8 +237,6 @@ export function forecast(input: ForecastInput): ForecastResult {
       if (categoryId === SAVINGS_GOALS_CATEGORY_ID) return { key: 'goals', pot: 'savings' };
       const pot = potOf.get(categoryId);
       if (pot === undefined) return { key: 'none' };
-      if (pot === 'savings' && investFrom) return { key: 'pot:savings', pot };
-      if (potFrom.has(pot)) return { key: `pot:${pot}`, pot };
       const method = settings.forecastMethod[pot] ?? 'targets';
       if (method === 'fixed') return { key: `pot:${pot}`, pot };
       if (method === 'average' || plan.categoryTargets[categoryId] !== undefined) return { key: `cat:${categoryId}`, pot };
@@ -356,24 +311,17 @@ export function forecast(input: ForecastInput): ForecastResult {
       fundsTotal += s.balance;
     }
 
-    // Planned entries made by hand, and a scenario's one-off purchases and extra debt payments.
+    // Planned entries made by hand.
     for (const e of entries) {
       if (e.kind !== 'expense' || e.status !== 'planned' || (e.recurringId !== undefined && templateById.has(e.recurringId))) continue;
       planned.push({ ...(e.debtId !== undefined && debtIds.has(e.debtId) && potOf.get(e.categoryId ?? '') === 'debts' ? debtLine(e.debtId) : lineOf(e.categoryId)), amount: e.amount });
     }
-    oneOffs.forEach((c, n) => { if (c.income !== true && c.ym === ym) planned.push({ key: `oneoff:${n}`, ...(c.pot !== undefined && { pot: c.pot }), amount: c.amount }); });
-    for (const c of extras) {
-      const amount = (c.monthly ?? 0) + (c.lumpYm === ym ? c.lump ?? 0 : 0);
-      if (amount > 0) planned.push({ ...debtLine(c.debtId), amount });
-    }
 
     // Everything else, by the pot's method.
     for (const pot of POT_IDS) {
-      if (pot === 'savings' && investFrom) continue;
       // Savings-goal money stays in the bank: its category takes its share of the pot target, but is no spending.
       const inPot = categories.filter((c) => c.pot === pot);
-      const override = potFrom.get(pot);
-      const method = override !== undefined ? 'targets' : settings.forecastMethod[pot] ?? 'targets';
+      const method = settings.forecastMethod[pot] ?? 'targets';
       // The automatic debt instalments come first out of the Debts pot's plan, whatever its method.
       let pool = pot === 'debts' ? autoInstalments : 0;
       if (method === 'fixed') {
@@ -381,10 +329,10 @@ export function forecast(input: ForecastInput): ForecastResult {
       } else if (method === 'average') {
         for (const c of inPot) if (c.id !== SAVINGS_GOALS_CATEGORY_ID) planned.push({ key: `cat:${c.id}`, pot, amount: average.get(c.id) ?? 0 });
       } else {
-        const potTarget = override ?? potTargetAmount(plan.potTargets[pot], plannedIncome);
+        const potTarget = potTargetAmount(plan.potTargets[pot], plannedIncome);
         let taken = 0;
         for (const c of inPot) {
-          const target = override === undefined ? plan.categoryTargets[c.id]?.amount : undefined;
+          const target = plan.categoryTargets[c.id]?.amount;
           const cov = covered.get(c.id) ?? 0;
           if (target === undefined) { taken += cov; continue; }
           const rest = Math.max(0, target - cov);
@@ -395,11 +343,6 @@ export function forecast(input: ForecastInput): ForecastResult {
         }
         planned.push({ key: `pot:${pot}`, pot, amount: Math.max(0, potTarget - taken - pool) });
       }
-    }
-    if (investFrom) {
-      // From its month on, the scenario's contribution is the whole planned contribution (goals aside).
-      for (let n = planned.length - 1; n >= 0; n -= 1) if (planned[n].key === 'pot:savings') planned.splice(n, 1);
-      planned.push({ key: 'pot:savings', pot: 'savings', amount: investFrom.monthly });
     }
 
     // Actual spending.

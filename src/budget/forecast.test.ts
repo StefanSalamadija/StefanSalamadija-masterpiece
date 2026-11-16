@@ -5,6 +5,7 @@ import { forecast } from './forecast';
 import type { BudgetData, ForecastResult } from './forecast';
 import { balancesByMonth, SAVINGS_GOALS_CATEGORY_ID } from './ledger';
 import { addMonths } from './months';
+import { scenarioPlan } from './scenarios';
 import type { ScenarioChange } from './scenarioTypes';
 
 const TODAY = '2026-11-15';
@@ -17,12 +18,11 @@ const ROTATION = { salaryFrom: [{ ym: '2026-01', amount: 300000 }], periods: [{ 
 const needs200 = (fields: Partial<BudgetMonth> = {}) =>
   month('2026-11', { potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } }, ...fields });
 
-function run(data: Partial<BudgetData> = {}, s: Partial<BudgetSettings> = {}, overrides?: ScenarioChange[], months?: number): ForecastResult {
+function run(data: Partial<BudgetData> = {}, s: Partial<BudgetSettings> = {}, months?: number): ForecastResult {
   return forecast({
     today: TODAY,
     data: budgetData({ budgetCategories: CATEGORIES, budgetCorrections: [correction('bank', '2026-10', 500000)], budgetMonths: [needs200()], ...data }),
     settings: settings({ rotation: ROTATION, horizon: 12, ...s }),
-    overrides,
     months,
   });
 }
@@ -38,7 +38,7 @@ describe('forecast: the bank start', () => {
     const r = run();
     expect(r.needsBankStart).toBe(false);
     expect(r.months.map((m) => m.ym)).toEqual(Array.from({ length: 12 }, (_, i) => addMonths('2026-11', i)));
-    expect(run({}, {}, undefined, 60).months).toHaveLength(60);
+    expect(run({}, {}, 60).months).toHaveLength(60);
   });
 });
 
@@ -339,55 +339,6 @@ describe('forecast: transfers, funds and debts', () => {
   });
 });
 
-describe('forecast: overrides (scenarios)', () => {
-  it('a one-off purchase lowers the bank from its month on', () => {
-    const base = run();
-    const car = run({}, {}, [{ kind: 'oneOff', ym: '2027-05', amount: 1800000, label: 'Car' }]);
-    expect(car.months[5].bank).toBe(base.months[5].bank);
-    expect(car.months[6].bank).toBe(base.months[6].bank - 1800000);
-    expect(car.months[11].bank).toBe(base.months[11].bank - 1800000);
-  });
-
-  it('a salary change and a longer contract change the income', () => {
-    const r = run({}, {}, [{ kind: 'salary', fromYm: '2026-12', amount: 400000 }, { kind: 'rotation', patternOn: 10, patternOff: 2 }]);
-    expect(r.months[0].income).toBe(300000);
-    expect(r.months[1].income).toBe(400000);
-    expect(r.months.slice(2, 4).map((m) => m.status)).toEqual(['home', 'home']);
-    expect(r.months[4].status).toBe('onboard');
-  });
-
-  it('an extra debt payment lowers the bank and the debt', () => {
-    const data = { budgetDebts: [debt({ startBalance: 100000, startYm: '2026-11', yearlyRatePct: 0 })] };
-    const r = run(data, {}, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000, lumpYm: '2026-12', lump: 50000 }]);
-    expect(r.months.slice(0, 5).map((m) => m.debts)).toEqual([90000, 30000, 20000, 10000, 0]);
-    expect(r.debtFree['debt-1']).toBe('2027-03');
-    expect(r.months[1].spending).toBe(260000);
-  });
-
-  it('an investment contribution from a month on, and a pot target change', () => {
-    const r = run({ budgetCorrections: [correction('bank', '2026-10', 500000), correction('investments', '2026-10', 0)] }, {}, [
-      { kind: 'investment', fromYm: '2027-01', monthly: 25000 },
-      { kind: 'potTarget', pot: 'needs', fromYm: '2027-02', amount: 150000 },
-    ]);
-    expect(r.months.slice(0, 4).map((m) => m.contribution)).toEqual([0, 0, 25000, 25000]);
-    expect(r.months.slice(0, 4).map((m) => m.spending)).toEqual([200000, 200000, 225000, 175000]);
-    expect(r.months[3].investments).toBe(50000);
-  });
-
-  it('an investment contribution replaces the savings templates, not adds to them', () => {
-    const r = run({ budgetRecurring: [recurring({ id: 'tpl-etf', amount: 10000, startYm: '2026-01', categoryId: 'cat-etf' })] }, {},
-      [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
-    expect(r.months.slice(0, 4).map((m) => m.contribution)).toEqual([10000, 10000, 25000, 25000]);
-  });
-
-  it('rates change the return the investments grow by', () => {
-    const r = run({ budgetCorrections: [correction('bank', '2026-10', 500000), correction('investments', '2026-10', 1000000)] }, {},
-      [{ kind: 'rates', yearlyReturnPct: 12 }]);
-    expect(r.months[0].investments).toBe(Math.round(1000000 * 1.12 ** (1 / 12)));
-    expect(r.assumptions.yearlyReturnPct).toBe(12);
-  });
-});
-
 /** A small seeded PRNG (mulberry32), so that the random plans are the same on every run. */
 function prng(seed: number): () => number {
   let a = seed >>> 0;
@@ -400,7 +351,7 @@ function prng(seed: number): () => number {
   };
 }
 
-function randomPlan(seed: number): { data: BudgetData; s: BudgetSettings; overrides: ScenarioChange[] } {
+function randomPlan(seed: number): { data: BudgetData; s: BudgetSettings } {
   const rnd = prng(seed);
   const int = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
   const pick = <T,>(xs: readonly T[]): T => xs[int(0, xs.length - 1)];
@@ -444,25 +395,26 @@ function randomPlan(seed: number): { data: BudgetData; s: BudgetSettings; overri
     horizon: pick([12, 24, 36, 60] as const),
     assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30, ...(rnd() < 0.7 && { yearlyReturnPct: int(-500, 1200) / 100 }) },
   });
-  const overrides: ScenarioChange[] = [];
-  if (rnd() < 0.3) overrides.push({ kind: 'oneOff', ym: ym(0, 20), amount: int(1, 2000000), label: 'x', ...(rnd() < 0.5 && { pot: pick(pots) }), income: rnd() < 0.2 });
-  if (rnd() < 0.2 && debts.length > 0) overrides.push({ kind: 'extraDebt', debtId: debts[0].id, monthly: int(0, 50000), lumpYm: ym(0, 12), lump: int(0, 500000) });
-  if (rnd() < 0.2) overrides.push({ kind: 'investment', fromYm: ym(0, 12), monthly: int(0, 100000) });
-  if (rnd() < 0.2) overrides.push({ kind: 'potTarget', pot: pick(pots), fromYm: ym(0, 12), amount: int(0, 200000) });
-  if (rnd() < 0.2) overrides.push({ kind: 'salary', fromYm: ym(0, 12), amount: int(0, 900000) });
-  if (rnd() < 0.2) overrides.push({ kind: 'rotation', patternOn: int(1, 10), patternOff: int(0, 6) });
-  return {
-    data: budgetData({ budgetCategories: CATEGORIES, budgetEntries: entries, budgetDebts: debts, budgetRecurring: recurringT, budgetFunds: funds,
-      budgetMonths: months, budgetCorrections: corrections }),
-    s, overrides,
-  };
+  // A random scenario, applied to the plan in memory, as a scenario is forecast.
+  const changes: ScenarioChange[] = [];
+  if (rnd() < 0.3) changes.push({ kind: 'oneOff', ym: ym(0, 20), amount: int(1, 2000000), label: 'x', ...(rnd() < 0.5 && { pot: pick(pots) }), income: rnd() < 0.2 });
+  if (rnd() < 0.2 && debts.length > 0) changes.push({ kind: 'extraDebt', debtId: debts[0].id, monthly: int(0, 50000), lumpYm: ym(0, 12), lump: int(0, 500000) });
+  if (rnd() < 0.2) changes.push({ kind: 'investment', fromYm: ym(0, 12), monthly: int(0, 100000) });
+  if (rnd() < 0.2) changes.push({ kind: 'potTarget', pot: pick(pots), fromYm: ym(0, 12), amount: int(0, 200000) });
+  if (rnd() < 0.2) changes.push({ kind: 'salary', fromYm: ym(0, 12), amount: int(0, 900000) });
+  if (rnd() < 0.2) changes.push({ kind: 'rotation', patternOn: int(1, 10), patternOff: int(0, 6) });
+  const data = budgetData({ budgetCategories: CATEGORIES, budgetEntries: entries, budgetDebts: debts, budgetRecurring: recurringT, budgetFunds: funds,
+    budgetMonths: months, budgetCorrections: corrections });
+  const scenario = { id: 'sc', createdAt: '', updatedAt: '', updatedBy: '', deleted: false, scope: 'personal' as const, name: 'x', changes };
+  const planned = scenarioPlan(data, s, scenario, TODAY);
+  return { data: planned.data, s: { ...planned.settings, horizon: s.horizon } };
 }
 
 describe('forecast: properties over 100 random plans', () => {
   it('keeps every amount in whole cents, and bank(m) = bank(m − 1) + income − spending exactly', () => {
     for (let seed = 1; seed <= 100; seed += 1) {
-      const { data, s, overrides } = randomPlan(seed);
-      const r = forecast({ today: TODAY, data, settings: s, overrides });
+      const { data, s } = randomPlan(seed);
+      const r = forecast({ today: TODAY, data, settings: s });
       expect(r.months.length, `seed ${seed}`).toBe(s.horizon);
       // The first month continues the tracked balances (no bank correction is made this month in these plans).
       const prevYm = addMonths('2026-11', -1);
@@ -501,11 +453,8 @@ describe('forecast: speed', () => {
       entry(`${addMonths('2024-11', Math.floor(n / 42))}-${String((n % 28) + 1).padStart(2, '0')}`, 1000 + ((n * 7919) % 90000), { categoryId: CATEGORIES[n % CATEGORIES.length].id }));
     const planEdits = Array.from({ length: 12 }, (_, n) => month(addMonths('2026-01', n), { categoryTargets: { 'cat-groc': { fromOn: 50000 + n * 100 } } }));
     const big = budgetData({ ...data, budgetEntries: [...data.budgetEntries, ...historyEntries], budgetMonths: [...data.budgetMonths, ...planEdits] });
-    const scenarios: ScenarioChange[][] = [[], [{ kind: 'oneOff', ym: '2027-05', amount: 1800000, label: 'Car' }],
-      [{ kind: 'rotation', patternOn: 10, patternOff: 2 }], [{ kind: 'investment', fromYm: '2027-01', monthly: 50000 }],
-      [{ kind: 'salary', fromYm: '2027-01', amount: 450000 }]];
     const started = performance.now();
-    for (const overrides of scenarios) expect(forecast({ today: TODAY, data: big, settings: { ...s, horizon: 60 }, overrides }).months).toHaveLength(60);
+    for (let k = 0; k < 5; k += 1) expect(forecast({ today: TODAY, data: big, settings: { ...s, horizon: 60 } }).months).toHaveLength(60);
     const ms = performance.now() - started;
     console.log(`forecast: 60 months × 5 runs in ${ms.toFixed(1)} ms`);
     expect(ms).toBeLessThan(100);

@@ -43,6 +43,18 @@ describe('parseShorthand', () => {
     expect(parseShorthand('repairs 80', CATEGORIES)).toMatchObject({ categoryId: 'cat-repairs', ambiguous: false });
   });
 
+  it('prefers the longest phrase that matches', () => {
+    expect(parseShorthand('car repairs 80', CATEGORIES)).toEqual({ amount: 8000, categoryId: 'cat-car-repairs', ambiguous: false });
+    expect(parseShorthand('travel flights 50 split', CATEGORIES)).toEqual({ amount: 5000, categoryId: 'cat-flights', note: 'split', ambiguous: false });
+    expect(parseShorthand('fuel parking 30', CATEGORIES)).toEqual({ amount: 3000, categoryId: 'cat-fuel', ambiguous: false });
+    // A phrase never runs across the amount.
+    expect(parseShorthand('car 80 repairs', CATEGORIES)).toEqual({ amount: 8000, categoryId: 'cat-repairs', note: 'car', ambiguous: false });
+  });
+
+  it('leaves a lone euro sign out of the note', () => {
+    expect(parseShorthand('12 € fuel', CATEGORIES)).toEqual({ amount: 1200, categoryId: 'cat-fuel', ambiguous: false });
+  });
+
   it('matches the start of a word of three letters or more', () => {
     expect(parseShorthand('groc 9', CATEGORIES)).toMatchObject({ categoryId: 'cat-groc' });
     expect(parseShorthand('gr 9', CATEGORIES)).toEqual({ amount: 900, note: 'gr', ambiguous: false });

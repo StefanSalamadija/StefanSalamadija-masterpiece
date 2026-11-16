@@ -1,9 +1,9 @@
 import type { Cents, PotId, Ym } from '../domain/types';
 
 /**
- * One change a "what if" scenario makes to the forecast. Scenarios change the forecast only, until "Apply to plan"
- * writes each change to its real place. Declared here, apart from the scenario code, so that the forecast can take
- * them as overrides.
+ * One change a "what if" scenario makes. Scenarios change the forecast only, until "Apply to plan" writes each change
+ * to its real place; a scenario is forecast as the plan applying it would make (see `scenarios.ts`). Declared here,
+ * apart from the scenario code, so that the domain types can name it without loading the scenario code.
  */
 export type ScenarioChange =
   | { kind: 'rotation'; periods?: { signOn: string; signOff: string }[]; patternOn?: number; patternOff?: number }

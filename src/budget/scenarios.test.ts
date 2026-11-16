@@ -1,36 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import type { BaseRecord, BudgetScenario, BudgetSettings } from '../domain/types';
-import { budgetData, category, correction, debt, month, recurring, settings } from '../test/budgetRecords';
+import { budgetData, category, correction, debt, entry, month, recurring, settings } from '../test/budgetRecords';
 import { forecast } from './forecast';
-import type { BudgetData, ForecastInput } from './forecast';
+import type { BudgetData, ForecastResult } from './forecast';
 import { freedom } from './freedom';
 import { SAVINGS_GOALS_CATEGORY_ID } from './ledger';
+import { addMonths } from './months';
 import { applyToPlan, compareScenarios } from './scenarios';
-import type { PlanWrite } from './scenarios';
+import type { CompareRow, PlanWrite } from './scenarios';
 import type { ScenarioChange } from './scenarioTypes';
 
 const TODAY = '2026-11-15';
 const CATEGORIES = [
-  category('cat-rent', 'needs', { name: 'Rent / mortgage', order: 0 }), category('cat-other-needs', 'needs', { name: 'Other needs', order: 1 }),
-  category('cat-fun', 'wants', { name: 'Shopping', order: 2 }), category('cat-other-wants', 'wants', { name: 'Other wants', order: 3 }),
-  category(SAVINGS_GOALS_CATEGORY_ID, 'savings', { name: 'Savings goals', order: 4 }), category('cat-etf', 'savings', { name: 'Index funds', order: 5 }),
-  category('cat-em', 'emergency', { name: 'Emergency fund', order: 6 }),
-  category('cat-loan', 'debts', { name: 'Loan instalment', order: 7 }), category('cat-extra', 'debts', { name: 'Extra loan payment', order: 8 }),
+  category('cat-rent', 'needs', { name: 'Rent / mortgage', order: 0 }), category('cat-groc', 'needs', { name: 'Groceries', order: 1 }),
+  category('cat-other-needs', 'needs', { name: 'Other needs', order: 2 }),
+  category('cat-fun', 'wants', { name: 'Shopping', order: 3 }), category('cat-other-wants', 'wants', { name: 'Other wants', order: 4 }),
+  category(SAVINGS_GOALS_CATEGORY_ID, 'savings', { name: 'Savings goals', order: 5 }), category('cat-etf', 'savings', { name: 'Index funds', order: 6 }),
+  category('cat-em', 'emergency', { name: 'Emergency fund', order: 7 }),
+  category('cat-loan', 'debts', { name: 'Loan instalment', order: 8 }), category('cat-extra', 'debts', { name: 'Extra loan payment', order: 9 }),
 ];
 const ROTATION = { salaryFrom: [{ ym: '2026-01', amount: 300000 }], periods: [{ signOn: '2026-05-01', signOff: '2026-12-31' }] };
 const LOAN = debt({ id: 'debt-1', name: 'Car loan', startBalance: 1000000, startYm: '2026-01', yearlyRatePct: 6, instalment: 20000 });
+const NEEDS = month('2026-11', { id: 'm-2026-11', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } } });
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthName = (ym: string) => `${MONTH_NAMES[Number(ym.slice(5)) - 1]} ${ym.slice(0, 4)}`;
 
 function data(fields: Partial<BudgetData> = {}): BudgetData {
   return budgetData({
     budgetCategories: CATEGORIES,
     budgetCorrections: [correction('bank', '2026-10', 500000), correction('investments', '2026-10', 1000000), correction('debt:debt-1', '2026-10', 1000000)],
-    budgetMonths: [month('2026-11', { potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } } })],
+    budgetMonths: [NEEDS],
     budgetDebts: [LOAN],
     ...fields,
   });
 }
-const SETTINGS = settings({ rotation: ROTATION, horizon: 24, assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30, yearlyReturnPct: 5, inflationPct: 2 } });
-const base = (fields: Partial<BudgetData> = {}, s: BudgetSettings = SETTINGS): ForecastInput => ({ today: TODAY, data: data(fields), settings: s });
+const ASSUMPTIONS = { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30, yearlyReturnPct: 5, inflationPct: 2 };
+const SETTINGS = settings({ rotation: ROTATION, horizon: 24, assumptions: ASSUMPTIONS });
+const SPENDING = 60000;
+const input = (d: BudgetData = data(), s: BudgetSettings = SETTINGS) => ({ today: TODAY, data: d, settings: s, yearlySpending: SPENDING });
 
 let n = 0;
 function scenario(name: string, changes: ScenarioChange[]): BudgetScenario {
@@ -39,15 +46,53 @@ function scenario(name: string, changes: ScenarioChange[]): BudgetScenario {
 }
 const CAR: ScenarioChange = { kind: 'oneOff', ym: '2027-05', amount: 1800000, label: 'Car', pot: 'needs' };
 
+/** Carries the writes out on a copy of the data and settings, as the db layer would (written apart from `planWith`). */
+function perform(d: BudgetData, s: BudgetSettings, writes: PlanWrite[]): { data: BudgetData; settings: BudgetSettings } {
+  const out: BudgetData = { ...d, budgetMonths: [...d.budgetMonths], budgetRecurring: [...d.budgetRecurring], budgetEntries: [...d.budgetEntries] };
+  let st = s;
+  let id = 0;
+  const stamp = (): BaseRecord => {
+    id += 1;
+    return { id: `db-${id}`, createdAt: '2026-11-15T10:00:00.000Z', updatedAt: '2026-11-15T10:00:00.000Z', updatedBy: 'device', deleted: false, scope: 'personal' };
+  };
+  for (const w of writes) {
+    if (w.table === 'budgetSettings') st = { ...st, ...w.patch };
+    else if (w.op === 'create') (out[w.table] as unknown[]).push({ ...w.fields, ...stamp() });
+    else {
+      const list = out[w.table] as { id: string; deleted: boolean }[];
+      const at = list.findIndex((r) => r.id === w.id);
+      expect(at, `${w.table} ${w.id}`).toBeGreaterThanOrEqual(0);
+      list[at] = w.op === 'delete' ? { ...list[at], deleted: true } : { ...list[at], ...w.patch };
+    }
+  }
+  return { data: out, settings: st };
+}
+
+/**
+ * Compares a scenario, applies it to the plan, and checks that the plan after Apply forecasts exactly the scenario's
+ * Compare row. Returns the row, and the forecasts of the plan before and after Apply.
+ */
+function roundTrip(d: BudgetData, s: BudgetSettings, changes: ScenarioChange[]): { row: CompareRow; applied: ForecastResult; base: ForecastResult } {
+  const sc = scenario('What if', changes);
+  const [, row] = compareScenarios(input(d, s), [sc]);
+  const after = perform(d, s, applyToPlan(d, s, sc, TODAY).writes);
+  const [afterRow] = compareScenarios(input(after.data, after.settings), []);
+  expect({ ...afterRow, name: 'What if' }).toEqual(row);
+  return { row, applied: forecast({ today: TODAY, ...after, months: 120 }), base: forecast({ today: TODAY, data: d, settings: s, months: 120 }) };
+}
+const from = (r: ForecastResult, ym: string, count: number) => r.months.filter((m) => m.ym >= ym).slice(0, count);
+/** What the month paid its debts (no emergency fund moves in these plans). */
+const debtPaid = (m: ForecastResult['months'][number]) => m.transfers - m.contribution;
+
 describe('compareScenarios', () => {
   it('puts the base plan first, then each scenario in order', () => {
-    const rows = compareScenarios(base(), [scenario('Car', [CAR]), scenario('Longer contract', [{ kind: 'rotation', patternOn: 10, patternOff: 2 }])]);
+    const rows = compareScenarios(input(), [scenario('Car', [CAR]), scenario('Longer contract', [{ kind: 'rotation', patternOn: 10, patternOff: 2 }])]);
     expect(rows.map((r) => r.name)).toEqual(['Base plan', 'Car', 'Longer contract']);
   });
 
   it('a "Car €18,000 May 2027" one-off lowers the bank from that month on', () => {
-    const [b, car] = compareScenarios(base(), [scenario('Car', [CAR])]);
-    const at = (rows: typeof b, ym: string) => rows.series.find((m) => m.ym === ym)!;
+    const [b, car] = compareScenarios(input(), [scenario('Car', [CAR])]);
+    const at = (row: CompareRow, ym: string) => row.series.find((m) => m.ym === ym)!;
     expect(at(car, '2027-04').bank).toBe(at(b, '2027-04').bank);
     expect(at(car, '2027-05').bank).toBe(at(b, '2027-05').bank - 1800000);
     expect(at(car, '2030-05').bank).toBe(at(b, '2030-05').bank - 1800000);
@@ -55,16 +100,27 @@ describe('compareScenarios', () => {
   });
 
   it('an extra debt payment brings the debt-free date earlier and lowers the total interest', () => {
-    const [b, extra] = compareScenarios(base(), [scenario('Extra', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 20000, lumpYm: '2027-01', lump: 200000 }])]);
+    const [b, extra] = compareScenarios(input(), [scenario('Extra', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 20000, lumpYm: '2027-01', lump: 200000 }])]);
     expect(b.debtFree).toBeDefined();
-    expect(extra.debtFree).toBeDefined();
     expect(extra.debtFree! < b.debtFree!).toBe(true);
     expect(extra.totalInterest).toBeLessThan(b.totalInterest);
   });
 
+  it('a salary change and a longer contract change the income', () => {
+    const { applied } = roundTrip(data(), SETTINGS, [{ kind: 'salary', fromYm: '2026-12', amount: 400000 }, { kind: 'rotation', patternOn: 10, patternOff: 2 }]);
+    expect(applied.months.slice(0, 2).map((m) => m.income)).toEqual([300000, 400000]);
+    expect(applied.months.slice(2, 5).map((m) => m.status)).toEqual(['home', 'home', 'onboard']);
+  });
+
+  it('rates change the return the investments grow by', () => {
+    const { applied } = roundTrip(data(), SETTINGS, [{ kind: 'rates', yearlyReturnPct: 12 }]);
+    expect(applied.months[0].investments).toBe(Math.round(1000000 * 1.12 ** (1 / 12)));
+    expect(applied.assumptions.yearlyReturnPct).toBe(12);
+  });
+
   it('looks 10 years ahead: net worth after 1, 5 and 10 years, and the lowest bank month', () => {
-    const [b] = compareScenarios(base(), []);
-    const r = forecast({ ...base(), months: 120 });
+    const [b] = compareScenarios(input(), []);
+    const r = forecast({ today: TODAY, data: data(), settings: SETTINGS, months: 120 });
     expect(b.series).toHaveLength(120);
     expect(b.netWorth1y).toBe(r.months[11].netWorth);
     expect(b.netWorth5y).toBe(r.months[59].netWorth);
@@ -74,46 +130,47 @@ describe('compareScenarios', () => {
     expect(b.lowest).toEqual({ ym: lowest.ym, amount: lowest.bank });
   });
 
-  it('gives the freedom date at each plan\'s rates when yearly spending is given', () => {
-    const rows = compareScenarios(base(), [scenario('Better return', [{ kind: 'rates', yearlyReturnPct: 9 }])], { yearlySpending: 60000 });
-    const r = forecast({ ...base(), months: 120 });
-    const f = freedom({ forecast: r, yearlySpending: 60000, assumptions: r.assumptions, today: TODAY });
-    expect(f.status).toBe('ok');
+  it('gives the freedom date at each plan\'s rates, from the yearly spending it is given', () => {
+    const rows = compareScenarios(input(), [scenario('Better return', [{ kind: 'rates', yearlyReturnPct: 9 }])]);
+    const r = forecast({ today: TODAY, data: data(), settings: SETTINGS, months: 120 });
+    const f = freedom({ forecast: r, yearlySpending: SPENDING, assumptions: r.assumptions, today: TODAY });
     expect(f.status === 'ok' && f.ym).toBeTruthy();
     expect(rows[0].freedom).toBe(f.status === 'ok' ? f.ym : undefined);
     expect(rows[1].freedom! < rows[0].freedom!).toBe(true);
-    expect(compareScenarios(base(), [])[0].freedom).toBeUndefined();
+    // Without an expected return there is no freedom date.
+    const { yearlyReturnPct: _r, ...noReturn } = ASSUMPTIONS;
+    expect(compareScenarios(input(data(), { ...SETTINGS, assumptions: noReturn }), [])[0].freedom).toBeUndefined();
   });
 
   it('has no debt-free date while a debt is not paid off within the 10 years', () => {
     const slow = debt({ id: 'debt-2', name: 'Mortgage', startBalance: 50000000, startYm: '2026-01', yearlyRatePct: 3, instalment: 100000 });
-    const [b] = compareScenarios(base({ budgetDebts: [LOAN, slow] }), []);
+    const [b] = compareScenarios(input(data({ budgetDebts: [LOAN, slow] })), []);
     expect(b.debtFree).toBeUndefined();
+  });
+
+  it('changes nothing stored', () => {
+    const d = data();
+    const before = JSON.stringify(d);
+    compareScenarios(input(d), [scenario('All', [CAR, { kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 1 }, { kind: 'extraDebt', debtId: 'debt-1', monthly: 5000 }])]);
+    expect(JSON.stringify(d)).toBe(before);
+  });
+
+  it('compares the base and 4 scenarios quickly', () => {
+    const history = Array.from({ length: 24 * 40 }, (_, k) =>
+      entry(`${addMonths('2024-11', Math.floor(k / 40))}-${String((k % 28) + 1).padStart(2, '0')}`, 1000 + ((k * 7919) % 90000), { categoryId: CATEGORIES[k % CATEGORIES.length].id }));
+    const d = data({ budgetEntries: history });
+    const scenarios = [scenario('Car', [CAR]), scenario('Contract', [{ kind: 'rotation', patternOn: 10, patternOff: 2 }]),
+      scenario('Invest', [{ kind: 'investment', fromYm: '2027-01', monthly: 50000 }]), scenario('Pay off', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 20000 }])];
+    compareScenarios(input(d), scenarios);
+    const started = performance.now();
+    compareScenarios(input(d), scenarios);
+    const ms = performance.now() - started;
+    console.log(`compareScenarios: base + 4 scenarios × 120 months in ${ms.toFixed(1)} ms`);
+    expect(ms).toBeLessThan(250);
   });
 });
 
-/** Carries the writes out on a copy of the data and settings, as the db layer would. */
-function perform(d: BudgetData, s: BudgetSettings, writes: PlanWrite[]): { data: BudgetData; settings: BudgetSettings } {
-  const out: BudgetData = { ...d, budgetMonths: [...d.budgetMonths], budgetRecurring: [...d.budgetRecurring], budgetEntries: [...d.budgetEntries] };
-  let st = s;
-  let id = 0;
-  const stamp = (): BaseRecord => {
-    id += 1;
-    return { id: `new-${id}`, createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:00.000Z', updatedBy: 'test', deleted: false, scope: 'personal' };
-  };
-  for (const w of writes) {
-    if (w.table === 'budgetSettings') st = { ...st, ...w.patch };
-    else if (w.op === 'create') (out[w.table] as unknown[]).push({ ...w.fields, ...stamp() });
-    else {
-      const list = out[w.table] as { id: string; deleted: boolean }[];
-      const at = list.findIndex((r) => r.id === w.id);
-      list[at] = w.op === 'delete' ? { ...list[at], deleted: true } : { ...list[at], ...w.patch };
-    }
-  }
-  return { data: out, settings: st };
-}
-
-describe('applyToPlan', () => {
+describe('applyToPlan: what it writes', () => {
   it('writes rotation, salary and rates into one settings change', () => {
     const s = scenario('Plan', [
       { kind: 'rotation', periods: [{ signOn: '2027-03-01', signOff: '2027-12-31' }], patternOn: 10, patternOff: 2 },
@@ -147,10 +204,9 @@ describe('applyToPlan', () => {
       { kind: 'potTarget', pot: 'wants', fromYm: '2027-02', amount: 50000 },
       { kind: 'potTarget', pot: 'emergency', fromYm: '2027-02', amount: 10000 },
     ]);
-    const d = data();
-    const { writes, summary } = applyToPlan(d, SETTINGS, s, TODAY);
+    const { writes, summary } = applyToPlan(data(), SETTINGS, s, TODAY);
     expect(writes).toEqual([
-      { op: 'update', table: 'budgetMonths', id: d.budgetMonths[0].id, patch: { potTargets: { needs: { fromOn: { kind: 'amount', value: 180000 } } } } },
+      { op: 'update', table: 'budgetMonths', id: 'm-2026-11', patch: { potTargets: { needs: { fromOn: { kind: 'amount', value: 180000 } } }, categoryTargets: {} } },
       { op: 'create', table: 'budgetMonths', fields: { ym: '2027-02', categoryTargets: {}, potTargets: {
         wants: { fromOn: { kind: 'amount', value: 50000 } }, emergency: { fromOn: { kind: 'amount', value: 10000 } } } } },
     ]);
@@ -161,7 +217,29 @@ describe('applyToPlan', () => {
     ]);
   });
 
-  it('changes the investment templates from a month on', () => {
+  it('clears the pot\'s category targets and later edits, and plans the pot by its targets', () => {
+    const months = [
+      month('2026-11', { id: 'm-1', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } }, categoryTargets: { 'cat-rent': { fromOn: 100000 }, 'cat-fun': { fromOn: 20000 } } }),
+      month('2027-03', { id: 'm-2', categoryTargets: { 'cat-groc': { thisOnly: 70000 } } }),
+      month('2027-06', { id: 'm-3', potTargets: { needs: { fromOn: { kind: 'amount', value: 250000 } }, wants: { fromOn: { kind: 'amount', value: 9000 } } } }),
+    ];
+    const s = scenario('Cut', [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 150000 }]);
+    const { writes, summary } = applyToPlan(data({ budgetMonths: months }), { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, needs: 'average' } }, s, TODAY);
+    expect(writes).toEqual([
+      { op: 'update', table: 'budgetSettings', id: SETTINGS.id, patch: { forecastMethod: { ...SETTINGS.forecastMethod, needs: 'targets' } } },
+      { op: 'update', table: 'budgetMonths', id: 'm-2', patch: { potTargets: {}, categoryTargets: {} } },
+      { op: 'update', table: 'budgetMonths', id: 'm-3', patch: { potTargets: { wants: { fromOn: { kind: 'amount', value: 9000 } } }, categoryTargets: {} } },
+      { op: 'create', table: 'budgetMonths', fields: { ym: '2027-01', potTargets: { needs: { fromOn: { kind: 'amount', value: 150000 } } }, categoryTargets: { 'cat-rent': { fromOn: null } } } },
+    ]);
+    expect(summary).toEqual([
+      'Needs target: €1,500.00 a month from January 2027 on',
+      'Needs: category targets removed from January 2027 on (Rent / mortgage)',
+      'Needs: later target changes removed (March 2027, June 2027)',
+      'Needs: planned by its targets in every month (was the average of past months)',
+    ]);
+  });
+
+  it('changes the investment templates and the Savings target from a month on', () => {
     const tpl = recurring({ id: 'tpl-etf', name: 'ETF', amount: 10000, startYm: '2026-01', categoryId: 'cat-etf', day: 3 });
     const later = recurring({ id: 'tpl-later', name: 'Pension', amount: 5000, startYm: '2027-06', categoryId: 'cat-etf' });
     const goal = recurring({ id: 'tpl-goal', name: 'Holiday', amount: 5000, startYm: '2026-01', categoryId: SAVINGS_GOALS_CATEGORY_ID });
@@ -169,18 +247,22 @@ describe('applyToPlan', () => {
     const s = scenario('Invest', [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
     const { writes, summary } = applyToPlan(data({ budgetRecurring: [tpl, later, goal, done] }), SETTINGS, s, TODAY);
     expect(writes).toEqual([
+      { op: 'create', table: 'budgetMonths', fields: { ym: '2027-01', categoryTargets: {}, potTargets: { savings: { fromOn: { kind: 'amount', value: 25000 } } } } },
       { op: 'update', table: 'budgetRecurring', id: 'tpl-etf', patch: { endYm: '2026-12' } },
       { op: 'delete', table: 'budgetRecurring', id: 'tpl-later' },
       { op: 'create', table: 'budgetRecurring', fields: { name: 'ETF', amount: 25000, categoryId: 'cat-etf', day: 3, startYm: '2027-01' } },
     ]);
-    expect(summary).toEqual(['Investments: €250.00 a month from January 2027 on (replacing ETF, Pension)']);
+    expect(summary).toEqual([
+      'Investments: €250.00 a month from January 2027 on (replacing ETF, Pension)',
+      'Savings & investments target: €250.00 a month from January 2027 on',
+    ]);
   });
 
   it('creates an investment template when there is none', () => {
     const { writes, summary } = applyToPlan(data(), SETTINGS, scenario('I', [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]), TODAY);
-    expect(writes).toEqual([{ op: 'create', table: 'budgetRecurring',
-      fields: { name: 'Investment contribution', amount: 25000, categoryId: 'cat-etf', day: 1, startYm: '2027-01' } }]);
-    expect(summary).toEqual(['Investments: €250.00 a month from January 2027 on']);
+    expect(writes).toContainEqual({ op: 'create', table: 'budgetRecurring',
+      fields: { name: 'Investment contribution', amount: 25000, categoryId: 'cat-etf', day: 1, startYm: '2027-01' } });
+    expect(summary[0]).toBe('Investments: €250.00 a month from January 2027 on');
   });
 
   it('makes one-off items planned entries to confirm in their months', () => {
@@ -199,26 +281,22 @@ describe('applyToPlan', () => {
     ]);
   });
 
-  it('makes an extra debt payment a monthly template (with the instalment it would stop) and a planned lump sum', () => {
+  it('makes an extra debt payment planned payments on the debt, each month until it is paid off, and the lump sum', () => {
     const s = scenario('Pay off', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000, lumpYm: '2027-01', lump: 200000 }]);
     const { writes, summary } = applyToPlan(data(), SETTINGS, s, TODAY);
-    expect(writes).toEqual([
-      { op: 'create', table: 'budgetRecurring', fields: { name: 'Car loan instalment + extra', amount: 30000, categoryId: 'cat-extra', day: 1, startYm: '2026-11', untilDebtId: 'debt-1' } },
-      { op: 'create', table: 'budgetEntries', fields: { kind: 'expense', date: '2027-01-01', amount: 200000, categoryId: 'cat-extra', debtId: 'debt-1', note: 'Extra payment: Car loan', status: 'planned', oneOff: true } },
-    ]);
+    const [, row] = compareScenarios(input(), [s]);
+    const pay = (date: string, amount: number) => ({ op: 'create', table: 'budgetEntries',
+      fields: { kind: 'expense', date, amount, categoryId: 'cat-extra', debtId: 'debt-1', note: 'Extra payment: Car loan', status: 'planned', oneOff: true } });
+    const monthly = writes.slice(1);
+    expect(writes[0]).toEqual(pay('2027-01-01', 200000));
+    expect(monthly.length).toBeGreaterThan(12);
+    expect(monthly).toEqual(monthly.map((_, i) => pay(`${addMonths('2026-11', i)}-01`, 10000)));
+    // The last one is in the month the debt is paid off.
+    expect(addMonths('2026-11', monthly.length - 1)).toBe(row.debtFree);
     expect(summary).toEqual([
-      'Car loan: extra €100.00 a month from November 2026 on (one template with its €200.00 instalment, €300.00 a month)',
+      `Car loan: extra €100.00 a month from November 2026 to ${monthName(row.debtFree!)}, ${monthly.length} planned payments to confirm`,
       'Car loan: extra payment of €2,000.00 in January 2027',
     ]);
-  });
-
-  it('adds only the extra when a template already pays the debt', () => {
-    const tpl = recurring({ id: 'tpl-loan', amount: 25000, startYm: '2026-01', categoryId: 'cat-loan', untilDebtId: 'debt-1' });
-    const { writes, summary } = applyToPlan(data({ budgetRecurring: [tpl] }), SETTINGS, scenario('E', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]), TODAY);
-    expect(writes).toEqual([
-      { op: 'create', table: 'budgetRecurring', fields: { name: 'Car loan extra payment', amount: 10000, categoryId: 'cat-extra', day: 1, startYm: '2026-11', untilDebtId: 'debt-1' } },
-    ]);
-    expect(summary).toEqual(['Car loan: extra €100.00 a month from November 2026 on']);
   });
 
   it('leaves out an extra payment to a debt that no longer exists', () => {
@@ -227,23 +305,114 @@ describe('applyToPlan', () => {
     expect(summary).toEqual(['Extra debt payment: the debt no longer exists, left out']);
   });
 
-  it('once applied, the base plan forecasts what the scenario did', () => {
+  it('leaves out an extra payment to a debt already paid off', () => {
+    const paid = data({ budgetCorrections: [correction('bank', '2026-10', 500000), correction('debt:debt-1', '2026-10', 0)] });
+    const { writes, summary } = applyToPlan(paid, SETTINGS, scenario('E', [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]), TODAY);
+    expect(writes).toEqual([]);
+    expect(summary).toEqual(['Car loan: extra €100.00 a month left out, the debt is paid off before it starts']);
+  });
+});
+
+describe('applyToPlan: the plan after Apply is what Compare showed', () => {
+  it('a scenario with every kind of change', () => {
     const changes: ScenarioChange[] = [
-      { kind: 'rotation', patternOn: 9, patternOff: 3 },
-      { kind: 'salary', fromYm: '2027-02', amount: 330000 },
-      { kind: 'rates', yearlyReturnPct: 6 },
-      { kind: 'potTarget', pot: 'needs', fromYm: '2027-03', amount: 170000 },
-      { kind: 'investment', fromYm: '2027-01', monthly: 25000 },
-      CAR,
-      { kind: 'oneOff', ym: '2027-08', amount: 150000, income: true, label: 'Bonus' },
+      { kind: 'rotation', patternOn: 9, patternOff: 3 }, { kind: 'salary', fromYm: '2027-02', amount: 330000 }, { kind: 'rates', yearlyReturnPct: 6 },
+      { kind: 'potTarget', pot: 'needs', fromYm: '2027-03', amount: 170000 }, { kind: 'investment', fromYm: '2027-01', monthly: 25000 },
+      CAR, { kind: 'oneOff', ym: '2027-08', amount: 150000, income: true, label: 'Bonus' },
       { kind: 'extraDebt', debtId: 'debt-1', monthly: 15000, lumpYm: '2027-06', lump: 100000 },
     ];
-    const d = data({ budgetRecurring: [recurring({ id: 'tpl-etf', name: 'ETF', amount: 10000, startYm: '2026-01', categoryId: 'cat-etf' })] });
-    const scenarioRun = forecast({ today: TODAY, data: d, settings: SETTINGS, overrides: changes, months: 60 });
-    const applied = perform(d, SETTINGS, applyToPlan(d, SETTINGS, scenario('All', changes), TODAY).writes);
-    const appliedRun = forecast({ today: TODAY, data: applied.data, settings: applied.settings, months: 60 });
-    const pick = (r: typeof scenarioRun) => r.months.map((m) => [m.ym, m.income, m.spending, m.bank, m.investments, m.debts]);
-    expect(pick(appliedRun)).toEqual(pick(scenarioRun));
-    expect(appliedRun.totalInterest).toBe(scenarioRun.totalInterest);
+    roundTrip(data({ budgetRecurring: [recurring({ id: 'tpl-etf', name: 'ETF', amount: 10000, startYm: '2026-01', categoryId: 'cat-etf' })] }), SETTINGS, changes);
+  });
+
+  it('an investment change with a Savings target and a category target: Savings contributes exactly the new amount', () => {
+    const months = [month('2026-11', { id: 'm-1', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } }, savings: { fromOn: { kind: 'amount', value: 50000 } } },
+      categoryTargets: { 'cat-etf': { fromOn: 30000 } } })];
+    const d = data({ budgetMonths: months, budgetRecurring: [recurring({ id: 'tpl-etf', name: 'ETF', amount: 10000, startYm: '2026-01', categoryId: 'cat-etf' })] });
+    const { applied, base } = roundTrip(d, SETTINGS, [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
+    expect(base.months.slice(0, 4).map((m) => m.contribution)).toEqual([50000, 50000, 50000, 50000]);
+    expect(applied.months.slice(0, 4).map((m) => m.contribution)).toEqual([50000, 50000, 25000, 25000]);
+    expect(from(applied, '2027-01', 24).every((m) => m.contribution === 25000)).toBe(true);
+  });
+
+  it('an investment change keeps a planned Savings entry made by hand', () => {
+    const d = data({ budgetEntries: [entry('2027-02-10', 7000, { categoryId: 'cat-etf', status: 'planned' })] });
+    const { applied } = roundTrip(d, SETTINGS, [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
+    expect(applied.months.slice(2, 5).map((m) => m.contribution)).toEqual([25000, 32000, 25000]);
+  });
+
+  it('an investment change with Savings planned by a fixed amount', () => {
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, savings: 'fixed' as const }, fixedSpend: { savings: 40000 } };
+    const { applied } = roundTrip(data(), s, [{ kind: 'investment', fromYm: '2027-01', monthly: 25000 }]);
+    expect(from(applied, '2027-01', 12).every((m) => m.contribution === 25000)).toBe(true);
+  });
+
+  it('a pot target below its category targets: the pot is planned at the new amount', () => {
+    const months = [month('2026-11', { id: 'm-1', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } },
+      categoryTargets: { 'cat-rent': { fromOn: 100000 }, 'cat-groc': { fromOn: 60000 } } })];
+    const { applied, base } = roundTrip(data({ budgetMonths: months }), SETTINGS, [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 150000 }]);
+    expect(base.months.slice(0, 4).map((m) => m.needs)).toEqual([200000, 200000, 200000, 200000]);
+    expect(applied.months.slice(0, 4).map((m) => m.needs)).toEqual([200000, 200000, 150000, 150000]);
+  });
+
+  it('a pot target with later months\' own edits: the new amount holds for every later month', () => {
+    const months = [NEEDS, month('2027-06', { id: 'm-6', potTargets: { needs: { fromOn: { kind: 'amount', value: 250000 } } } }),
+      month('2027-09', { id: 'm-9', categoryTargets: { 'cat-groc': { fromOn: 190000 } } })];
+    const { applied } = roundTrip(data({ budgetMonths: months }), SETTINGS, [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 180000 }]);
+    expect(from(applied, '2027-01', 36).every((m) => m.needs === 180000)).toBe(true);
+  });
+
+  it('a pot target on a pot planned by the average', () => {
+    const history = ['2026-08', '2026-09', '2026-10'].map((ym) => entry(`${ym}-05`, 90000, { categoryId: 'cat-fun' }));
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, wants: 'average' as const } };
+    const wants = (m: ForecastResult['months'][number]) => m.spending - m.needs - m.transfers;
+    const { applied, base } = roundTrip(data({ budgetEntries: history }), s, [{ kind: 'potTarget', pot: 'wants', fromYm: '2027-01', amount: 50000 }]);
+    expect(base.months.slice(0, 4).map(wants)).toEqual([90000, 90000, 90000, 90000]);
+    expect(from(applied, '2027-01', 12).every((m) => wants(m) === 50000)).toBe(true);
+  });
+
+  it('a pot target on a pot planned by a fixed amount', () => {
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, needs: 'fixed' as const }, fixedSpend: { needs: 120000 } };
+    const { applied } = roundTrip(data(), s, [{ kind: 'potTarget', pot: 'needs', fromYm: '2027-01', amount: 150000 }]);
+    expect(from(applied, '2027-01', 12).every((m) => m.needs === 150000)).toBe(true);
+  });
+
+  it('an extra debt payment with a Debts target pays the instalment and the extra', () => {
+    const months = [month('2026-11', { id: 'm-1', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 50000 } } } })];
+    const { applied, base } = roundTrip(data({ budgetMonths: months }), SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(base.months.slice(0, 6).map(debtPaid)).toEqual([50000, 50000, 50000, 50000, 50000, 50000]);
+    expect(applied.months.slice(0, 6).map(debtPaid)).toEqual([60000, 60000, 60000, 60000, 60000, 60000]);
+  });
+
+  it('an extra debt payment with a Debts category target', () => {
+    const months = [month('2026-11', { id: 'm-1', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } }, categoryTargets: { 'cat-loan': { fromOn: 30000 } } })];
+    const { applied, base } = roundTrip(data({ budgetMonths: months }), SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(base.months.slice(0, 6).map(debtPaid)).toEqual([30000, 30000, 30000, 30000, 30000, 30000]);
+    expect(applied.months.slice(0, 6).map(debtPaid)).toEqual([40000, 40000, 40000, 40000, 40000, 40000]);
+  });
+
+  it('an extra debt payment with the Debts pot planned by a fixed amount', () => {
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, debts: 'fixed' as const }, fixedSpend: { debts: 50000 } };
+    const { applied, base } = roundTrip(data(), s, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(base.months.slice(0, 6).map(debtPaid)).toEqual([50000, 50000, 50000, 50000, 50000, 50000]);
+    expect(applied.months.slice(0, 6).map(debtPaid)).toEqual([60000, 60000, 60000, 60000, 60000, 60000]);
+  });
+
+  it('an extra debt payment with the Debts pot planned by the average', () => {
+    const history = ['2026-08', '2026-09', '2026-10'].map((ym) => entry(`${ym}-05`, 20000, { categoryId: 'cat-loan', debtId: 'debt-1' }));
+    const s = { ...SETTINGS, forecastMethod: { ...SETTINGS.forecastMethod, debts: 'average' as const } };
+    const { applied, base } = roundTrip(data({ budgetEntries: history }), s, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(applied.months.slice(0, 6).map(debtPaid)).toEqual(base.months.slice(0, 6).map((m) => debtPaid(m) + 10000));
+  });
+
+  it('an extra debt payment alongside a template that pays the debt', () => {
+    const tpl = recurring({ id: 'tpl-loan', amount: 25000, startYm: '2026-01', categoryId: 'cat-loan', untilDebtId: 'debt-1' });
+    const { applied, base } = roundTrip(data({ budgetRecurring: [tpl] }), SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(base.months.slice(0, 6).map(debtPaid)).toEqual([25000, 25000, 25000, 25000, 25000, 25000]);
+    expect(applied.months.slice(0, 6).map(debtPaid)).toEqual([35000, 35000, 35000, 35000, 35000, 35000]);
+    // A template that ends, and another that starts later: the instalment is never lost nor paid twice.
+    const later = recurring({ id: 'tpl-later', amount: 30000, startYm: '2027-04', categoryId: 'cat-loan', untilDebtId: 'debt-1' });
+    const r = roundTrip(data({ budgetRecurring: [{ ...tpl, endYm: '2027-01' }, later] }), SETTINGS, [{ kind: 'extraDebt', debtId: 'debt-1', monthly: 10000 }]);
+    expect(r.base.months.slice(0, 8).map(debtPaid)).toEqual([25000, 25000, 25000, 20000, 20000, 30000, 30000, 30000]);
+    expect(r.applied.months.slice(0, 8).map(debtPaid)).toEqual(r.base.months.slice(0, 8).map((m) => debtPaid(m) + 10000));
   });
 });
