@@ -27,10 +27,12 @@ afterEach(() => {
 });
 
 describe('database', () => {
-  it('declares schema version 4 with the syncable tables, settings and snapshots', () => {
+  it('declares schema version 5 with the syncable tables, settings and snapshots', () => {
     const db = freshDb();
-    expect(db.verno).toBe(4);
+    expect(db.verno).toBe(5);
     expect(db.tables.map((t) => t.name).sort()).toEqual([
+      'budgetAssets', 'budgetCategories', 'budgetCorrections', 'budgetDebts', 'budgetEntries', 'budgetFundMoves', 'budgetFunds', 'budgetGoals',
+      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings',
       'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFiles', 'libraryFolders', 'libraryOpened', 'libraryText',
       'settings', 'ships', 'snapshots', 'voyages',
     ]);
@@ -261,6 +263,8 @@ describe('allTables, putRecords and replaceAllTables', () => {
     const t = await allTables(db);
     expect(Object.keys(t)).toEqual([...TABLE_NAMES]);
     expect(Object.keys(t).sort()).toEqual([
+      'budgetAssets', 'budgetCategories', 'budgetCorrections', 'budgetDebts', 'budgetEntries', 'budgetFundMoves', 'budgetFunds', 'budgetGoals',
+      'budgetMonths', 'budgetRecurring', 'budgetScenarios', 'budgetSettings',
       'certificates', 'clockChanges', 'crew', 'crewDocuments', 'formDrafts', 'formLastValues', 'formPhotos', 'formTemplates', 'libraryDocs', 'libraryFolders', 'ships', 'voyages',
     ]);
     expect(t.ships.map((r) => r.id)).toEqual([ship.id]);
@@ -307,6 +311,7 @@ describe('allTables, putRecords and replaceAllTables', () => {
     const incoming: Tables = {
       ships: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
       formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
       crew: [{ id: 'm-1', createdAt: 'x', updatedAt: 'x', updatedBy: 'x', deleted: true, scope: 'ship', shipId: 'gone', ...draft } as CrewMember],
     };
     await replaceAllTables(db, incoming);

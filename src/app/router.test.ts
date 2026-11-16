@@ -34,6 +34,17 @@ describe('matchRoute', () => {
     for (const hash of ['#/forms/abc', '#/forms/abc/other', '#/forms/abc/setup/x']) expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
   });
 
+  it('knows the budget routes', () => {
+    expect(matchRoute('#/budget/add/same/e1')).toEqual({ path: '/budget/add/same/:id', params: { id: 'e1' } });
+    for (const path of ['/budget', '/budget/add', '/budget/add/income', '/budget/catch-up', '/budget/forecast', '/budget/net-worth', '/budget/scenarios', '/budget/plan',
+      '/budget/trends', '/budget/import', '/budget/export']) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
+    expect(matchRoute('#/budget/month/2026-10')).toEqual({ path: '/budget/month/:ym', params: { ym: '2026-10' } });
+    expect(matchRoute('#/budget/scenarios/s1')).toEqual({ path: '/budget/scenarios/:id', params: { id: 's1' } });
+    expect(matchRoute('#/budget/plan/start')).toEqual({ path: '/budget/plan/start', params: {} });
+    expect(matchRoute('#/budget/plan/debts')).toEqual({ path: '/budget/plan/:section', params: { section: 'debts' } });
+    expect(matchRoute('#/budget/month')).toEqual({ path: '/', params: {} });
+  });
+
   it('knows the Expiring route', () => {
     expect(matchRoute('#/ship/expiring')).toEqual({ path: '/ship/expiring', params: {} });
   });

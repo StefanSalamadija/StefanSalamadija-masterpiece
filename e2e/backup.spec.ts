@@ -833,3 +833,16 @@ test('a device with a ship can reach the import screen from Settings and come ba
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await expect(page.getByText('No snapshots yet.')).toBeVisible();
 });
+
+test('import works offline after a reload: its screen and the backup service come from the cache', async ({ page, context }, testInfo) => {
+  await freshApp(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await context.setOffline(true);
+  await page.reload(); // served by the service worker, so the import chunk must come from its cache
+  await page.getByRole('link', { name: 'Import a backup' }).click();
+  await expect(page.getByRole('heading', { name: 'Import backup' })).toBeVisible();
+  const notBackup = testInfo.outputPath('notes.txt');
+  await fs.writeFile(notBackup, 'shopping list');
+  await page.getByLabel('Backup file').setInputFiles(notBackup);
+  await expect(page.getByRole('alert')).toHaveText("This isn't a Masterpiece backup file.");
+});

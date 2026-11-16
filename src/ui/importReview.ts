@@ -1,4 +1,5 @@
 import { base64ByteLength, isBase64 } from '../backup/crypto';
+import { formatMoney } from '../budget/money';
 import { MAX_BACKUP_FILE_BYTES } from '../backup/envelope';
 import { CREW_DOC_TYPES, RANKS } from '../domain/catalogues';
 import { CREW_LIST_COLUMNS } from '../domain/crewList';
@@ -113,6 +114,27 @@ const LABELS: Record<TableName, Record<string, string>> = {
   crewDocuments: CREW_DOCUMENT_LABELS, formTemplates: FORM_TEMPLATE_LABELS, formDrafts: FORM_DRAFT_LABELS,
   formLastValues: FORM_LAST_VALUES_LABELS, formPhotos: FORM_PHOTO_LABELS,
   libraryDocs: { title: 'Title', tags: 'Tags' }, libraryFolders: { name: 'Name' },
+  budgetCategories: { name: 'Name', pot: 'Pot', group: 'Group', order: 'Order', hidden: 'Hidden', synonyms: 'Other words' },
+  budgetEntries: {
+    kind: 'Kind', date: 'Date', amount: 'Amount', categoryId: 'Category', incomeSource: 'Income source', note: 'Note', payee: 'Payee',
+    status: 'Status', fundId: 'Paid from fund', soldAssetId: 'Asset sold', debtId: 'Debt', oneOff: 'One-off',
+  },
+  budgetMonths: { ym: 'Month', plannedIncome: 'Planned income', potTargets: 'Pot targets', categoryTargets: 'Category targets', notes: 'Notes' },
+  budgetRecurring: {
+    name: 'Name', amount: 'Amount', categoryId: 'Category', incomeSource: 'Income source', day: 'Day', startYm: 'From', endYm: 'Until',
+    untilDebtId: 'Until debt paid',
+  },
+  budgetFunds: { name: 'Name', amount: 'Amount', dueYm: 'Due', repeatMonths: 'Repeats every (months)', categoryId: 'Category', startBalance: 'Start balance' },
+  budgetFundMoves: { fundId: 'Fund', ym: 'Month', amount: 'Amount', kind: 'Kind' },
+  budgetDebts: { name: 'Name', startBalance: 'Start balance', yearlyRatePct: 'Yearly rate (%)', instalment: 'Instalment', startYm: 'From' },
+  budgetGoals: { name: 'Name', amount: 'Amount', targetYm: 'Target month', categoryId: 'Category' },
+  budgetAssets: { name: 'Name', includeInNetWorth: 'In net worth' },
+  budgetCorrections: { account: 'Account', ym: 'Month', balance: 'Balance' },
+  budgetScenarios: { name: 'Name', changes: 'Changes' },
+  budgetSettings: {
+    rotation: 'Rotation', assumptions: 'Assumptions', meCrewId: 'Me (crew record)', favourites: 'Favourites', bufferCents: 'Buffer',
+    forecastMethod: 'Forecast method', fixedSpend: 'Fixed spending', horizon: 'Horizon (months)',
+  },
 };
 
 /**
@@ -126,7 +148,12 @@ const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = {
   certificates: new Set(['key']), crewDocuments: new Set(['crewId']),
   formTemplates: new Set(['code', 'title', 'kind', 'fileName', 'fileBase64', 'schema']),
   formDrafts: new Set(['templateId', 'code', 'photoIds']), formLastValues: new Set(['code']), formPhotos: new Set(['draftId', 'jpegBase64']),
+  // Where an entry came from (a template, an import cell, a fund record's entry) is bookkeeping too, as is the settings' key.
+  budgetEntries: new Set(['recurringId', 'importKey']), budgetFundMoves: new Set(['entryId']), budgetSettings: new Set(['key']),
 };
+
+/** The budget's fields that hold whole cents, shown as money. */
+const MONEY_FIELDS: ReadonlySet<string> = new Set(['amount', 'balance', 'startBalance', 'instalment', 'plannedIncome', 'bufferCents']);
 
 /** The fields of a record that the review compares, by the name they have in the file. A ship's particulars are at the top level, with its other settings. */
 function valuesOf(table: TableName, record: SyncRecord): Values {
@@ -170,10 +197,17 @@ function setupText(setup: Values): string {
   return `${filled} filled for you · ${leftEmpty} left empty`;
 }
 
+/** A month's planned income edit: "€4,500.00 from this month on · €4,000.00 this month only". */
+function plannedIncomeText(edit: Values): string {
+  const part = (v: unknown, when: string) => (v === undefined ? undefined : `${Number.isSafeInteger(v) ? formatMoney(v as number) : 'none'} ${when}`);
+  return [part(edit.fromOn, 'from this month on'), part(edit.thisOnly, 'this month only')].filter(Boolean).join(' · ') || EMPTY_VALUE;
+}
+
 function show(key: string, value: unknown): string {
   if (value === undefined || value === null || value === '') return EMPTY_VALUE;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'number') {
+    if (MONEY_FIELDS.has(key) && Number.isSafeInteger(value)) return formatMoney(value);
     return (key === 'etaOffsetMinutes' || key === 'toOffsetMinutes') && isValidOffset(value) ? formatOffset(value) : String(value);
   }
   if (typeof value === 'string') {
@@ -185,6 +219,7 @@ function show(key: string, value: unknown): string {
   }
   if (key === 'crewListColumns' && Array.isArray(value)) return columnsText(value);
   if (key === 'crewImportMapping' && isObject(value) && isObject(value.byHeader)) return `${Object.keys(value.byHeader).length} mapped columns`;
+  if (key === 'plannedIncome' && isObject(value)) return plannedIncomeText(value);
   if (key === 'values' && isObject(value)) return valuesText(value);
   if (key === 'setup' && isObject(value)) return setupText(value);
   return plainText(JSON.stringify(value), MAX_VALUE);
@@ -277,6 +312,22 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
     }
     case 'libraryDocs': return `Library document: ${nameOf(r.title, '(no title)')}`;
     case 'libraryFolders': return `Library folder: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetCategories': return `Budget category: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetEntries': {
+      const what = r.kind === 'income' ? 'Budget income' : 'Budget expense';
+      const amount = Number.isSafeInteger(r.amount) ? formatMoney(r.amount as number) : '(no amount)';
+      return `${what}: ${nameOf(r.date, '(no date)')} — ${amount}`;
+    }
+    case 'budgetMonths': return `Budget month: ${nameOf(r.ym, '(no month)')}`;
+    case 'budgetRecurring': return `Budget recurring item: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetFunds': return `Budget fund: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetFundMoves': return `Budget fund record: ${nameOf(r.ym, '(no month)')}`;
+    case 'budgetDebts': return `Budget debt: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetGoals': return `Budget goal: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetAssets': return `Budget asset: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetCorrections': return `Budget balance: ${nameOf(r.account, '(no account)')} — ${nameOf(r.ym, '(no month)')}`;
+    case 'budgetScenarios': return `Budget scenario: ${nameOf(r.name, '(no name)')}`;
+    case 'budgetSettings': return 'Budget settings';
   }
 }
 

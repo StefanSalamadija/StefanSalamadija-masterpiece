@@ -62,6 +62,9 @@ const COUNT_WORDS: readonly (readonly [TableName, string, string])[] = [
   ['formPhotos', 'photo', 'photos'],
   ['libraryDocs', 'library document', 'library documents'],
   ['libraryFolders', 'library folder', 'library folders'],
+  // The budget is counted by what is kept by hand: its entries and categories. Its plans and settings come with them.
+  ['budgetCategories', 'budget category', 'budget categories'],
+  ['budgetEntries', 'budget entry', 'budget entries'],
 ];
 
 /** "1 ship · 12 crew · 30 certificates": what a snapshot holds, leaving out what it does not. Deleted records are counted too. */

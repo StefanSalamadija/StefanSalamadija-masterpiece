@@ -219,3 +219,31 @@ test('home fits a phone with everything on it at once', async ({ page }) => {
   await expect(page.getByText('Clock change 26 Oct 02:00 → UTC-09:30')).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
+
+test('home shows the personal budget alerts on screen, never in print', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  const budgetAlerts = page.getByRole('region', { name: 'Budget alerts' });
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
+  await expect(noBackupYet(page)).toBeVisible();
+  await expect(budgetAlerts).toHaveCount(0); // a budget never opened has nothing to say
+  await page.goto('./#/budget');
+  await expect(page.getByRole('link', { name: /^Starting balances/ })).toBeVisible();
+  // A fund due on 1 November 2026, 7 days after the ship's today.
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('masterpiece');
+    open.onsuccess = () => {
+      const tx = open.result.transaction('budgetFunds', 'readwrite');
+      tx.objectStore('budgetFunds').put({
+        id: 'fund-ins', name: 'Home insurance', amount: 30000, dueYm: '2026-11', startBalance: 30000,
+        createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'test', deleted: false, scope: 'personal',
+      });
+      tx.oncomplete = () => { open.result.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  await page.goto('./#/');
+  await expect(budgetAlerts).toContainText('1 budget alert');
+  await expect(budgetAlerts.getByRole('link', { name: 'Home insurance is due in November 2026' })).toHaveAttribute('href', '#/budget/plan/funds');
+  await page.emulateMedia({ media: 'print' });
+  await expect(budgetAlerts).toBeHidden();
+});

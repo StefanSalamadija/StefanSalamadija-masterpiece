@@ -378,8 +378,10 @@ describe('conflictViews', () => {
   });
 
   it('works on a plan the merge made', () => {
-    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [] };
-    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [] };
+    const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [] };
+    const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [] };
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
@@ -388,7 +390,8 @@ describe('conflictViews', () => {
 
 describe("a merge of the contract length, the planned relief, the ship's limit and its crew list columns", () => {
   const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
-    formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [], ...extra,
+    formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], ...extra,
   });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');
@@ -609,5 +612,34 @@ describe('forms in the review', () => {
     const photo = (extra: object) => rec({ shipId: 's1', draftId: 'd1', jpegBase64: '/9j/', width: 10, height: 10, ...extra });
     expect(changedFields('formPhotos', photo({}), photo({ deleted: true, jpegBase64: '' })))
       .toEqual([{ label: 'Status', local: 'Active', incoming: 'Deleted' }]);
+  });
+});
+
+describe('the budget in the review', () => {
+  // Invented figures only.
+  const entry = (over: object = {}) =>
+    rec({ scope: 'personal', kind: 'expense', date: '2026-11-14', amount: 320, status: 'actual', note: 'Coffee', recurringId: 'r1', ...over });
+
+  it('names budget records by what they are, with the amount of an entry as money', () => {
+    expect(recordTitle('budgetEntries', entry())).toBe('Budget expense: 2026-11-14 — €3.20');
+    expect(recordTitle('budgetEntries', entry({ kind: 'income', amount: 450000 }))).toBe('Budget income: 2026-11-14 — €4,500.00');
+    expect(recordTitle('budgetEntries', entry({ amount: 'lots' }))).toBe('Budget expense: 2026-11-14 — (no amount)');
+    expect(recordTitle('budgetCategories', rec({ scope: 'personal', name: 'Groceries, food & drink' }))).toBe('Budget category: Groceries, food & drink');
+    expect(recordTitle('budgetCorrections', rec({ scope: 'personal', account: 'bank', ym: '2026-10' }))).toBe('Budget balance: bank — 2026-10');
+    expect(recordTitle('budgetSettings', rec({ scope: 'personal', key: 'budget' }))).toBe('Budget settings');
+  });
+
+  it('shows a change of amount as money, and leaves out where an entry came from', () => {
+    expect(changedFields('budgetEntries', entry(), entry({ amount: -150, note: 'Coffee and cake', recurringId: 'r2' }))).toEqual([
+      { label: 'Amount', local: '€3.20', incoming: '−€1.50' },
+      { label: 'Note', local: 'Coffee', incoming: 'Coffee and cake' },
+    ]);
+  });
+
+  it('shows a month\'s planned income as money, with how it was set', () => {
+    const month = (plannedIncome: object) => rec({ scope: 'personal', ym: '2026-11', potTargets: {}, categoryTargets: {}, plannedIncome });
+    expect(changedFields('budgetMonths', month({ fromOn: 450000 }), month({ fromOn: 450000, thisOnly: null }))).toEqual([
+      { label: 'Planned income', local: '€4,500.00 from this month on', incoming: '€4,500.00 from this month on · none this month only' },
+    ]);
   });
 });

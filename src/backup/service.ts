@@ -8,8 +8,9 @@ import { guardWrite } from '../db/storage';
 import { computeMerge, resolveMerge } from '../domain/merge';
 import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
-import { TABLE_NAMES } from '../domain/types';
-import type { ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
+import { BUDGET_TABLES, TABLE_NAMES } from '../domain/types';
+import type { BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
+import { budgetMoneyOk, entryLinksOk, isCents } from '../budget/validate';
 import { isBase64 } from './crypto';
 import {
   BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, StaleReviewError, openBackup, sealBackup, validatePassword,
@@ -117,15 +118,82 @@ function isBase64Text(value: unknown): boolean {
   return typeof value === 'string' && isBase64(value);
 }
 
+const POT_IDS: ReadonlySet<unknown> = new Set(['needs', 'savings', 'wants', 'debts', 'emergency']);
+const HORIZONS: ReadonlySet<unknown> = new Set([12, 24, 36, 60]);
+const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
+const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+function isYm(value: unknown): boolean {
+  return typeof value === 'string' && YM.test(value);
+}
+
+/** A debt's extra steps: absent, or a list of a month and an amount of 0 or more, one step per month. */
+function extraStepsOk(steps: unknown): boolean {
+  if (steps === undefined) return true;
+  if (!Array.isArray(steps)) return false;
+  const months = new Set<unknown>();
+  return steps.every((s) => isObject(s) && isYm(s.fromYm) && isCents(s.monthly) && (s.monthly as number) >= 0 && !months.has(s.fromYm) && months.add(s.fromYm));
+}
+
+/** The rotation the forecast reads without checking again: salaries by month, contract periods, the pattern and the pay rule. */
+function rotationOk(rotation: unknown): boolean {
+  if (!isObject(rotation)) return false;
+  const { salaryFrom, periods, patternOn, patternOff, paidNextMonth, paidAtHomePct } = rotation;
+  const whole = (v: unknown, min: number) => Number.isInteger(v) && (v as number) >= min && (v as number) <= 24;
+  return Array.isArray(salaryFrom) && salaryFrom.every((s) => isObject(s) && isYm(s.ym))
+    && Array.isArray(periods) && periods.every((p) => isObject(p) && typeof p.signOn === 'string' && DATE.test(p.signOn)
+      && typeof p.signOff === 'string' && DATE.test(p.signOff) && isOptionalText(p.crewId))
+    && whole(patternOn, 1) && whole(patternOff, 0) && typeof paidNextMonth === 'boolean'
+    && typeof paidAtHomePct === 'number' && paidAtHomePct >= 0 && paidAtHomePct <= 100;
+}
+
+/**
+ * What a budget record needs, beyond being personal: the fields the budget's sums read without checking again. Every
+ * amount is whole cents, nested ones too (a month's targets, the settings' favourites, fixed spending and salaries, a
+ * scenario's changes: see `budgetMoneyOk`), and every month `YYYY-MM`.
+ */
+function hasBudgetFields(name: BudgetTableName, r: Record<string, unknown>): boolean {
+  return budgetMoneyOk(r) && hasBudgetShape(name, r);
+}
+
+/** The fields each budget table must have, of the right kind. */
+function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): boolean {
+  switch (name) {
+    case 'budgetCategories':
+      return POT_IDS.has(r.pot) && typeof r.name === 'string' && typeof r.order === 'number' && typeof r.hidden === 'boolean' && isOptionalText(r.group);
+    case 'budgetEntries':
+      return (r.kind === 'expense' || r.kind === 'income') && typeof r.date === 'string' && DATE.test(r.date) && isCents(r.amount)
+        && (r.status === 'actual' || r.status === 'planned') && entryLinksOk(r);
+    case 'budgetMonths': return isYm(r.ym) && isObject(r.potTargets) && isObject(r.categoryTargets);
+    case 'budgetRecurring': return typeof r.name === 'string' && isCents(r.amount) && typeof r.day === 'number' && isYm(r.startYm);
+    case 'budgetFunds': return typeof r.name === 'string' && isCents(r.amount) && isYm(r.dueYm) && isCents(r.startBalance);
+    case 'budgetFundMoves': return typeof r.fundId === 'string' && isYm(r.ym) && isCents(r.amount) && (r.kind === 'setaside' || r.kind === 'paid');
+    case 'budgetDebts':
+      return typeof r.name === 'string' && isCents(r.startBalance) && typeof r.yearlyRatePct === 'number' && Number.isFinite(r.yearlyRatePct)
+        && r.yearlyRatePct >= 0 && r.yearlyRatePct <= 100 && isCents(r.instalment) && isYm(r.startYm) && extraStepsOk(r.extraSteps)
+        && (r.extraApplied === undefined || (Array.isArray(r.extraApplied) && r.extraApplied.every((a) => isObject(a) && typeof a.source === 'string'
+          && isYm(a.fromYm) && isCents(a.monthly) && (a.monthly as number) >= 0)));
+    case 'budgetGoals': return typeof r.name === 'string' && isCents(r.amount) && isYm(r.targetYm);
+    case 'budgetAssets': return typeof r.name === 'string' && typeof r.includeInNetWorth === 'boolean';
+    case 'budgetCorrections': return typeof r.account === 'string' && isYm(r.ym) && isCents(r.balance);
+    case 'budgetScenarios': return typeof r.name === 'string' && Array.isArray(r.changes);
+    case 'budgetSettings':
+      return r.key === 'budget' && rotationOk(r.rotation) && isObject(r.assumptions) && Array.isArray(r.favourites) && isObject(r.forecastMethod)
+        && HORIZONS.has(r.horizon);
+  }
+}
+
 /**
  * What a record of `name` needs beyond what every record needs: what it belongs to, and what the app reads from it
- * without checking again. Every table but the ships and the forms library belongs to a ship by its `shipId`.
+ * without checking again. Every table but the ships and the personal ones (the libraries and the budget) belongs to a ship by its `shipId`.
  */
 function hasOwnFields(name: TableName, r: Record<string, unknown>): boolean {
   if (name === 'ships') return isObject(r.particulars);
   // The library is personal and belongs to no ship. Its file is what every filled form is made from.
   if (name === 'libraryDocs') return r.scope === 'personal' && typeof r.title === 'string' && typeof r.sha256 === 'string' && Array.isArray(r.tags);
   if (name === 'libraryFolders') return r.scope === 'personal' && typeof r.name === 'string';
+  // The budget is personal and belongs to no ship.
+  if (BUDGET_TABLES.includes(name as BudgetTableName)) return r.scope === 'personal' && hasBudgetFields(name as BudgetTableName, r);
   if (name === 'formTemplates') {
     return r.scope === 'personal' && typeof r.code === 'string' && isBase64Text(r.fileBase64) && isObject(r.schema) && isObject(r.setup);
   }

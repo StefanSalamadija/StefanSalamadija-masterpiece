@@ -43,6 +43,7 @@ const P: BackupPayload = {
   tables: {
     ships: [], crew: [crewRec({ surname: 'Šašić' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [docRec()],
     formTemplates: [templateRec()], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
   },
 };
 /** The forms tables of a file made before they existed, as they are read: empty. */

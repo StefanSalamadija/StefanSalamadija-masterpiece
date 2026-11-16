@@ -56,6 +56,18 @@ Home → **Library**: your own manuals, procedures and circulars (PDF, Word .doc
 - One file can be up to 100 MB.
 - Normal backups carry only titles, folders and tags. **Library files** (Library → Library files, or Settings) exports the documents themselves as encrypted files of up to 100 MB each; import them on another device in any order.
 
+## Budget
+
+Home → **Budget** (or **+ Expense**, or long-press the app icon → *Add expense*): your personal budget in euros, offline, behind the app lock. It is never in ship files or handovers.
+
+- **Quick add:** amount, category, Save — three taps. Income too (salary, sales, other). Repeat last, favourites, "Same as last time", typing `fuel 60`, and **Catch up** for several entries in a row. Undo for 5 seconds.
+- **Month:** your five pots (Needs, Savings & investments, Wants, Debts, Emergency fund) against their targets, categories, and recurring payments and fund set-asides to confirm.
+- **Plan:** targets (this month only or from this month on), categories, recurring payments, yearly bills (sinking funds), debts with planned extra payments, goals, assets, your rotation (or from your contract), assumptions, and starting balances.
+- **Forecast:** salary for the days onboard, spending and your bank balance month by month through your rotations, with warnings before a home month runs short.
+- **Net worth and freedom date:** what you own minus what you owe over time, savings rate, and the date your investments could cover your yearly spending (your own return, withdrawal and inflation rates). *Projection — not a forecast or financial advice.*
+- **Scenarios:** compare "what if" plans side by side; **Apply to plan** makes one your real plan.
+- **Excel:** import your existing budget workbook once (Budget → Import), and export months or years to Excel.
+
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.

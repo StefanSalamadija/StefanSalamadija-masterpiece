@@ -2,7 +2,8 @@ import Dexie from 'dexie';
 import type { Table } from 'dexie';
 import { TABLE_NAMES } from '../domain/types';
 import type {
-  Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, LibraryDoc, LibraryFileRow, LibraryFolder, LibraryOpenedRow, LibraryTextRow, Settings, ShipProfile, Snapshot,
+  BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth, BudgetRecurring,
+  BudgetScenario, BudgetSettings, Certificate, ClockChange, CrewDocument, CrewMember, FormDraft, FormLastValues, FormPhoto, FormTemplate, LibraryDoc, LibraryFileRow, LibraryFolder, LibraryOpenedRow, LibraryTextRow, Settings, ShipProfile, Snapshot,
   SyncRecord, TableName, Voyage,
 } from '../domain/types';
 import { connectionWatch } from './connection';
@@ -35,6 +36,18 @@ export class MasterpieceDB extends Dexie {
   declare libraryFiles: Table<LibraryFileRow, string>;
   declare libraryText: Table<LibraryTextRow, string>;
   declare libraryOpened: Table<LibraryOpenedRow, string>;
+  declare budgetCategories: Table<BudgetCategory, string>;
+  declare budgetEntries: Table<BudgetEntry, string>;
+  declare budgetMonths: Table<BudgetMonth, string>;
+  declare budgetRecurring: Table<BudgetRecurring, string>;
+  declare budgetFunds: Table<BudgetFund, string>;
+  declare budgetFundMoves: Table<BudgetFundMove, string>;
+  declare budgetDebts: Table<BudgetDebt, string>;
+  declare budgetGoals: Table<BudgetGoal, string>;
+  declare budgetAssets: Table<BudgetAsset, string>;
+  declare budgetCorrections: Table<BudgetCorrection, string>;
+  declare budgetScenarios: Table<BudgetScenario, string>;
+  declare budgetSettings: Table<BudgetSettings, string>;
   declare settings: Table<Settings, 'device'>;
   declare snapshots: Table<Snapshot, string>;
 
@@ -70,6 +83,24 @@ export class MasterpieceDB extends Dexie {
       libraryFiles: 'docId',
       libraryText: 'id, docId',
       libraryOpened: 'docId',
+    }).upgrade(async (tx) => {
+      await snapshotInUpgrade(tx);
+    });
+    // The personal budget: every table syncs (personal) and is keyed by `id` like every syncable table, so that the merge
+    // matches records by id. The settings are one record, found by its `key` ('budget').
+    this.version(5).stores({
+      budgetCategories: 'id',
+      budgetEntries: 'id, date, categoryId, status',
+      budgetMonths: 'id, ym',
+      budgetRecurring: 'id',
+      budgetFunds: 'id',
+      budgetFundMoves: 'id, fundId, ym',
+      budgetDebts: 'id',
+      budgetGoals: 'id',
+      budgetAssets: 'id',
+      budgetCorrections: 'id, account, ym',
+      budgetScenarios: 'id',
+      budgetSettings: 'id, key',
     }).upgrade(async (tx) => {
       await snapshotInUpgrade(tx);
     });
