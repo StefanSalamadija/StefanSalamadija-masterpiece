@@ -55,6 +55,26 @@ function stored(page: Page, table: string): Promise<Record<string, any>[]> {
   }), table);
 }
 
+/** Keeps a store busy with a read-write transaction until `releaseStore`, so the app's writes to it wait. */
+function holdStore(page: Page, table: string): Promise<void> {
+  return page.evaluate((table) => new Promise<void>((resolve, reject) => {
+    const w = window as unknown as { __hold: boolean };
+    w.__hold = true;
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const store = open.result.transaction(table, 'readwrite').objectStore(table);
+      const spin = () => { if (w.__hold) store.get('none').onsuccess = spin; else open.result.close(); };
+      spin();
+      resolve();
+    };
+  }), table);
+}
+
+function releaseStore(page: Page): Promise<void> {
+  return page.evaluate(() => { (window as unknown as { __hold: boolean }).__hold = false; });
+}
+
 /** Writes records straight into a table, such as one the test needs to exist already. */
 function seed(page: Page, table: string, records: Record<string, unknown>[]): Promise<void> {
   return page.evaluate(({ table, records }) => new Promise<void>((resolve, reject) => {
@@ -892,12 +912,20 @@ test('budget scenarios: a car changes the lowest bank month and the freedom date
   await change.getByLabel('Month').fill('2027-05');
   await change.getByLabel('Amount').fill('18000');
   await change.getByLabel('Pot').selectOption({ label: 'Wants' });
+  // The first Add's save is held up (a test transaction keeps the scenarios store busy) while the next change is typed,
+  // as a quick user does: what was typed must survive the save finishing.
+  await holdStore(page, 'budgetScenarios');
   await change.getByRole('button', { name: 'Add change' }).click();
   await page.getByLabel('Kind of change').selectOption({ label: 'Investment contribution from a month on' });
   await change.getByLabel('From month').fill('2027-05');
   await change.getByLabel('Each month').fill('500');
-  await change.getByRole('button', { name: 'Add change' }).click();
+  await releaseStore(page);
   const changes = page.getByRole('list', { name: 'Changes' }).getByRole('listitem');
+  // The first Add has finished saving: what was typed for the next change meanwhile is still there.
+  await expect(changes).toHaveCount(1);
+  await expect(change.getByLabel('From month')).toHaveValue('2027-05');
+  await expect(change.getByLabel('Each month')).toHaveValue('500');
+  await change.getByRole('button', { name: 'Add change' }).click();
   await expect(changes).toHaveCount(2);
   await expect(changes.nth(0)).toContainText('Car: €18,000.00 in May 2027 (Wants)');
   await expect(changes.nth(1)).toContainText('Investments: €500.00 a month from May 2027 on');

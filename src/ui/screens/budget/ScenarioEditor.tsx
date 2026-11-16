@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks';
+import { useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { navigate } from '../../../app/router';
@@ -96,7 +96,10 @@ function ChangeForm({ data, onAdd }: { data: PlanData; onAdd: (c: ScenarioChange
   const [f, setF] = useState<Record<string, string>>(() => startFields('oneOff', data));
   const [error, setError] = useState('');
   const [busy, run] = useBusy();
-  const set = (key: string) => (v: string) => { setF({ ...f, [key]: v }); setError(''); };
+  // The kind shown now, for the reset after an Add: by then the user may have moved on to another kind.
+  const kindNow = useRef(kind);
+  kindNow.current = kind;
+  const set = (key: string) => (v: string) => { setF((cur) => ({ ...cur, [key]: v })); setError(''); };
   const field = (key: string, label: string, opts: { type?: 'month' | 'date'; money?: boolean; rate?: boolean; hint?: string } = {}) => (
     <TextField label={label} value={f[key] ?? ''} onInput={set(key)} type={opts.type} inputMode={opts.money || opts.rate ? 'decimal' : undefined} hint={opts.hint} />
   );
@@ -110,7 +113,11 @@ function ChangeForm({ data, onAdd }: { data: PlanData; onAdd: (c: ScenarioChange
       e.preventDefault();
       const c = changeOf(kind, f, data);
       if ('error' in c) { setError(c.error); return; }
-      run(() => onAdd(c), () => setF(startFields(kind, data)));
+      const added = kind;
+      const sent = f;
+      // Cleared for the next change only while the form still shows what was added: what was typed meanwhile (for
+      // another kind, say) is kept.
+      run(() => onAdd(c), () => { if (kindNow.current === added) setF((cur) => (cur === sent ? startFields(added, data) : cur)); });
     }}>
       <SelectField label="Kind of change" value={kind} onChange={(v) => { setKind(v as Kind); setF(startFields(v as Kind, data)); setError(''); }}>
         {KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
