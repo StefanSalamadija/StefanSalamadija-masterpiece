@@ -138,3 +138,15 @@ export function potTargetAmount(t: PotTarget | undefined, plannedIncome: Cents):
   if (!t) return 0;
   return t.kind === 'amount' ? t.value : Math.round((plannedIncome * t.value) / 100);
 }
+
+/**
+ * Where a value of `ym`'s plan comes from: the month's own "this month only" edit, or the "from this month on" edit of
+ * the latest month up to it (`ym` itself, or the earlier month it is inherited from). None when nothing set it.
+ */
+export function editOrigin<V>(months: BudgetMonth[], ym: Ym, read: (m: BudgetMonth) => PlanEdit<V> | undefined): { scope: PlanScope; ym: Ym } | undefined {
+  const upTo = storedMonths(months).filter((m) => m.ym <= ym);
+  const own = upTo.find((m) => m.ym === ym);
+  if (own && read(own)?.thisOnly !== undefined) return { scope: 'this', ym };
+  for (let i = upTo.length - 1; i >= 0; i -= 1) if (read(upTo[i])?.fromOn !== undefined) return { scope: 'fromOn', ym: upTo[i].ym };
+  return undefined;
+}

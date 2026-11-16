@@ -47,7 +47,7 @@ function BudgetNav() {
     { label: 'Forecast', href: '#/budget/forecast', active: path === '/budget/forecast' },
     { label: 'Net worth', href: '#/budget/net-worth', active: path === '/budget/net-worth' },
     { label: 'Scenarios', href: '#/budget/scenarios', active: path.startsWith('/budget/scenarios') },
-    { label: 'Plan', href: '#/budget/plan', active: path === '/budget/plan' },
+    { label: 'Plan', href: '#/budget/plan', active: path.startsWith('/budget/plan') },
   ];
   return (
     <nav class="budget-nav no-print" aria-label="Budget sections">

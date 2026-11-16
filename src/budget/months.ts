@@ -32,3 +32,11 @@ export function ymOf(date: string): Ym {
   if (!match) throw new Error(`Not a date (YYYY-MM-DD): ${date}`);
   return match[1];
 }
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** `2026-10` → `October 2026`. */
+export function monthLabel(ym: Ym): string {
+  const [year, month] = ym.split('-');
+  return `${MONTH_NAMES[Number(month) - 1]} ${year}`;
+}

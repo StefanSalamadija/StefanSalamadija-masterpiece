@@ -168,8 +168,8 @@ export interface BudgetScenario extends BaseRecord { scope: 'personal'; name: st
 export interface RotationSettings {
   /** The monthly net salary onboard, each amount from its month on. */
   salaryFrom: { ym: Ym; amount: Cents }[];
-  /** Past and planned contracts, as `YYYY-MM-DD` dates. */
-  periods: { signOn: string; signOff: string }[];
+  /** Past and planned contracts, as `YYYY-MM-DD` dates. `crewId` marks a period copied from that crew record ("Use my contract"). */
+  periods: { signOn: string; signOff: string; crewId?: string }[];
   /** Months on and off of the pattern that repeats after the last period. */
   patternOn: number; patternOff: number;
   /** The salary lands in the month after it is earned. */

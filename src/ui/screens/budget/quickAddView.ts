@@ -1,5 +1,5 @@
 import { addDays } from '../../../domain/dates';
-import type { BudgetCategory, BudgetEntry, Cents, IncomeSource, Ym } from '../../../domain/types';
+import type { BudgetCategory, BudgetEntry, Cents, IncomeSource } from '../../../domain/types';
 
 /*
  * The pure parts of quick add (v2 §3.6): what the amount pad types, which categories come first, the date chips.
@@ -93,10 +93,4 @@ export function dateChips(today: string): { label: string; date: string }[] {
   return [{ label: 'Today', date: today }, { label: 'Yesterday', date: addDays(today, -1) }, { label: '2 days ago', date: addDays(today, -2) }];
 }
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-/** `2026-10` → `October 2026`. */
-export function monthLabel(ym: Ym): string {
-  const [year, month] = ym.split('-');
-  return `${MONTH_NAMES[Number(month) - 1]} ${year}`;
-}
+export { monthLabel } from '../../../budget/months';

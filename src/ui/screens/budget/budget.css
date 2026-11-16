@@ -57,6 +57,17 @@
 .budget-cat { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .budget-edit { display: flex; flex-direction: column; gap: 10px; }
 
+/* The Plan. */
+.plan-back { margin: 0 0 12px; }
+.plan-back a { min-height: var(--target); display: inline-flex; align-items: center; }
+.plan-month { margin: 0 0 12px; font-size: 18px; }
+.plan-income { margin: 0 0 12px; }
+.budget-pot .field, .budget-row .field { margin: 0; }
+.plan-scope, .plan-methods { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.plan-scope legend, .plan-methods legend { margin: 0 0 8px; padding: 0; font-weight: 600; }
+.budget-debt-free { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.budget-edit h3 { margin: 0; font-size: 16px; }
+
 @media print {
   .budget-toast { display: none; }
 }

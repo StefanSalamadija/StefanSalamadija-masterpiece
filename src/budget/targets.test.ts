@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetMonth } from '../domain/types';
 import { month } from '../test/budgetRecords';
-import { effectiveMonth, potTargetAmount, setCategoryTarget, setPlannedIncome, setPotTarget } from './targets';
+import { editOrigin, effectiveMonth, potTargetAmount, setCategoryTarget, setPlannedIncome, setPotTarget } from './targets';
 import type { MonthChanges } from './targets';
 
 /** Saves the changes the way the app does: a new record is added with a fresh id, a changed one replaced. */
@@ -187,5 +187,22 @@ describe('potTargetAmount', () => {
     expect(potTargetAmount({ kind: 'pct', value: 12.5 }, 100000)).toBe(12500);
     expect(potTargetAmount({ kind: 'amount', value: 70000 }, 300000)).toBe(70000);
     expect(potTargetAmount(undefined, 300000)).toBe(0);
+  });
+});
+
+describe('editOrigin', () => {
+  const needs = (m: BudgetMonth) => m.potTargets.needs;
+  const months = [
+    month('2026-10', { potTargets: { needs: { fromOn: { kind: 'pct', value: 50 } } } }),
+    month('2026-12', { potTargets: { needs: { thisOnly: { kind: 'pct', value: 30 } } } }),
+  ];
+
+  it('names the month a value comes from, and whether it is for that month only', () => {
+    expect(editOrigin(months, '2026-09', needs)).toBeUndefined();
+    expect(editOrigin(months, '2026-10', needs)).toEqual({ scope: 'fromOn', ym: '2026-10' });
+    expect(editOrigin(months, '2026-11', needs)).toEqual({ scope: 'fromOn', ym: '2026-10' });
+    expect(editOrigin(months, '2026-12', needs)).toEqual({ scope: 'this', ym: '2026-12' });
+    expect(editOrigin(months, '2027-01', needs)).toEqual({ scope: 'fromOn', ym: '2026-10' });
+    expect(editOrigin([{ ...months[0], deleted: true }], '2026-11', needs)).toBeUndefined();
   });
 });

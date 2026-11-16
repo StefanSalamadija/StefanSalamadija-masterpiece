@@ -43,6 +43,8 @@ const ROUTES = [
   '/budget/scenarios',
   '/budget/scenarios/:id',
   '/budget/plan',
+  '/budget/plan/start',
+  '/budget/plan/:section',
   '/budget/trends',
   '/budget/import',
   '/budget/export',

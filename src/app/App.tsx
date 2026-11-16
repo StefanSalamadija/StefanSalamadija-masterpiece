@@ -81,6 +81,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/budget/scenarios': budget('Scenarios'),
   '/budget/scenarios/:id': budget('Scenarios'),
   '/budget/plan': budget('Plan'),
+  '/budget/plan/start': budget('StartBalances'),
+  '/budget/plan/:section': budget('Plan'),
   '/budget/trends': budget('Trends'),
   '/budget/import': budget('ImportBudget'),
   '/budget/export': budget('ExportBudget'),

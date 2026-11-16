@@ -40,6 +40,8 @@ describe('matchRoute', () => {
       '/budget/trends', '/budget/import', '/budget/export']) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
     expect(matchRoute('#/budget/month/2026-10')).toEqual({ path: '/budget/month/:ym', params: { ym: '2026-10' } });
     expect(matchRoute('#/budget/scenarios/s1')).toEqual({ path: '/budget/scenarios/:id', params: { id: 's1' } });
+    expect(matchRoute('#/budget/plan/start')).toEqual({ path: '/budget/plan/start', params: {} });
+    expect(matchRoute('#/budget/plan/debts')).toEqual({ path: '/budget/plan/:section', params: { section: 'debts' } });
     expect(matchRoute('#/budget/month')).toEqual({ path: '/', params: {} });
   });
 

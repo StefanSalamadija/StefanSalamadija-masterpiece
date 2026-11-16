@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addMonths, monthsBetween, ymOf } from './months';
+import { addMonths, monthLabel, monthsBetween, ymOf } from './months';
 
 describe('months', () => {
   it('adds months across a year end, forwards and back', () => {
@@ -25,5 +25,12 @@ describe('months', () => {
     expect(() => addMonths('2026-13', 1)).toThrow();
     expect(() => monthsBetween('Nov', '2026-11')).toThrow();
     expect(() => ymOf('15.11.2026')).toThrow();
+  });
+});
+
+describe('monthLabel', () => {
+  it('names a month in full', () => {
+    expect(monthLabel('2026-10')).toBe('October 2026');
+    expect(monthLabel('2027-01')).toBe('January 2027');
   });
 });
