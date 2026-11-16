@@ -163,7 +163,12 @@ export interface BudgetDebt extends BaseRecord { scope: 'personal'; name: string
    * The planned extra payment each month, on top of the instalment (or the template that pays the debt), until it is
    * paid off: in each month, the latest step at or before it (none before the first step; a step of 0 stops it).
    */
-  extraSteps?: { fromYm: Ym; monthly: Cents }[] }
+  extraSteps?: { fromYm: Ym; monthly: Cents }[];
+  /**
+   * What "Apply to plan" added to `extraSteps`: `monthly` from `fromYm` on, by the scenario change `source`
+   * (`scenario:<scenarioId>:<changeIndex>`). Applying the scenario again replaces its part instead of adding to it.
+   */
+  extraApplied?: { source: string; fromYm: Ym; monthly: Cents }[] }
 export interface BudgetGoal extends BaseRecord { scope: 'personal'; name: string; amount: Cents; targetYm: Ym; categoryId?: string }
 export interface BudgetAsset extends BaseRecord { scope: 'personal'; name: string; includeInNetWorth: boolean }
 export type BudgetAccount = 'bank' | 'investments' | 'emergency' | `debt:${string}` | `asset:${string}` | `fund:${string}`;

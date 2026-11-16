@@ -7,7 +7,7 @@ import { forecast } from './forecast';
 import type { BudgetData, ForecastInput } from './forecast';
 import { freedom } from './freedom';
 import { SAVINGS_GOALS_CATEGORY_ID } from './ledger';
-import { addExtra } from './debts';
+import { addExtra, removeExtra, tidySteps } from './debts';
 import type { ExtraStep } from './debts';
 import { formatMoney } from './money';
 import { addMonths, monthsBetween, ymOf } from './months';
@@ -83,7 +83,7 @@ export type PlanWrite =
   | { op: 'create'; table: 'budgetRecurring'; fields: Fields<BudgetRecurring> }
   | { op: 'update'; table: 'budgetRecurring'; id: string; patch: Partial<Fields<BudgetRecurring>> }
   | { op: 'delete'; table: 'budgetRecurring'; id: string }
-  | { op: 'update'; table: 'budgetDebts'; id: string; patch: Required<Pick<Fields<BudgetDebt>, 'extraSteps'>> }
+  | { op: 'update'; table: 'budgetDebts'; id: string; patch: Required<Pick<Fields<BudgetDebt>, 'extraSteps'>> & Pick<Fields<BudgetDebt>, 'extraApplied'> }
   /** `id`, when given, is the entry's own: the same on every device (see `applyToPlan`). */
   | { op: 'create'; table: 'budgetEntries'; fields: Fields<BudgetEntry>; id?: string };
 
@@ -127,6 +127,8 @@ export function planWith(data: BudgetData, settings: BudgetSettings, writes: Pla
     } else if (w.table === 'budgetDebts') {
       change(out.budgetDebts, w.id, (r) => ({ ...r, ...w.patch }));
     } else {
+      // As `applyPlanWrites` does: an entry already live under its id is left as it is.
+      if (w.id !== undefined && out.budgetEntries.some((e) => e.id === w.id && !e.deleted)) continue;
       out.budgetEntries.push({ ...w.fields, ...record(), ...(w.id !== undefined && { id: w.id }) } as BudgetEntry);
     }
   }
@@ -193,6 +195,9 @@ function extraPayment(categories: BudgetCategory[], d: BudgetDebt, ym: Ym, amoun
   return { kind: 'expense', date: `${ym}-01`, amount, ...(categoryId !== undefined && { categoryId }), debtId: d.id, note: `Extra payment: ${d.name}`, status: 'planned', oneOff: true };
 }
 
+/** A scenario's monthly extra on a debt, its summary line, and the change it comes from (`scenario:<id>:<index>`). */
+type Extra = { debt: BudgetDebt; monthly: Cents; line: number; source: string };
+
 export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: BudgetScenario, today: string): { writes: PlanWrite[]; summary: string[] } {
   const cur = ymOf(today);
   const summary: string[] = [];
@@ -209,7 +214,7 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
   let recurring = data.budgetRecurring.filter((t) => !t.deleted);
   const templateWrites: PlanWrite[] = [];
   const entryWrites: PlanWrite[] = [];
-  const extras: { debt: BudgetDebt; monthly: Cents; line: number }[] = [];
+  const extras: Extra[] = [];
 
   const monthEdit = ({ create, update }: MonthChanges) => {
     for (const c of create) {
@@ -382,7 +387,7 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
         continue;
       }
       if (c.monthly !== undefined && c.monthly > 0) {
-        extras.push({ debt: d, monthly: c.monthly, line: summary.length });
+        extras.push({ debt: d, monthly: c.monthly, line: summary.length, source: `scenario:${s.id}:${index}` });
         summary.push('');
       }
       if (c.lumpYm !== undefined && c.lump !== undefined && c.lump > 0) {
@@ -392,8 +397,13 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
     }
   }
 
-  const writes = assemble();
-  if (extras.length > 0) writes.push(...extraWrites(data, settings, writes, today, extras, summary));
+  const assembled = assemble();
+  // A planned entry already live under its id (the scenario was applied before) is the plan already: never added twice.
+  const live = new Set(data.budgetEntries.filter((e) => !e.deleted).map((e) => e.id));
+  const writes = assembled.filter((w) => !(w.table === 'budgetEntries' && w.op === 'create' && w.id !== undefined && live.has(w.id)));
+  const prefix = `scenario:${s.id}:`;
+  const appliedBefore = debts.some((d) => d.extraApplied?.some((a) => a.source.startsWith(prefix)));
+  if (extras.length > 0 || appliedBefore) writes.push(...extraWrites(data, settings, writes, today, extras, summary, prefix));
   return { writes, summary };
 }
 
@@ -403,7 +413,7 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
  * is left out. Each change's summary line names the month the debt is then paid off.
  */
 function extraWrites(data: BudgetData, settings: BudgetSettings, writes: PlanWrite[], today: string,
-  extras: { debt: BudgetDebt; monthly: Cents; line: number }[], summary: string[]): PlanWrite[] {
+  extras: Extra[], summary: string[], prefix: string): PlanWrite[] {
   const cur = ymOf(today);
   const startOf = (d: BudgetDebt) => (d.startYm > cur ? d.startYm : cur);
   const before = forecast({ today, ...planWith(data, settings, writes, today), months: 1 }).debtFree;
@@ -415,13 +425,30 @@ function extraWrites(data: BudgetData, settings: BudgetSettings, writes: PlanWri
     }
     return true;
   });
+  const leftOut = extras.filter((x) => !kept.includes(x));
   const out: PlanWrite[] = [];
   const stepsAfter = new Map<string, ExtraStep[]>();
-  for (const d of new Set(kept.map((x) => x.debt))) {
-    let steps: ExtraStep[] | undefined = d.extraSteps;
-    for (const x of kept) if (x.debt === d) steps = addExtra(steps, startOf(d), x.monthly);
-    stepsAfter.set(d.id, steps!);
-    out.push({ op: 'update', table: 'budgetDebts', id: d.id, patch: { extraSteps: steps! } });
+  const debts = data.budgetDebts.filter((d) => !d.deleted && (kept.some((x) => x.debt.id === d.id) || d.extraApplied?.some((a) => a.source.startsWith(prefix))));
+  for (const d of debts) {
+    let steps: ExtraStep[] = [...(d.extraSteps ?? [])];
+    const held = d.extraApplied ?? [];
+    // This scenario's part from an earlier Apply is taken back first (from now on: past months keep what they had), then
+    // its changes are added again, so applying twice gives what applying once does.
+    const back = held.filter((a) => a.source.startsWith(prefix) && !leftOut.some((x) => x.source === a.source && x.debt.id === d.id));
+    for (const a of back) steps = removeExtra(steps, a.fromYm > startOf(d) ? a.fromYm : startOf(d), a.monthly);
+    const applied = held.filter((a) => !back.includes(a));
+    for (const x of kept) {
+      if (x.debt.id !== d.id) continue;
+      steps = addExtra(steps, startOf(d), x.monthly);
+      const was = back.find((a) => a.source === x.source);
+      applied.push({ source: x.source, fromYm: was !== undefined && was.monthly === x.monthly ? was.fromYm : startOf(d), monthly: x.monthly });
+    }
+    if (back.length > 0) steps = tidySteps(steps);
+    stepsAfter.set(d.id, steps);
+    const same = JSON.stringify(tidySteps(steps)) === JSON.stringify(tidySteps(d.extraSteps ?? []))
+      && JSON.stringify(applied) === JSON.stringify(held);
+    if (same) continue;
+    out.push({ op: 'update', table: 'budgetDebts', id: d.id, patch: { extraSteps: steps, extraApplied: applied } });
   }
   if (kept.length === 0) return out;
   const paidOff = (span: number) => forecast({ today, ...planWith(data, settings, [...writes, ...out], today), months: span }).debtFree;

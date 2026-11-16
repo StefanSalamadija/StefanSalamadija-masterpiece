@@ -75,3 +75,26 @@ export function addExtra(steps: readonly ExtraStep[] | undefined, fromYm: Ym, mo
   const later = held.filter((s) => s.fromYm > fromYm).map((s) => ({ fromYm: s.fromYm, monthly: s.monthly + monthly }));
   return [...before, { fromYm, monthly: extraFor(held, fromYm) + monthly }, ...later];
 }
+
+/**
+ * The steps with `monthly` less from `fromYm` on (never below 0): what `addExtra` added, taken back. Steps that then
+ * plan the same as the step before them (or 0 before any) are dropped, so adding and taking back give the steps again.
+ */
+export function removeExtra(steps: readonly ExtraStep[] | undefined, fromYm: Ym, monthly: Cents): ExtraStep[] {
+  const held = [...(steps ?? [])].sort((a, b) => (a.fromYm < b.fromYm ? -1 : a.fromYm > b.fromYm ? 1 : 0));
+  const before = held.filter((s) => s.fromYm < fromYm);
+  const later = held.filter((s) => s.fromYm > fromYm).map((s) => ({ fromYm: s.fromYm, monthly: Math.max(0, s.monthly - monthly) }));
+  return tidySteps([...before, { fromYm, monthly: Math.max(0, extraFor(held, fromYm) - monthly) }, ...later]);
+}
+
+/** The steps in month order without the ones that change nothing (the same as the step before, or 0 before any). */
+export function tidySteps(steps: readonly ExtraStep[]): ExtraStep[] {
+  const out: ExtraStep[] = [];
+  for (const s of [...steps].sort((a, b) => (a.fromYm < b.fromYm ? -1 : a.fromYm > b.fromYm ? 1 : 0))) {
+    const last = out[out.length - 1];
+    if (last ? last.monthly === s.monthly : s.monthly === 0) continue;
+    if (last && last.fromYm === s.fromYm) out[out.length - 1] = s;
+    else out.push(s);
+  }
+  return out;
+}
