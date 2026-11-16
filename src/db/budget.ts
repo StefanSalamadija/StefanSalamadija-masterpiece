@@ -192,17 +192,32 @@ export function getMonth(db: MasterpieceDB, ym: Ym): Promise<BudgetMonth | undef
   return db.budgetMonths.where('ym').equals(ym).filter((m) => !m.deleted).first();
 }
 
+/** The id of the planned entry a template makes in a month: the same on every device (see `generatePlannedEntries`). */
+export function plannedEntryId(recurringId: string, ym: Ym): string {
+  return `planned:${recurringId}:${ym}`;
+}
+
+/** The id of a fund's confirmed set-aside in a month: the same on every device (see `confirmSetAside`). */
+export function setAsideId(fundId: string, ym: Ym): string {
+  return `fundmove:${fundId}:${ym}:setaside`;
+}
+
 /**
  * Opening a month: writes a planned entry, to confirm, for each recurring template due in it (`plannedItemsFor`). It
  * is idempotent: a template with an entry in the month, a deleted one included, is skipped, and the reads and writes are
  * one transaction, so two opens at once still write each entry once. A template that pays off a debt stops once the
  * debt's balance at the start of the month is 0. The funds' set-asides are not entries: they are confirmed with
  * `confirmSetAside`.
+ *
+ * Every device makes these on its own, so each one is made the same everywhere, as the seeded defaults are: its id is
+ * `plannedEntryId` and its stamp `SEED_STAMP`. Two devices that both opened the month before an exchange then hold one
+ * record, which the merge sees as no change (never as two items to confirm, or as a conflict). Once the user confirms,
+ * edits or deletes it, the record is stamped as usual, so the change wins over the untouched copy on the other device.
  */
 export function generatePlannedEntries(db: MasterpieceDB, ym: Ym): Promise<void> {
   const tables = [
     db.budgetEntries, db.budgetRecurring, db.budgetFunds, db.budgetFundMoves, db.budgetDebts, db.budgetCorrections, db.budgetAssets,
-    db.budgetCategories, db.settings,
+    db.budgetCategories,
   ];
   return guardWrite(() =>
     db.transaction('rw', tables, async () => {
@@ -222,14 +237,37 @@ export function generatePlannedEntries(db: MasterpieceDB, ym: Ym): Promise<void>
         if (balance !== undefined) debtBalances[d.id] = balance;
       }
       const { entries } = plannedItemsFor(ym, { recurring, funds, fundMoves, existing: all, debts, debtBalances, corrections });
-      for (const e of entries) await addEntry(db, e);
+      const held = new Set(all.map((e) => e.id));
+      for (const e of entries) {
+        const id = plannedEntryId(e.recurringId!, ym);
+        if (held.has(id)) continue; // moved to another month, or deleted there: never made again
+        assertEntry(e);
+        await db.budgetEntries.add({ ...e, id, ...SEED_STAMP } as BudgetEntry);
+      }
     }),
   );
 }
 
-/** Confirms a fund's set-aside for the month: a fund record, never a bank entry (§3.9.6). */
+/**
+ * Confirms a fund's set-aside for the month: a fund record, never a bank entry (§3.9.6). There is one per fund and
+ * month, under `setAsideId`, so a set-aside confirmed on two devices is one record after an exchange (the merge asks
+ * which amount to keep), never two. Confirming again while one is live leaves it as it is; after an undo it is made anew.
+ */
 export function confirmSetAside(db: MasterpieceDB, fundId: string, ym: Ym, amount: number): Promise<BudgetFundMove> {
-  return createBudgetRecord(db, 'budgetFundMoves', { fundId, ym, amount, kind: 'setaside' });
+  const id = setAsideId(fundId, ym);
+  const fields: BudgetFields<'budgetFundMoves'> = { fundId, ym, amount, kind: 'setaside' };
+  try {
+    assertCents(fields);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return guardWrite(() =>
+    db.transaction('rw', [db.budgetFundMoves, db.settings], async () => {
+      const held = await db.budgetFundMoves.get(id);
+      if (held && !held.deleted) return held;
+      return createRecord<BudgetFundMove>(db, 'budgetFundMoves', fields, { scope: 'personal', id });
+    }),
+  );
 }
 
 /** Saves a month's notes in its plan record; empty notes remove them. A month without a record gets one only for notes. */

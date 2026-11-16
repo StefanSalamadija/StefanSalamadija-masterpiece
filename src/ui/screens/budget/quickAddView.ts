@@ -1,5 +1,5 @@
 import { addDays } from '../../../domain/dates';
-import type { BudgetCategory, BudgetEntry, Cents, Ym } from '../../../domain/types';
+import type { BudgetCategory, BudgetEntry, Cents, IncomeSource, Ym } from '../../../domain/types';
 
 /*
  * The pure parts of quick add (v2 §3.6): what the amount pad types, which categories come first, the date chips.
@@ -26,6 +26,28 @@ export function padPress(text: string, key: string): string {
   if (comma >= 0) return text.length - comma > 2 ? text : text + key;
   if (text === '0') return key;
   return text.length >= MAX_WHOLE_DIGITS ? text : text + key;
+}
+
+/**
+ * What is typed into the amount field on a keyboard, held to the pad's rules (`padPress`, key by key): a dot or a comma
+ * is the decimal comma, anything else that is not a digit is dropped.
+ */
+export function normaliseAmount(typed: string): string {
+  let text = '';
+  for (const c of typed) text = padPress(text, c === '.' ? ',' : c);
+  return text;
+}
+
+/** The sources of income, with their exact labels (base §3.4). */
+export const INCOME_SOURCES: readonly { id: IncomeSource; label: string }[] = [
+  { id: 'salary', label: 'Salary' }, { id: 'property', label: 'Sale of property' }, { id: 'sales', label: 'Other sales' },
+  { id: 'jobs', label: 'Other jobs' }, { id: 'other', label: 'Other' },
+];
+
+/** What an entry is called in a message or a list: its category, or its source of income. */
+export function entryLabel(entry: BudgetEntry, category: BudgetCategory | undefined): string {
+  if (entry.kind === 'income') return INCOME_SOURCES.find((s) => s.id === (entry.incomeSource ?? 'other'))!.label;
+  return category?.name ?? 'No category';
 }
 
 /** Cents as the pad types them: `3,20`, `60`, `0,05`. */

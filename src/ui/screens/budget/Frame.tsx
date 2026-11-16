@@ -5,7 +5,7 @@ import { reportError } from '../../../app/errors';
 import { useRoute } from '../../../app/router';
 import { ensureBudgetSetup } from '../../../db/budget';
 import type { MasterpieceDB } from '../../../db/schema';
-import { dismissUndo, useUndoNotice } from './undoToast';
+import { dismissUndo, pauseUndo, resumeUndo, useUndoNotice } from './undoToast';
 import './budget.css';
 
 /** The set-up of each database, run once (the first use of the budget seeds its categories and settings). */
@@ -60,11 +60,15 @@ function BudgetNav() {
 
 function UndoToast() {
   const notice = useUndoNotice();
-  // The region stays on the page, so that a screen reader announces each new message.
+  // The region stays on the page, so that a screen reader announces each new message. It comes early in the page (it is
+  // drawn at the foot of the screen), so that the keyboard reaches its Undo within a few Tabs.
   return (
     <div class="budget-toast-region no-print" role="status">
       {notice && (
-        <div key={notice.key} class="budget-toast">
+        <div
+          key={notice.key} class="budget-toast" onMouseEnter={pauseUndo} onMouseLeave={resumeUndo} onFocusIn={pauseUndo}
+          onFocusOut={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resumeUndo(); }}
+        >
           <span class="toast-message">{notice.message}</span>
           <button type="button" class="btn btn-small budget-toast-undo" onClick={() => { dismissUndo(); notice.undo().catch(reportError); }}>
             Undo
@@ -84,12 +88,12 @@ export function BudgetFrame({ title, children, addButton = true }: { title: stri
   return (
     <section class="screen budget">
       <BudgetNav />
+      <UndoToast />
       <div class="screen-head">
         <h2>{title}</h2>
         {addButton && <a class="btn btn-primary no-print" href="#/budget/add">+ Expense</a>}
       </div>
       {ready ? children : <p class="live" role="status">Loading…</p>}
-      <UndoToast />
     </section>
   );
 }

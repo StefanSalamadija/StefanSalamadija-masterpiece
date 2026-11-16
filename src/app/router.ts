@@ -34,6 +34,8 @@ const ROUTES = [
   '/library/doc/:id',
   '/budget',
   '/budget/add',
+  '/budget/add/income',
+  '/budget/add/same/:id',
   '/budget/catch-up',
   '/budget/month/:ym',
   '/budget/forecast',

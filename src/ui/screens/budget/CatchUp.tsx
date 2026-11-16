@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { formatMoney } from '../../../budget/money';
-import type { BudgetCategory, BudgetEntry } from '../../../domain/types';
+import type { BudgetEntry } from '../../../domain/types';
 import { BudgetFrame } from './Frame';
 import { EntryPad } from './QuickAdd';
 
@@ -17,8 +17,8 @@ function dayText(date: string): string {
  */
 export function CatchUp() {
   const [added, setAdded] = useState<Added[]>([]);
-  const onSaved = (entry: BudgetEntry, category: BudgetCategory) =>
-    setAdded((list) => [{ id: entry.id, text: `${dayText(entry.date)} ${category.name} ${formatMoney(entry.amount)}` }, ...list]);
+  const onSaved = (entry: BudgetEntry, label: string) =>
+    setAdded((list) => [{ id: entry.id, text: `${dayText(entry.date)} ${label} ${entry.kind === 'income' ? '+' : ''}${formatMoney(entry.amount)}` }, ...list]);
   const onUndone = (id: string) => setAdded((list) => list.filter((a) => a.id !== id));
   return (
     <BudgetFrame title="Catch up" addButton={false}>

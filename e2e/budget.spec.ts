@@ -210,6 +210,75 @@ test('budget: an entry saved as a favourite is a chip on the pad', async ({ page
   await expect(entries(page)).toHaveCount(2);
 });
 
+test('budget: a salary added as income shows in the month as received', async ({ page }) => {
+  await openQuickAdd(page);
+  await page.getByRole('group', { name: 'Entry type' }).getByRole('button', { name: 'Income' }).click();
+  await expect(categories(page)).toHaveCount(0);
+  await typeAmount(page, '4500');
+  await expect(save(page)).toBeDisabled();                       // no source yet
+  await page.getByRole('group', { name: 'Source' }).getByRole('button', { name: 'Salary' }).click();
+  await save(page).click();
+  await expect(page).toHaveURL(/#\/budget\/month\/2026-10$/);
+  await expect(page.getByText('Received €4,500.00')).toBeVisible();
+  await expect(entries(page).first()).toContainText('Salary');
+  await expect(entries(page).first()).toContainText('+€4,500.00');
+  expect(await storedEntries(page)).toMatchObject([{ kind: 'income', incomeSource: 'salary', amount: 450000, status: 'actual' }]);
+});
+
+test('budget: "+ Income" in the month; a sale of property can name the asset sold', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget/month/2026-10');
+  await expect(page.getByRole('heading', { name: 'October 2026' })).toBeVisible();
+  await seed(page, 'budgetAssets', [{ id: 'asset-boat', name: 'Old boat', includeInNetWorth: true }]);
+  await page.getByRole('link', { name: '+ Income' }).click();
+  await expect(page.getByRole('group', { name: 'Entry type' }).getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true');
+  await typeAmount(page, '3000');
+  await expect(page.getByLabel('Sold asset')).toHaveCount(0);
+  await page.getByRole('group', { name: 'Source' }).getByRole('button', { name: 'Sale of property' }).click();
+  await page.getByLabel('Sold asset').selectOption({ label: 'Old boat' });
+  await save(page).click();
+  await expect(page.getByText('Received €3,000.00')).toBeVisible();
+  expect(await storedEntries(page)).toMatchObject([{ kind: 'income', incomeSource: 'property', soldAssetId: 'asset-boat', amount: 300000 }]);
+});
+
+test('budget: "Same as last time" on an entry starts quick add from it', async ({ page }) => {
+  await openQuickAdd(page);
+  await typeAmount(page, '18,9');
+  await category(page, 'Pharmacy').click();
+  await save(page).click();
+  await expect(entries(page)).toHaveCount(1);
+  await entries(page).first().getByRole('link', { name: 'Same as last time' }).click();
+  await expect(page.getByLabel('Amount', { exact: true })).toHaveValue('18,90');
+  await expect(category(page, 'Pharmacy')).toHaveAttribute('aria-pressed', 'true');
+  await save(page).click();
+  await expect(entries(page)).toHaveCount(2);
+});
+
+test('budget: typing on a keyboard keeps the pad rules, and the shorthand keeps a typed note', async ({ page }) => {
+  await openQuickAdd(page);
+  await page.getByLabel('Amount', { exact: true }).fill('12.345');
+  await expect(page.getByLabel('Amount', { exact: true })).toHaveValue('12,34');
+  await page.getByLabel('Note').fill('for the trip');
+  await page.getByLabel('Type it').fill('fuel 60');
+  await expect(page.getByLabel('Note')).toHaveValue('for the trip');
+  await page.getByLabel('Type it').fill('fuel 60 shell');
+  await expect(page.getByLabel('Note')).toHaveValue('shell');
+  await page.getByLabel('Type it').fill('fuel 60');
+  await expect(page.getByLabel('Note')).toHaveValue('');
+});
+
+test('budget: the Undo toast stays up while the pointer is on it', async ({ page }) => {
+  await openQuickAdd(page);
+  await typeAmount(page, '7');
+  await category(page, 'Pharmacy').click();
+  await save(page).click();
+  await page.getByRole('button', { name: 'Undo' }).hover();
+  await page.clock.fastForward(8_000);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(entries(page)).toHaveCount(0);
+});
+
 test('budget: an entry can be edited and deleted in the month', async ({ page }) => {
   await openQuickAdd(page);
   await typeAmount(page, '10');

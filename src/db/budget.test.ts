@@ -3,9 +3,12 @@ import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import type { BudgetCategory, BudgetEntry, BudgetSettings } from '../domain/types';
 import {
   addEntry, confirmSetAside, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, generatePlannedEntries, getBudgetSettings,
-  getMonth, listBudget, listCategories, saveMonthNotes, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
+  getMonth, listBudget, listCategories, plannedEntryId, saveMonthNotes, setAsideId, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
 } from './budget';
+import { computeMerge, resolveMerge } from '../domain/merge';
 import { allTables } from './records';
+import { syncTable } from './schema';
+import type { MasterpieceDB } from './schema';
 import { openDb } from './schema';
 import { getSettings } from './settings';
 
@@ -266,6 +269,87 @@ describe('saveMonthNotes', () => {
     expect(await db.budgetMonths.count()).toBe(1);
     await saveMonthNotes(db, '2026-11', '');
     expect(await db.budgetMonths.count()).toBe(1);
+    db.close();
+  });
+});
+
+/**
+ * Imports `from`'s full backup into `into`, as the backup's merge does: conflicts take the incoming side, deletions
+ * apply. `lastSync` is when the two last exchanged (none: never, so every difference is a conflict).
+ */
+async function mergeInto(into: MasterpieceDB, from: MasterpieceDB, lastSync?: string): Promise<ReturnType<typeof computeMerge>> {
+  const plan = computeMerge(await allTables(into), await allTables(from), lastSync);
+  const conflicts = Object.fromEntries(plan.items.filter((i) => i.kind === 'conflict').map((i) => [`${i.table}:${i.id}`, 'incoming' as const]));
+  for (const { table, record } of resolveMerge(plan, { conflicts, applyDeletions: true }, new Date().toISOString(), 'merge')) {
+    await syncTable(into, table).put(record);
+  }
+  return plan;
+}
+
+describe('planned items on two devices', () => {
+  const netflix = { name: 'Netflix', amount: 1299, categoryId: 'budget-cat:wants:subscriptions', day: 5, startYm: '2026-10' };
+
+  /** Two devices with the same template, as after an exchange. */
+  async function twoDevices(): Promise<[MasterpieceDB, MasterpieceDB, string]> {
+    const [a, b] = [freshDb(), freshDb()];
+    await ensureBudgetSetup(a);
+    await ensureBudgetSetup(b);
+    const t = await createBudgetRecord(a, 'budgetRecurring', netflix);
+    await syncTable(b, 'budgetRecurring').put(t);
+    return [a, b, t.id];
+  }
+
+  it('a month opened on both devices before an exchange holds one planned entry after it, with nothing to decide', async () => {
+    const [a, b, templateId] = await twoDevices();
+    await generatePlannedEntries(a, '2026-11');
+    vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+    await generatePlannedEntries(b, '2026-11');
+    const plan = await mergeInto(a, b);
+    expect(plan.items.filter((i) => i.table === 'budgetEntries')).toEqual([]);
+    const made = await entriesInMonth(a, '2026-11');
+    expect(made.map((e) => e.id)).toEqual([plannedEntryId(templateId, '2026-11')]);
+    a.close();
+    b.close();
+  });
+
+  it('confirming on one device wins over the untouched copy on the other, both ways', async () => {
+    const [a, b, templateId] = await twoDevices();
+    await generatePlannedEntries(a, '2026-11');
+    await generatePlannedEntries(b, '2026-11');
+    const id = plannedEntryId(templateId, '2026-11');
+    // The template came over in an exchange on 1 November; B confirms on the 15th (the clock of these tests).
+    await updateEntry(b, id, { status: 'actual', amount: 1499 });
+    const plan = await mergeInto(a, b, '2026-11-01T00:00:00.000Z');
+    expect(plan.summary).toMatchObject({ updated: 1, conflicts: 0 });
+    expect(await entriesInMonth(a, '2026-11')).toMatchObject([{ id, status: 'actual', amount: 1499 }]);
+    await mergeInto(b, a, '2026-11-01T00:00:00.000Z');
+    expect(await entriesInMonth(b, '2026-11')).toMatchObject([{ id, status: 'actual', amount: 1499 }]);
+    a.close();
+    b.close();
+  });
+
+  it('a set-aside confirmed on both devices is one fund record after an exchange', async () => {
+    const [a, b] = [freshDb(), freshDb()];
+    const fund = await createBudgetRecord(a, 'budgetFunds', { name: 'Insurance', amount: 60000, dueYm: '2027-03', startBalance: 0 });
+    await syncTable(b, 'budgetFunds').put(fund);
+    await confirmSetAside(a, fund.id, '2026-10', 10000);
+    vi.setSystemTime(new Date('2026-11-16T12:00:00Z'));
+    await confirmSetAside(b, fund.id, '2026-10', 12000);
+    await mergeInto(a, b);
+    expect(await listBudget(a, 'budgetFundMoves')).toMatchObject([{ id: setAsideId(fund.id, '2026-10'), amount: 12000 }]);
+    a.close();
+    b.close();
+  });
+
+  it('confirming a set-aside again leaves the live one; after an undo it is made anew', async () => {
+    const db = freshDb();
+    const fund = await createBudgetRecord(db, 'budgetFunds', { name: 'Insurance', amount: 60000, dueYm: '2027-03', startBalance: 0 });
+    await confirmSetAside(db, fund.id, '2026-10', 10000);
+    await confirmSetAside(db, fund.id, '2026-10', 11000);
+    expect(await listBudget(db, 'budgetFundMoves')).toMatchObject([{ amount: 10000 }]);
+    await deleteBudgetRecord(db, 'budgetFundMoves', setAsideId(fund.id, '2026-10'));
+    await confirmSetAside(db, fund.id, '2026-10', 11000);
+    expect(await listBudget(db, 'budgetFundMoves')).toMatchObject([{ amount: 11000, deleted: false }]);
     db.close();
   });
 });

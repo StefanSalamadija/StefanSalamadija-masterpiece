@@ -72,6 +72,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/library/doc/:id': lazyScreen(() => import('../ui/screens/library').then((m) => m.LibraryDoc)),
   '/budget': budget('Dashboard'),
   '/budget/add': budget('QuickAdd'),
+  '/budget/add/income': budget('QuickAdd'),
+  '/budget/add/same/:id': budget('QuickAdd'),
   '/budget/catch-up': budget('CatchUp'),
   '/budget/month/:ym': budget('MonthView'),
   '/budget/forecast': budget('Forecast'),

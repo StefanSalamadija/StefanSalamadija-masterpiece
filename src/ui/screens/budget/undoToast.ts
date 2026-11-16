@@ -40,6 +40,19 @@ export function offerUndo(message: string, undo: () => Promise<void>): void {
   changed();
 }
 
+/** Holds the toast up while the pointer or the focus is on it, so it can be reached in time (WCAG 2.2.1). */
+export function pauseUndo(): void {
+  if (timer !== undefined) clearTimeout(timer);
+  timer = undefined;
+}
+
+/** Lets the toast go again, 5 s from now, once the pointer and the focus have left it. */
+export function resumeUndo(): void {
+  if (notice === undefined) return;
+  if (timer !== undefined) clearTimeout(timer);
+  timer = setTimeout(dismissUndo, UNDO_MS);
+}
+
 /** The toast being shown, if any. */
 export function useUndoNotice(): UndoNotice | undefined {
   const [current, setCurrent] = useState(notice);

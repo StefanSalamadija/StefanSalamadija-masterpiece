@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import { useRoute } from '../../../app/router';
@@ -18,11 +18,10 @@ import type { BudgetCategory, BudgetEntry, BudgetFund } from '../../../domain/ty
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { useLive } from '../../useLive';
 import { BudgetFrame, useCurrentYm } from './Frame';
-import { monthLabel } from './quickAddView';
+import { entryLabel, monthLabel } from './quickAddView';
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
 const BAND_TEXT: Record<CategoryBand, string | undefined> = { ok: 'On track', amber: 'Near target', red: 'Over target', none: undefined };
-const INCOME_TEXT: Record<string, string> = { salary: 'Salary', property: 'Sale of property', sales: 'Other sales', jobs: 'Other jobs', other: 'Other income' };
 
 /** An amount typed by the user, in cents above zero, or undefined. */
 function typed(text: string): number | undefined {
@@ -46,16 +45,22 @@ function useMonthData(ym: string) {
 }
 
 /** A planned entry or a fund's set-aside: Confirm, or Edit amount first. */
-function ConfirmRow({ name, detail, amount, onConfirm }: { name: string; detail: string; amount: number; onConfirm: (amount: number) => Promise<void> }) {
+function ConfirmRow({ rowId, name, detail, amount, onConfirm }: {
+  /** The planned entry's or the fund's id, which no other row has. */
+  rowId: string; name: string; detail: string; amount: number; onConfirm: (amount: number) => Promise<void>;
+}) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  // Checked at once, so that a second tap before the re-render confirms nothing more.
+  const confirming = useRef(false);
   const run = (value: number | undefined) => {
-    if (value === undefined || busy) return;
+    if (value === undefined || confirming.current) return;
+    confirming.current = true;
     setBusy(true);
-    onConfirm(value).catch(reportError).finally(() => setBusy(false));
+    onConfirm(value).catch(reportError).finally(() => { confirming.current = false; setBusy(false); });
   };
-  const id = `confirm-${name}-${detail}`.replace(/[^\w-]/g, '-');
+  const id = `confirm-${rowId}`.replace(/[^\w-]/g, '-');
   return (
     <li class="card budget-row">
       <div class="budget-row-head">
@@ -92,7 +97,7 @@ function EntryRow({ entry, categories, onDelete }: { entry: BudgetEntry; categor
   const [busy, setBusy] = useState(false);
   const [faved, setFaved] = useState(false);
   const category = categories.find((c) => c.id === entry.categoryId);
-  const name = entry.kind === 'income' ? INCOME_TEXT[entry.incomeSource ?? 'other'] : category?.name ?? 'No category';
+  const name = entryLabel(entry, category);
   const [, month, day] = entry.date.split('-');
   const base = `entry-${entry.id}`;
 
@@ -166,6 +171,7 @@ function EntryRow({ entry, categories, onDelete }: { entry: BudgetEntry; categor
       <div class="row-actions">
         <button type="button" class="btn btn-outline btn-small" onClick={edit}>Edit</button>
         <button type="button" class="btn btn-outline btn-small" onClick={onDelete}>Delete</button>
+        <a class="btn btn-outline btn-small" href={`#/budget/add/same/${encodeURIComponent(entry.id)}`}>Same as last time</a>
         {entry.kind === 'expense' && entry.categoryId !== undefined && (
           <button type="button" class="btn btn-outline btn-small" disabled={faved} onClick={favourite}>
             {faved ? 'In favourites' : 'Add to favourites'}
@@ -248,6 +254,9 @@ export function MonthView() {
         <a href={`#/budget/month/${addMonths(ym, -1)}`}>← {monthLabel(addMonths(ym, -1))}</a>
         <a href={`#/budget/month/${addMonths(ym, 1)}`}>{monthLabel(addMonths(ym, 1))} →</a>
       </p>
+      <p class="budget-months no-print">
+        <a class="btn btn-outline" href="#/budget/add/income">+ Income</a>
+      </p>
       {warning && <p class="field-warning budget-warning">{warning}</p>}
       <p class="budget-income">
         Planned income {formatMoney(summary.plannedIncome)} · Received {formatMoney(summary.actualIncome)}
@@ -281,8 +290,8 @@ export function MonthView() {
           <ul class="budget-list" aria-label="To confirm">
             {planned.map((e) => (
               <ConfirmRow
-                key={e.id} name={e.note ?? categoryName.get(e.categoryId ?? '') ?? 'Planned'} amount={e.amount}
-                detail={`${dayOf(e.date)} · ${e.kind === 'income' ? INCOME_TEXT[e.incomeSource ?? 'other'] : categoryName.get(e.categoryId ?? '') ?? 'No category'}`}
+                key={e.id} rowId={e.id} name={e.note ?? categoryName.get(e.categoryId ?? '') ?? 'Planned'} amount={e.amount}
+                detail={`${dayOf(e.date)} · ${entryLabel(e, data.categories.find((c) => c.id === e.categoryId))}`}
                 onConfirm={(amount) => updateEntry(db, e.id, { status: 'actual', amount }).then(() => undefined)}
               />
             ))}
@@ -290,7 +299,7 @@ export function MonthView() {
               const fund = fundsById.get(s.fundId);
               return (
                 <ConfirmRow
-                  key={s.fundId} name={fund?.name ?? 'Fund'} amount={s.amount}
+                  key={s.fundId} rowId={`fund-${s.fundId}`} name={fund?.name ?? 'Fund'} amount={s.amount}
                   detail={`Set aside for ${fund ? monthLabel(fund.dueYm) : 'the bill'}`}
                   onConfirm={(amount) => confirmSetAside(db, s.fundId, ym, amount).then(() => undefined)}
                 />

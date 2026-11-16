@@ -9,16 +9,17 @@ import { guardWrite } from './storage';
 
 /**
  * Writes a new record: fresh id, created and updated now by this device, on the ship's side of the ship/personal split
- * unless `opts.scope` says otherwise (a form template is personal).
+ * unless `opts.scope` says otherwise (a form template is personal). `opts.id` gives the id instead, for a record that
+ * every device must make under the same id (it replaces a record already stored with that id).
  */
 export async function createRecord<T extends SyncRecord>(
-  db: MasterpieceDB, table: TableName, fields: Omit<T, keyof BaseRecord>, opts: { scope?: Scope } = {},
+  db: MasterpieceDB, table: TableName, fields: Omit<T, keyof BaseRecord>, opts: { scope?: Scope; id?: string } = {},
 ): Promise<T> {
   const { deviceId } = await getSettings(db);
   const now = new Date().toISOString();
   const scope: Scope = opts.scope ?? 'ship';
   const record = {
-    ...fields, id: crypto.randomUUID(), createdAt: now, updatedAt: now, updatedBy: deviceId, deleted: false, scope,
+    ...fields, id: opts.id ?? crypto.randomUUID(), createdAt: now, updatedAt: now, updatedBy: deviceId, deleted: false, scope,
   } as unknown as T;
   await guardWrite(() => syncTable(db, table).put(record));
   return record;

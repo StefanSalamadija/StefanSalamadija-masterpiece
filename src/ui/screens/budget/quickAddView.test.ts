@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetCategory, BudgetEntry } from '../../../domain/types';
 import {
-  dateChips, DEFAULT_TOP, lastExpense, monthLabel, padPress, padText, topCategories,
+  dateChips, DEFAULT_TOP, entryLabel, lastExpense, monthLabel, normaliseAmount, padPress, padText, topCategories,
 } from './quickAddView';
 
 const stamp = { createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'd', deleted: false, scope: 'personal' as const };
@@ -35,6 +35,16 @@ describe('padPress', () => {
   it('stops at 7 whole digits, so an amount never reaches a 100× mistake by a held key', () => {
     expect(padPress('1234567', '8')).toBe('1234567');
     expect(padPress('1234567,', '8')).toBe('1234567,8');
+  });
+});
+
+describe('normaliseAmount', () => {
+  it('holds keyboard typing to the pad rules', () => {
+    expect(normaliseAmount('12.5')).toBe('12,5');
+    expect(normaliseAmount('12.345')).toBe('12,34');
+    expect(normaliseAmount('123456789')).toBe('1234567');
+    expect(normaliseAmount('€ 1,5x')).toBe('1,5');
+    expect(normaliseAmount('')).toBe('');
   });
 });
 
@@ -87,5 +97,14 @@ describe('dateChips', () => {
 describe('monthLabel', () => {
   it('names the month', () => {
     expect(monthLabel('2026-10')).toBe('October 2026');
+  });
+});
+
+describe('entryLabel', () => {
+  it('is the category of an expense and the source of an income', () => {
+    expect(entryLabel(entry('a', '2026-10-01'), cat('a', { name: 'Pharmacy' }))).toBe('Pharmacy');
+    expect(entryLabel(entry('a', '2026-10-01'), undefined)).toBe('No category');
+    expect(entryLabel(entry('a', '2026-10-01', { kind: 'income', categoryId: undefined, incomeSource: 'property' }), undefined)).toBe('Sale of property');
+    expect(entryLabel(entry('a', '2026-10-01', { kind: 'income', categoryId: undefined }), undefined)).toBe('Other');
   });
 });

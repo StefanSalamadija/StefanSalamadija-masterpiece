@@ -35,7 +35,8 @@ describe('matchRoute', () => {
   });
 
   it('knows the budget routes', () => {
-    for (const path of ['/budget', '/budget/add', '/budget/catch-up', '/budget/forecast', '/budget/net-worth', '/budget/scenarios', '/budget/plan',
+    expect(matchRoute('#/budget/add/same/e1')).toEqual({ path: '/budget/add/same/:id', params: { id: 'e1' } });
+    for (const path of ['/budget', '/budget/add', '/budget/add/income', '/budget/catch-up', '/budget/forecast', '/budget/net-worth', '/budget/scenarios', '/budget/plan',
       '/budget/trends', '/budget/import', '/budget/export']) expect(matchRoute(`#${path}`), path).toEqual({ path, params: {} });
     expect(matchRoute('#/budget/month/2026-10')).toEqual({ path: '/budget/month/:ym', params: { ym: '2026-10' } });
     expect(matchRoute('#/budget/scenarios/s1')).toEqual({ path: '/budget/scenarios/:id', params: { id: 's1' } });
