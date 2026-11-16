@@ -1,7 +1,7 @@
 # Masterpiece — Draft Survey (Piece 6) Design
 
 Date: 2026-11-16
-Status: draft for user review.
+Status: draft for user review. A builder check was done; findings marked *(builder check)*.
 
 > Confidentiality: the company's draft-survey workbook, the ship's hydrostatic table and any real survey figures are used **only locally** for checking. They are never committed or published. Tests use a made-up hydrostatic table and made-up surveys.
 
@@ -27,6 +27,12 @@ The Chief Officer runs draft surveys at loading and discharging ports with the c
 - **Output:** the numbers on screen, a printable report in the DS Report layout, and the company workbook filled in.
 - **Surveys:** Initial and Final (cargo is the difference), interim surveys per hold (like the workbook's "FINAL (2)"), and a constant check.
 - **Deductibles:** entered as tonnes per item, as agreed earlier.
+- **Interim surveys:** use the **FINAL** sheet's formulas against the linked initial survey. The workbook's "FINAL (2)" sheet has the wrong LBP and dA, and a look-up range that stops at 8.30 m, so it is not copied (user decision). Interims are written into the FINAL layout (§4.4).
+- **Cargo is always shown positive**, as loaded or discharged. **Difference = ship's figure − compared quantity**, in tonnes and %. The filled company Excel keeps its own formulas and signs untouched (user decision).
+- **LCF needs checking.** The HYDRO sheet's "LCF from midship" column is computed from the column headed "LCB Tabled", and the other way round, so they look swapped.
+  - The app keeps both: the workbook's column, and the "true" LCF from the "LCF Tabled" column.
+  - A per-ship setting, **LCF source**, decides which one is used. It defaults to **workbook**, so results match the company sheet.
+  - The survey screen shows the other value's first trim correction as a check line until the user confirms the right one against the stability booklet (user decision).
 - **Data source:** hydrostatics and ship data are imported from the company workbook (the HYDRO sheet and the survey sheets' fixed inputs); no PDF is needed.
 
 ## 3. Data (ship scope)
@@ -91,11 +97,17 @@ Implemented as pure functions in `src/survey/`. Each step uses the workbook's ow
 6. **Actual trim** = corrected A − corrected F.
 7. **Deflection:** HOG or SAG, and |100 × (M − fore-to-aft mean)| cm, rounded to 1 decimal. Shown only.
 8. **List** = 57.3 × atan(|Mp − Ms| ÷ beam), with PORT or STBD. Shown only, with no correction.
-9. **Table look-up, the workbook's way:**
-   - `v(x) = V(x₀) + (V(x₀ + 0.1) − V(x₀)) × (x − x₀) × 10`, where x₀ is the largest table draft ≤ x (Excel `VLOOKUP` approximate match).
-   - This is rounded to 3 decimals.
-   - The quarter-mean displacement, TPC and MTC look-ups use the table from the workbook's starting row (the row the formulas reference). The LCF look-up uses the full table.
-   - The builder confirms each formula's range against the real workbook locally.
+9. **Table look-up, exactly as the workbook does it** *(builder check)*:
+   - `v(x) = ROUND(VL(x) + (VL(x + 0.1) − VL(x)) × (x − VLd(x)) × 10, 3)`.
+     - `VL(y)` is Excel `VLOOKUP(y, range, col)` with approximate match: the value at the last row whose draft ≤ y.
+     - `VLd` is that row's draft.
+     - `VL(x + 0.1)` is a second look-up at x + 0.1. It is **not** "the row 0.1 m above". The table has an inserted row at 16.065, so the two differ there.
+   - For MTC at QM ± 0.5, the look-ups are at QM ± 0.5 and QM ± 0.6, but the fraction is `(QM − VLd(QM))` **taken at QM**, as the workbook does.
+   - **The range start row is per sheet:**
+     - INITIAL: displacement, TPC and MTC start at row 17 (1.75 m); LCF starts at row 2 (1.00 m).
+     - FINAL (also used for interims): every look-up starts at row 37 (2.75 m).
+     - The import stores these start drafts per sheet.
+   - **Out of range:** a look-up below the start row, or a needed y above the last row, gives the out-of-range message. Excel would quietly return the last row; the app refuses instead.
 10. **First trim correction** = `ROUND(trim × TPC × LCF × 100 / LBP, 3)`.
 11. **dM/dZ** = MTC(QM + 0.5) − MTC(QM − 0.5). **Second trim correction** = `ROUND(trim² × dM/dZ × 50 / LBP, 3)`.
 12. **Displacement corrected for trim** = QM displacement + first trim correction + second trim correction.
@@ -106,7 +118,16 @@ Implemented as pure functions in `src/survey/`. Each step uses the workbook's ow
     - the cargo loaded or discharged;
     - the difference from the B/L in tonnes and in %.
     - Interim surveys use the FINAL formulas against the linked initial survey.
-17. **Unexplained cells:** any cell whose purpose isn't clear, such as the conditional `0.54` correction in the workbook's helper cells AK11, AN12 and AN13, is reproduced only if the builder finds it feeds a result. Otherwise it is listed as a question for the user (§6).
+17. **Helper cells** AK11, AN12 and AN13 (INITIAL) and AK12, AN13, AN14 and BG31 (FINAL) feed no result, so they are not built *(builder check)*.
+18. **The compared quantity** is FINAL's Y37: "Shore Scale" when loading, "B/L figure" when discharging. FINAL P8 "BL Q-ty" and INITIAL P8 are stored and written back, but used in no calculation, as in the workbook *(builder check)*.
+19. **The DS Report computes some figures with its own formulas**, and the report must use them:
+    - QM = `ROUND((F + 6M + A)/8, 4)`;
+    - first trim correction = `ROUND(LCF × trim × TPC / LBP × 100, 3)`;
+    - second trim correction = `ROUND(50 × dMdZ × trim² / LBP, 3)`;
+    - deductibles grouped as VLSFO + LSMGO, fresh water, ballast, and lub oil + other.
+
+    The on-screen survey uses the sheet formulas; the printed report uses the report formulas. The two can differ in the last digit, exactly as in the workbook *(builder check)*.
+20. **FINAL takes dF, dM, beam and LBP from INITIAL**, but has its own typed dA and LBP *(builder check)*. The app uses the ship record for all of them. On fill, FINAL's own dA and LBP cells are written with the ship record's values, so the workbook agrees.
 
 **Out of range:** a draft whose look-up needs a table row outside the table (including QM ± 0.6 for MTC) gives "Outside the ship's hydrostatic table", and no result is shown.
 
@@ -170,4 +191,4 @@ These sit under **Ship → Draft survey**, a new Ship chip, and are lazy-loaded:
 
 - The exact on-screen arrangement, within the app's theme.
 - Report pagination.
-- The meaning of any helper cells such as AK11, AN12 and AN13: check them against the real workbook and ask the user only if they affect a result.
+- Interim report: the DS Report layout with the interim survey in the second column, titled "Interim".
