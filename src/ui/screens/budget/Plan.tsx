@@ -1,5 +1,6 @@
 import type { ComponentType } from 'preact';
 import { useRoute } from '../../../app/router';
+import { unassignedDebtTemplates } from '../../../budget/forecast';
 import { BudgetFrame } from './Frame';
 import { PlanAssets } from './PlanAssets';
 import { PlanAssumptions } from './PlanAssumptions';
@@ -26,6 +27,14 @@ const SECTIONS: { id: string; title: string; detail: string; Screen: ComponentTy
   { id: 'assumptions', title: 'Assumptions', detail: 'Return, withdrawal rate, inflation, buffer and horizon', Screen: PlanAssumptions },
 ];
 
+/** Recurring's flag: the Debts templates that do not say which of the debts they pay (see `unassignedDebtTemplates`). */
+function WhichDebtFlag() {
+  const data = usePlanData();
+  const count = data ? unassignedDebtTemplates(data.recurring, data.categories, data.debts).length : 0;
+  if (count === 0) return null;
+  return <span class="alert-detail field-warning">Which debt? {count === 1 ? 'A Debts template does' : `${count} Debts templates do`} not say which debt it pays.</span>;
+}
+
 function PlanIndex() {
   return (
     <BudgetFrame title="Plan">
@@ -35,6 +44,7 @@ function PlanIndex() {
             <a class="alert-link" href={`#/budget/plan/${s.id}`}>
               <span class="alert-title">{s.title}</span>
               <span class="alert-detail">{s.detail}</span>
+              {s.id === 'recurring' && <WhichDebtFlag />}
             </a>
           </li>
         ))}

@@ -287,6 +287,33 @@ describe('forecast: transfers, funds and debts', () => {
     expect(r.debtFree).toEqual({ 'debt-1': '2026-12', 'debt-2': '2027-01' });
   });
 
+  describe('a Debts template with two debts (I4)', () => {
+    const debts = [
+      debt({ id: 'debt-1', name: 'Car loan', startBalance: 1000000, startYm: '2026-01', instalment: 30000 }),
+      debt({ id: 'debt-2', name: 'Credit card', startBalance: 200000, startYm: '2026-01', instalment: 5000 }),
+    ];
+    const tpl = recurring({ id: 'tpl-car', name: 'Car loan', amount: 30000, startYm: '2026-11', categoryId: 'cat-loan' });
+
+    it('not yet assigned: replaces no instalment, adds nothing, and is listed as unassigned', () => {
+      const r = run({ budgetDebts: debts, budgetRecurring: [tpl] });
+      expect(r.unassignedDebtTemplates).toEqual(['tpl-car']);
+      // Needs €2,000 plus each debt's own instalment, once: never the template on top.
+      expect(r.months.slice(0, 3).map((m) => [m.spending, m.debts])).toEqual([[235000, 1165000], [235000, 1130000], [235000, 1095000]]);
+    });
+
+    it('assigned to its debt: replaces that debt\'s instalment, so the debt is never paid twice', () => {
+      const r = run({ budgetDebts: debts, budgetRecurring: [{ ...tpl, untilDebtId: 'debt-1' }] });
+      expect(r.unassignedDebtTemplates).toEqual([]);
+      expect(r.months.slice(0, 3).map((m) => [m.spending, m.debts])).toEqual([[235000, 1165000], [235000, 1130000], [235000, 1095000]]);
+    });
+
+    it('with one debt, a template without a debt pays it, as before (nothing unassigned)', () => {
+      const r = run({ budgetDebts: [debts[0]], budgetRecurring: [tpl] });
+      expect(r.unassignedDebtTemplates).toEqual([]);
+      expect(r.months[0]).toMatchObject({ spending: 230000, debts: 970000 });
+    });
+  });
+
   it('takes the automatic instalments out of the Debts pot target', () => {
     const r = run({
       budgetMonths: [needs200({ potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } }, debts: { fromOn: { kind: 'amount', value: 40000 } } } })],

@@ -83,6 +83,12 @@ function ForecastBody({ data }: { data: PlanData }) {
       {r.lowest && (
         <p class="budget-surplus">Lowest: {formatMoney(r.lowest.freeToSpend)} in {monthLabel(r.lowest.ym)} ({statusText(r.lowest.status).toLowerCase()})</p>
       )}
+      {r.unassignedDebtTemplates.length > 0 && (
+        <p class="field-warning" role="note">
+          {r.unassignedDebtTemplates.length === 1 ? 'A Debts template does not say which debt it pays' : `${r.unassignedDebtTemplates.length} Debts templates do not say which debt they pay`}
+          , so it is left out of the forecast and each debt is paid its own instalment. <a href="#/budget/plan/recurring">Which debt?</a>
+        </p>
+      )}
       {warnings.length > 0 && (
         <ul class="budget-lines field-warning" aria-label="Warnings">{warnings.map((w) => <li key={w}>{w}</li>)}</ul>
       )}

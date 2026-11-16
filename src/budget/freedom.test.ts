@@ -11,7 +11,7 @@ const TODAY = '2026-11-15';
 /** A forecast that only carries what the freedom date reads: the start of investments and each month's contribution. */
 function fc(startInvestments: number, contributions: number[]): ForecastResult {
   const months = contributions.map((contribution, i) => ({ ym: addMonths('2026-11', i), contribution }) as ForecastMonth);
-  return { months, warnings: [], debtFree: {}, totalInterest: 0, interestByDebt: {}, needsBankStart: false, buffer: 0, startInvestments, investmentsCorrectedNow: false,
+  return { months, warnings: [], debtFree: {}, totalInterest: 0, interestByDebt: {}, needsBankStart: false, buffer: 0, startInvestments, investmentsCorrectedNow: false, unassignedDebtTemplates: [],
     assumptions: { withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30 } };
 }
 const rates = (fields: Partial<Assumptions>): Assumptions => ({ withdrawalRatePct: 4, emergencyMonths: 6, fundReminderDays: 30, ...fields });

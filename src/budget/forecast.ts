@@ -130,6 +130,8 @@ export interface ForecastResult {
    * still to come), not `startInvestments` grown by a month.
    */
   investmentsCorrectedNow: boolean;
+  /** The Debts templates left out because they do not say which of 2 or more debts they pay (`unassignedDebtTemplates`). */
+  unassignedDebtTemplates: string[];
   /** The assumptions in force. */
   assumptions: Assumptions;
 }
@@ -137,6 +139,20 @@ export interface ForecastResult {
 interface Line { key: string; pot?: PotId; debtId?: string; amount: Cents }
 
 const POT_IDS: PotId[] = ['needs', 'savings', 'wants', 'debts', 'emergency'];
+/**
+ * The Debts-pot payment templates that do not say which debt they pay (`untilDebtId`) while there are 2 or more debts.
+ * With one debt such a template pays it; with more, the forecast cannot tell which debt's instalment it replaces, so it
+ * counts it nowhere (each debt keeps its own instalment, never paid twice) and lists it until the user picks the debt.
+ */
+export function unassignedDebtTemplates(recurring: BudgetRecurring[], categories: BudgetCategory[], debts: BudgetDebt[]): BudgetRecurring[] {
+  const live = debts.filter((d) => !d.deleted);
+  if (live.length < 2) return [];
+  const ids = new Set(live.map((d) => d.id));
+  const potOf = new Map(categories.map((c) => [c.id, c.pot]));
+  return recurring.filter((t) => !t.deleted && t.incomeSource === undefined && potOf.get(t.categoryId ?? '') === 'debts'
+    && !(t.untilDebtId !== undefined && ids.has(t.untilDebtId)));
+}
+
 const sum = (xs: Iterable<number>) => { let s = 0; for (const x of xs) s += x; return s; };
 
 export function forecast(input: ForecastInput): ForecastResult {
@@ -145,7 +161,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const cur = ymOf(input.today);
   const prev = addMonths(cur, -1);
   const corrections = data.budgetCorrections.filter((c) => !c.deleted);
-  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, interestByDebt: {}, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, investmentsCorrectedNow: false, assumptions };
+  const empty: ForecastResult = { months: [], warnings: [], debtFree: {}, totalInterest: 0, interestByDebt: {}, needsBankStart: true, buffer: settings.bufferCents ?? 0, startInvestments: 0, investmentsCorrectedNow: false, assumptions, unassignedDebtTemplates: [] };
   if (!corrections.some((c) => c.account === 'bank' && c.ym <= cur)) return empty;
 
   const count = Math.max(1, Math.floor(input.months ?? settings.horizon));
@@ -160,6 +176,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const templateById = new Map(templates.map((t) => [t.id, t]));
   const assets = data.budgetAssets.filter((a) => !a.deleted);
   const onlyDebt = debts.length === 1 ? debts[0].id : undefined;
+  const unassigned = new Set(unassignedDebtTemplates(templates, data.budgetCategories, debts).map((t) => t.id));
 
   const { balances } = balancesByMonth({
     entries: data.budgetEntries, corrections: data.budgetCorrections, debts: data.budgetDebts, assets: data.budgetAssets, categories: data.budgetCategories,
@@ -269,6 +286,7 @@ export function forecast(input: ForecastInput): ForecastResult {
     // Templates.
     for (const t of templates) {
       if (ym < t.startYm || (t.endYm !== undefined && ym > t.endYm)) continue;
+      if (unassigned.has(t.id)) continue; // which debt it pays is not known yet: see `unassignedDebtTemplates`
       const live = entries.filter((e) => e.recurringId === t.id);
       if (live.length === 0 && removed?.has(t.id)) continue;
       if (t.untilDebtId !== undefined && debtIds.has(t.untilDebtId)) {
@@ -472,5 +490,5 @@ export function forecast(input: ForecastInput): ForecastResult {
     if (lowest === undefined || m.freeToSpend < lowest.freeToSpend) lowest = { ym: m.ym, freeToSpend: m.freeToSpend, status: m.status };
   }
   return { months, lowest, warnings, debtFree, totalInterest, interestByDebt, needsBankStart: false, buffer, startInvestments: before.investments,
-    investmentsCorrectedNow: correctedNow('investments'), assumptions };
+    investmentsCorrectedNow: correctedNow('investments'), assumptions, unassignedDebtTemplates: [...unassigned] };
 }

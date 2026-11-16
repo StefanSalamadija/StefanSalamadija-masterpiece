@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { POTS } from '../../../budget/catalog';
+import { unassignedDebtTemplates } from '../../../budget/forecast';
 import { formatMoney } from '../../../budget/money';
 import { monthLabel } from '../../../budget/months';
 import { createBudgetRecord, deleteBudgetRecord, updateBudgetRecord } from '../../../db/budget';
@@ -45,8 +46,11 @@ function TemplateForm({ data, template, label, submit, onDone }: {
   const cents = typedMoney(amount);
   const dayValue = typedWhole(day, 1, 31);
   const endOk = endYm === '' || (YM.test(endYm) && endYm >= startYm);
+  // With 2 or more debts a Debts payment must say which debt it pays, as quick add asks: else the forecast cannot tell
+  // which instalment it replaces (see `unassignedDebtTemplates`).
+  const asksDebt = kind === 'expense' && data.categories.find((c) => c.id === categoryId)?.pot === 'debts' && data.debts.length >= 2;
   const ok = name.trim() !== '' && typeof cents === 'number' && cents > 0 && typeof dayValue === 'number' && YM.test(startYm) && endOk
-    && (kind === 'income' || categoryId !== '');
+    && (kind === 'income' || categoryId !== '') && (!asksDebt || untilDebtId !== '');
 
   const save = () => {
     if (!ok) return;
@@ -92,8 +96,9 @@ function TemplateForm({ data, template, label, submit, onDone }: {
       <TextField label="End month" type="month" value={endYm} onInput={setEndYm} hint="Optional."
         error={endOk ? undefined : 'The end month cannot be before the start month.'} />
       {kind === 'expense' && data.debts.length > 0 && (
-        <SelectField label="Until this debt is paid" value={untilDebtId} onChange={setUntilDebtId}>
-          <option value="">—</option>
+        <SelectField label={asksDebt ? 'Which debt?' : 'Until this debt is paid'} value={untilDebtId} onChange={setUntilDebtId}
+          hint={asksDebt ? 'It pays this debt instead of its instalment, until the debt is paid.' : undefined}>
+          <option value="">{asksDebt ? 'Choose…' : '—'}</option>
           {data.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
         </SelectField>
       )}
@@ -105,7 +110,7 @@ function TemplateForm({ data, template, label, submit, onDone }: {
   );
 }
 
-function TemplateRow({ template, data, onDelete }: { template: BudgetRecurring; data: PlanData; onDelete: () => void }) {
+function TemplateRow({ template, data, unassigned, onDelete }: { template: BudgetRecurring; data: PlanData; unassigned: boolean; onDelete: () => void }) {
   const [editing, setEditing] = useState(false);
   if (editing) {
     return (
@@ -121,8 +126,11 @@ function TemplateRow({ template, data, onDelete }: { template: BudgetRecurring; 
         <span class="budget-amount">{template.incomeSource !== undefined ? '+' : ''}{formatMoney(template.amount)}</span>
       </div>
       <span class="budget-row-detail">{sourceText(template, data.categories, data)}</span>
+      {unassigned && (
+        <p class="field-warning" role="note">Which debt? Until you choose the debt it pays, this payment is left out of the forecast.</p>
+      )}
       <div class="row-actions">
-        <button type="button" class="btn btn-outline btn-small" onClick={() => setEditing(true)}>Edit</button>
+        <button type="button" class="btn btn-outline btn-small" onClick={() => setEditing(true)}>{unassigned ? 'Choose the debt' : 'Edit'}</button>
         <button type="button" class="btn btn-outline btn-small" onClick={onDelete}>Delete</button>
       </div>
     </li>
@@ -139,6 +147,7 @@ export function PlanRecurring({ data }: { data: PlanData }) {
   const [deleting, setDeleting] = useState<BudgetRecurring>();
   const [, run] = useBusy();
   const templates = [...data.recurring].sort((a, b) => a.name.localeCompare(b.name));
+  const unassigned = new Set(unassignedDebtTemplates(data.recurring, data.categories, data.debts).map((t) => t.id));
   return (
     <>
       <TemplateForm data={data} label="New template" submit="Add template" />
@@ -146,7 +155,7 @@ export function PlanRecurring({ data }: { data: PlanData }) {
         <h3>Templates</h3>
         {templates.length === 0 ? <p class="empty">No templates yet.</p> : (
           <ul class="budget-list" aria-label="Templates">
-            {templates.map((t) => <TemplateRow key={t.id} template={t} data={data} onDelete={() => setDeleting(t)} />)}
+            {templates.map((t) => <TemplateRow key={t.id} template={t} data={data} unassigned={unassigned.has(t.id)} onDelete={() => setDeleting(t)} />)}
           </ul>
         )}
       </section>

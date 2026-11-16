@@ -542,6 +542,37 @@ test('budget plan: a recurring template makes a planned item to confirm', async 
   expect(await stored(page, 'budgetRecurring')).toMatchObject([{ name: 'Gym', amount: 3500, day: 3, startYm: '2026-10', categoryId: 'budget-cat:needs:training-gym' }]);
 });
 
+test('budget plan: with two debts, a Debts template must say which debt it pays, and one without is flagged', async ({ page }) => {
+  await openPlan(page, 'recurring');
+  await seed(page, 'budgetDebts', [
+    { id: 'debt-car', name: 'Car loan', startBalance: 500000, yearlyRatePct: 6, instalment: 20000, startYm: '2026-01' },
+    { id: 'debt-card', name: 'Visa', startBalance: 100000, yearlyRatePct: 0, instalment: 5000, startYm: '2026-01' },
+  ]);
+  await seed(page, 'budgetRecurring', [{ id: 'rec-old', name: 'Old loan payment', amount: 20000, categoryId: 'budget-cat:debts:loan-instalment', day: 5, startYm: '2026-01' }]);
+  await page.goto('./#/budget/plan');
+  await expect(page.getByRole('link', { name: /Recurring/ })).toContainText('Which debt?');
+  await page.goto('./#/budget/plan/recurring');
+  const old = page.getByRole('list', { name: 'Templates' }).getByRole('listitem').filter({ hasText: 'Old loan payment' });
+  await expect(old).toContainText('Which debt?');
+
+  const add = page.getByRole('form', { name: 'New template' });
+  await add.getByLabel('Name').fill('Car loan');
+  await add.getByLabel('Amount').fill('300');
+  await add.getByLabel('Category').selectOption({ label: 'Loan instalment' });
+  await expect(add.getByRole('button', { name: 'Add template' })).toBeDisabled();
+  await add.getByLabel('Which debt?').selectOption({ label: 'Car loan' });
+  await add.getByRole('button', { name: 'Add template' }).click();
+  await expect(page.getByRole('list', { name: 'Templates' }).getByRole('listitem').filter({ hasText: 'until Car loan is paid' })).toBeVisible();
+
+  await old.getByRole('button', { name: 'Choose the debt' }).click();
+  const edit = page.getByRole('form', { name: 'Edit Old loan payment' });
+  await edit.getByLabel('Which debt?').selectOption({ label: 'Visa' });
+  await edit.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('list', { name: 'Templates' })).not.toContainText('Which debt?');
+  await expect(page.getByRole('list', { name: 'Templates' })).toContainText('until Visa is paid');
+  expect((await stored(page, 'budgetRecurring')).map((t) => t.untilDebtId).sort()).toEqual(['debt-car', 'debt-card']);
+});
+
 test('budget plan: a yearly fund shows its set-aside, to confirm in the month', async ({ page }) => {
   await openPlan(page, 'funds');
   const add = page.getByRole('form', { name: 'New fund' });
