@@ -128,6 +128,26 @@ function isYm(value: unknown): boolean {
   return typeof value === 'string' && YM.test(value);
 }
 
+/** A debt's extra steps: absent, or a list of a month and an amount of 0 or more, one step per month. */
+function extraStepsOk(steps: unknown): boolean {
+  if (steps === undefined) return true;
+  if (!Array.isArray(steps)) return false;
+  const months = new Set<unknown>();
+  return steps.every((s) => isObject(s) && isYm(s.fromYm) && isCents(s.monthly) && (s.monthly as number) >= 0 && !months.has(s.fromYm) && months.add(s.fromYm));
+}
+
+/** The rotation the forecast reads without checking again: salaries by month, contract periods, the pattern and the pay rule. */
+function rotationOk(rotation: unknown): boolean {
+  if (!isObject(rotation)) return false;
+  const { salaryFrom, periods, patternOn, patternOff, paidNextMonth, paidAtHomePct } = rotation;
+  const whole = (v: unknown, min: number) => Number.isInteger(v) && (v as number) >= min && (v as number) <= 24;
+  return Array.isArray(salaryFrom) && salaryFrom.every((s) => isObject(s) && isYm(s.ym))
+    && Array.isArray(periods) && periods.every((p) => isObject(p) && typeof p.signOn === 'string' && DATE.test(p.signOn)
+      && typeof p.signOff === 'string' && DATE.test(p.signOff) && isOptionalText(p.crewId))
+    && whole(patternOn, 1) && whole(patternOff, 0) && typeof paidNextMonth === 'boolean'
+    && typeof paidAtHomePct === 'number' && paidAtHomePct >= 0 && paidAtHomePct <= 100;
+}
+
 /**
  * What a budget record needs, beyond being personal: the fields the budget's sums read without checking again. Every
  * amount is whole cents, nested ones too (a month's targets, the settings' favourites, fixed spending and salaries, a
@@ -151,14 +171,15 @@ function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): bool
     case 'budgetFundMoves': return typeof r.fundId === 'string' && isYm(r.ym) && isCents(r.amount) && (r.kind === 'setaside' || r.kind === 'paid');
     case 'budgetDebts':
       return typeof r.name === 'string' && isCents(r.startBalance) && typeof r.yearlyRatePct === 'number' && Number.isFinite(r.yearlyRatePct)
-        && isCents(r.instalment) && isYm(r.startYm)
-        && (r.extraSteps === undefined || (Array.isArray(r.extraSteps) && r.extraSteps.every((s) => isObject(s) && isYm(s.fromYm))));
+        && r.yearlyRatePct >= 0 && r.yearlyRatePct <= 100 && isCents(r.instalment) && isYm(r.startYm) && extraStepsOk(r.extraSteps)
+        && (r.extraApplied === undefined || (Array.isArray(r.extraApplied) && r.extraApplied.every((a) => isObject(a) && typeof a.source === 'string'
+          && isYm(a.fromYm) && isCents(a.monthly) && (a.monthly as number) >= 0)));
     case 'budgetGoals': return typeof r.name === 'string' && isCents(r.amount) && isYm(r.targetYm);
     case 'budgetAssets': return typeof r.name === 'string' && typeof r.includeInNetWorth === 'boolean';
     case 'budgetCorrections': return typeof r.account === 'string' && isYm(r.ym) && isCents(r.balance);
     case 'budgetScenarios': return typeof r.name === 'string' && Array.isArray(r.changes);
     case 'budgetSettings':
-      return r.key === 'budget' && isObject(r.rotation) && isObject(r.assumptions) && Array.isArray(r.favourites) && isObject(r.forecastMethod)
+      return r.key === 'budget' && rotationOk(r.rotation) && isObject(r.assumptions) && Array.isArray(r.favourites) && isObject(r.forecastMethod)
         && HORIZONS.has(r.horizon);
   }
 }

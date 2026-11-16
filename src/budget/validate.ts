@@ -48,9 +48,10 @@ function isPlanEdit(value: unknown, valid: (v: unknown) => boolean): boolean {
  */
 export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
   if (!MONEY_FIELDS.every((key) => optionalCents(fields, key))) return false;
-  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes, extraSteps, assumptions } = fields;
+  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes, extraSteps, extraApplied, assumptions } = fields;
   if (assumptions !== undefined && !(isObject(assumptions) && optionalCents(assumptions, 'yearlySpendingCents'))) return false;
   if (extraSteps !== undefined && !(Array.isArray(extraSteps) && extraSteps.every((s) => isObject(s) && isCents(s.monthly)))) return false;
+  if (extraApplied !== undefined && !(Array.isArray(extraApplied) && extraApplied.every((a) => isObject(a) && isCents(a.monthly)))) return false;
   if (plannedIncome !== undefined && !isPlanEdit(plannedIncome, isCents)) return false;
   if (potTargets !== undefined
     && !(isObject(potTargets) && Object.entries(potTargets).every(([pot, edit]) => POT_IDS.has(pot) && (edit === undefined || isPlanEdit(edit, isPotTarget))))) {
