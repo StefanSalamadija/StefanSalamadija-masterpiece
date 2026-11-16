@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HydroRow } from '../domain/types';
-import { excelRound, vlookupApprox } from './excel';
+import { excelRound, setLookupCompare, vlookupApprox } from './excel';
+import type { LookupCompare } from './excel';
 
 describe('excelRound: Excel ROUND, half away from zero, on the decimal value', () => {
   it.each([
@@ -50,12 +51,6 @@ describe('vlookupApprox: the last row whose draft ≤ y, from the range start', 
     expect(vlookupApprox(rows, 1, 1.47)).toBe(rows[5]); // the irregular 1.45 row
   });
 
-  it('matches a draft worked out in binary as the decimal value (1.1 + 0.1 is the 1.2 row)', () => {
-    expect(1.1 + 0.1).not.toBe(1.2);
-    expect(vlookupApprox(rows, 1, 1.1 + 0.1)).toBe(rows[2]);
-    expect(vlookupApprox(rows, 1, 0.7 + 0.5)).toBe(rows[2]);
-  });
-
   it('refuses a y below the range start, even with rows below it in the table', () => {
     expect(vlookupApprox(rows, 1.2, 1.19)).toBe('outOfRange');
     expect(vlookupApprox(rows, 1.2, 1.2)).toBe(rows[2]);
@@ -69,5 +64,31 @@ describe('vlookupApprox: the last row whose draft ≤ y, from the range start', 
 
   it('refuses a range start past the end of the table', () => {
     expect(vlookupApprox(rows, 2, 2)).toBe('outOfRange');
+  });
+});
+
+/*
+ * The VLOOKUP compare rule is pending confirmation in Excel (see excel.ts). These cases tell the two rules apart: y
+ * worked out in binary just below a row's draft.
+ */
+describe.each<[LookupCompare, 'low' | 'high']>([['decimal15', 'high'], ['binary', 'low']])('vlookupApprox with the %s compare', (rule, answer) => {
+  let previous: LookupCompare;
+  beforeEach(() => { previous = setLookupCompare(rule); });
+  afterEach(() => { setLookupCompare(previous); });
+
+  it(`takes 0.7 + 0.1 (= ${0.7 + 0.1}) to the ${answer} row of {0.7; 0.8}`, () => {
+    expect(0.7 + 0.1).toBeLessThan(0.8);
+    const pair = [row(0.7), row(0.8)];
+    expect(vlookupApprox(pair, 0.7, 0.7 + 0.1)).toBe(answer === 'high' ? pair[1] : pair[0]);
+  });
+
+  it(`takes 4.965 + 0.1 to the ${answer} row of {5; 5.065}`, () => {
+    const pair = [row(5), row(5.065)];
+    expect(vlookupApprox(pair, 5, 4.965 + 0.1)).toBe(answer === 'high' ? pair[1] : pair[0]);
+  });
+
+  it('agrees with the other rule where y is not near a row', () => {
+    expect(vlookupApprox(rows, 1, 1.1 + 0.1)).toBe(rows[2]); // 1.2000000000000002: above the row in binary too
+    expect(vlookupApprox(rows, 1, 1.25)).toBe(rows[2]);
   });
 });

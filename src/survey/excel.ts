@@ -3,10 +3,28 @@ import type { HydroRow } from '../domain/types';
 /*
  * The two spreadsheet functions the company workbook's survey formulas rest on, with Excel's behaviour.
  *
- * Excel works on doubles but treats a number as its 15-significant-digit decimal value where it matters: ROUND(2.675, 2)
- * is 2.68 although the double is 2.67499999…, and a draft worked out as 3.6 + 0.1 matches the 3.70 table row. Both
- * functions here therefore read their number as that decimal value first.
+ * ROUND: Excel rounds the number's 15-significant-digit decimal value, so ROUND(2.675, 2) is 2.68 although the double
+ * is 2.67499999….
+ *
+ * VLOOKUP: how Excel compares the looked-up y with the table's drafts is PENDING CONFIRMATION (a one-cell test the
+ * user will run in Excel). The two candidate rules differ only when y, worked out in binary, falls just below a row's
+ * draft: 4.965 + 0.1 is 5.0649999999999995, which matches the 5.065 row at 15 significant digits but not in a plain
+ * binary compare. `LOOKUP_COMPARE` below holds the rule; until it is confirmed, the 15-digit compare is the default.
  */
+
+/**
+ * How `vlookupApprox` compares y with a row's draft: `'decimal15'` reads y at 15 significant digits first, `'binary'`
+ * compares the doubles as they are. Pending confirmation in Excel; one of the two will remain.
+ */
+export type LookupCompare = 'decimal15' | 'binary';
+let LOOKUP_COMPARE: LookupCompare = 'decimal15';
+
+/** Tests only: sets the VLOOKUP compare rule and returns the previous one, to put back. */
+export function setLookupCompare(rule: LookupCompare): LookupCompare {
+  const previous = LOOKUP_COMPARE;
+  LOOKUP_COMPARE = rule;
+  return previous;
+}
 
 /** A number as Excel holds it for display and comparison: its value at 15 significant digits. */
 export function decimal15(x: number): number {
@@ -37,7 +55,7 @@ export function excelRound(x: number, digits: number): number {
  * refuses with `'outOfRange'` (spec §4.2 item 9). `rows` are in increasing draft order.
  */
 export function vlookupApprox(rows: readonly HydroRow[], fromDraft: number, y: number): HydroRow | 'outOfRange' {
-  const target = decimal15(y);
+  const target = LOOKUP_COMPARE === 'decimal15' ? decimal15(y) : y;
   const start = rows.findIndex((row) => row.draft >= fromDraft);
   const last = rows.at(-1);
   if (start < 0 || last === undefined || !(target >= rows[start].draft) || target > last.draft) return 'outOfRange';

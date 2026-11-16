@@ -77,9 +77,23 @@ describe('reportFigures: the DS Report’s own formulas', () => {
     expect(r.initial.nett).toBe(2702.558);
   });
 
-  it('calls the initial result "Cargo + Constant" when discharging, and the cargo positive', () => {
+  it('calls the initial result "Cargo + Constant" when discharging', () => {
     const r = ok(reportFigures(ship, hydro, { ...initial, operation: 'discharging' }));
     expect(r.constantLabel).toBe('Cargo + Constant');
+  });
+
+  it('gives the cargo discharged positive, from the report’s own netts (E46 = E26 − E45)', () => {
+    const dIni: DraftSurvey = { ...initial, operation: 'discharging', drafts: { fP: 6.1, fS: 6.12, mP: 6.2, mS: 6.22, aP: 6.3, aS: 6.3 }, density: 1.024,
+      deductibles: { ballast: 150.2, freshWater: 160.3, vlsfo: 420.1, lsmgo: 60.2, lubOil: 12.3, other: 1.5 } };
+    const dFin: DraftSurvey = { ...final, operation: 'discharging', drafts: { fP: 5.4, fS: 5.42, mP: 5.5, mS: 5.52, aP: 5.62, aS: 5.64 }, density: 1.023,
+      deductibles: { ballast: 2100.6, freshWater: 120.4, vlsfo: 380.5, lsmgo: 55.1, lubOil: 11.9, other: 1.5 }, comparedQty: 4400 };
+    const r = ok(reportFigures(ship, hydro, dIni, dFin));
+    expect(r.constantLabel).toBe('Cargo + Constant');
+    expect(r.cargoLabel).toBe('discharged');
+    expect(r.cargo).toBe(r.initial.nett - r.other!.nett);
+    expect(r.cargo).toBeGreaterThan(0);
+    expect(r.cargo).toBeCloseTo(18044.864 - 13683.59, 9);
+    expect(r.differenceT).toBe(18044.864 - 13683.59 - 4400); // the sheet's difference line, app sign
   });
 
   it('refuses when either survey is outside the table', () => {

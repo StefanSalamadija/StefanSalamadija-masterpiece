@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FAKE_FINAL, FAKE_INITIAL, makeSurveyWorkbook } from '../../e2e/fixtures/makeSurveyWorkbook';
 import type { DraftSurvey, DraftSurveyShip, HydroRow, SurveyDeductibles, SurveyDrafts } from '../domain/types';
-import { calcOutcome, calcSheet, OUT_OF_RANGE } from './calc';
+import { calcOutcome, calcSheet, MISSING_INPUT, NO_TABLED_LCF, OUT_OF_RANGE } from './calc';
+import { setLookupCompare } from './excel';
+import type { LookupCompare } from './excel';
 import type { SheetResult } from './calc';
 import { readSurveyWorkbook } from './workbook/read';
 
@@ -173,9 +175,9 @@ describe('calcSheet: the table’s range', () => {
 
   it('shows no result while a draft or the density is missing', () => {
     const missing = calcSheet(ship, hydro, survey('initial', { ...FAKE_INITIAL.drafts, mS: undefined }, 1.02, none), 'initial');
-    expect('error' in missing).toBe(true);
+    expect(missing).toEqual({ error: MISSING_INPUT });
     const noDensity = calcSheet(ship, hydro, { ...fakeInitial(), density: undefined }, 'initial');
-    expect('error' in noDensity).toBe(true);
+    expect(noDensity).toEqual({ error: MISSING_INPUT });
   });
 });
 
@@ -221,7 +223,7 @@ describe('calcSheet: the LCF source', () => {
   it('refuses the "tabled" source when the table has no "LCF Tabled" column', () => {
     const plain = hydro.map(({ lcfTabledMid: _dropped, ...row }) => row);
     const result = calcSheet({ ...ship, lcfSource: 'tabled' }, plain, fakeInitial(), 'initial');
-    expect('error' in result).toBe(true);
+    expect(result).toEqual({ error: NO_TABLED_LCF });
   });
 });
 
@@ -277,6 +279,18 @@ describe('calcOutcome', () => {
     expect(out.differencePct).toBe(100 * (18044.864 - 13683.59 - 4400) / 4400);
   });
 
+  it('shows a cargo that went the wrong way for the operation as negative, not forced positive', () => {
+    // A loading "final" whose nett is below its initial's: the drafts went the other way.
+    const lighter = ok(calcSheet(ship, hydro, survey('final', even(5.5), 1.025, { ballast: 13000 }, { comparedQty: 100 }), 'final'));
+    const deeper = ok(calcSheet(ship, hydro, fakeInitial(), 'initial'));
+    expect(lighter.nett).toBeLessThan(deeper.nett);
+    const out = calcOutcome(deeper, lighter, ship, survey('final', even(5.5), 1.025, { ballast: 13000 }, { comparedQty: 100 }));
+    expect(out.cargo).toBe(lighter.nett - deeper.nett);
+    expect(out.cargo).toBeLessThan(0);
+    expect(out.cargoLabel).toBe('loaded');
+    expect(out.differenceT).toBe(lighter.nett - deeper.nett - 100);
+  });
+
   it('works an interim survey with the FINAL formulas against its initial', () => {
     const interim = { ...fakeFinal(), kind: 'interim' as const, comparedQty: 12000 };
     const sheet = ok(calcSheet(ship, hydro, interim, 'final'));
@@ -292,5 +306,64 @@ describe('calcOutcome', () => {
     expect(out.cargo).toBe(16786.6 - 4175.857999999999);
     expect(out.differenceT).toBeUndefined();
     expect(out.differencePct).toBeUndefined();
+  });
+});
+
+describe('calcSheet: a rounding tie through the sheet', () => {
+  it('rounds the QM up where its sum is a x.xxxx5 tie in decimal but just below it in binary', () => {
+    const r = ok(calcSheet(ship, hydro, survey('initial', { fP: 4.557, fS: 4.559, mP: 4.834, mS: 4.834, aP: 5.476, aS: 5.479 }, 1.025, none), 'initial'));
+    const sum = (r.corrected.M + r.meanOfMeans) / 2;
+    expect(Math.round(sum * 1e4) / 1e4).toBe(4.882); // a binary rounding would go down
+    expect(r.quarterMean).toBe(4.8821); // Excel ROUND goes up
+    expect(r.trim).toBe(0.9532000000000007);
+    expect(r.qmDisplacement).toBe(14225.641);
+    expect(r.tpc).toBe(33.776);
+    expect(r.lcf).toBe(-1.768);
+    expect(r.mtcPlus).toBe(212.293);
+    expect(r.mtcMinus).toBe(206.293);
+    expect(r.trimCorr1).toBe(-37.948);
+    expect(r.trimCorr2).toBe(1.817);
+    expect(r.gross).toBe(14189.51);
+  });
+});
+
+/*
+ * The VLOOKUP compare rule is pending confirmation in Excel (see excel.ts). At these QMs a look-up's y lands just below
+ * a row's draft in binary (4.965 + 0.1, 4.465 + 0.6 and 5.465 − 0.4 are all 5.0649999999999995, against the 5.065
+ * row), so the two rules give different figures. Both are pinned; one will remain.
+ */
+describe.each<[LookupCompare, { disp: number; tpc: number; lcf: number; mtcPlus4465: number; mtcMinus5465: number }]>([
+  ['decimal15', { disp: 14650.26, tpc: 34.014, lcf: -1.749, mtcPlus4465: 210.044, mtcMinus5465: 210.044 }],
+  ['binary', { disp: 14506.35, tpc: 33.934, lcf: -1.755, mtcPlus4465: 209.79, mtcMinus5465: 209.79 }],
+])('calcSheet with the %s VLOOKUP compare', (rule, expected) => {
+  let previous: LookupCompare;
+  beforeEach(() => { previous = setLookupCompare(rule); });
+  afterEach(() => { setLookupCompare(previous); });
+
+  it('QM 4.965: the look-ups at QM + 0.1', () => {
+    expect(4.965 + 0.1).toBe(5.0649999999999995);
+    const r = ok(calcSheet(ship, hydro, survey('initial', even(4.965), 1.025, none), 'initial'));
+    expect(r.quarterMean).toBe(4.965);
+    expect(r.qmDisplacement).toBe(expected.disp);
+    expect(r.tpc).toBe(expected.tpc);
+    expect(r.lcf).toBe(expected.lcf);
+    expect(r.mtcPlus).toBe(212.79);
+    expect(r.mtcMinus).toBe(206.79);
+  });
+
+  it('QM 4.465: MTC + 0.5, through its look-up at QM + 0.6', () => {
+    expect(4.465 + 0.6).toBe(5.0649999999999995);
+    const r = ok(calcSheet(ship, hydro, survey('initial', even(4.465), 1.025, none), 'initial'));
+    expect(r.qmDisplacement).toBe(12833.44);
+    expect(r.mtcPlus).toBe(expected.mtcPlus4465);
+    expect(r.mtcMinus).toBe(203.79);
+  });
+
+  it('QM 5.465: MTC − 0.5, through its look-up at QM − 0.4', () => {
+    expect(5.465 - 0.4).toBe(5.0649999999999995);
+    const r = ok(calcSheet(ship, hydro, survey('initial', even(5.465), 1.025, none), 'initial'));
+    expect(r.qmDisplacement).toBe(16226.79);
+    expect(r.mtcPlus).toBe(215.79);
+    expect(r.mtcMinus).toBe(expected.mtcMinus5465);
   });
 });
