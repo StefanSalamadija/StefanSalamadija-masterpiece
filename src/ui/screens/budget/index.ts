@@ -1,7 +1,9 @@
 // The Budget screens: one chunk, loaded on demand (see App.tsx), so that the budget's code stays out of the main chunk.
 export { CatchUp } from './CatchUp';
-export { Dashboard, ExportBudget, ImportBudget } from './Dashboard';
+export { Dashboard } from './Dashboard';
+export { ExportBudget } from './ExportBudget';
 export { Forecast } from './Forecast';
+export { ImportBudget } from './ImportBudget';
 export { MonthView } from './MonthView';
 export { NetWorth } from './NetWorth';
 export { QuickAdd } from './QuickAdd';

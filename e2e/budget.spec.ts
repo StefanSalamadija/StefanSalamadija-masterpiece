@@ -1,5 +1,8 @@
+import { promises as fs } from 'node:fs';
+import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { makeBudgetXlsx } from './fixtures/makeBudgetXlsx';
 import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25 (October 2026).
@@ -937,4 +940,74 @@ test('budget: every chart and screen fits 360 px', async ({ page }) => {
     await expect(page.locator('figure svg').first()).toBeVisible();
     await expectNoHorizontalScroll(page);
   }
+});
+
+test('budget excel: a 3-month workbook is reviewed and imported, the months match its totals, and it exports back', async ({ page }, info) => {
+  // The workbook is made up: invented labels and amounts in the layout of the user's own.
+  const file = info.outputPath('budget.xlsx'); await makeBudgetXlsx(file);
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget');
+  await page.getByRole('link', { name: /^Import from Excel/ }).click();
+  await expect(page).toHaveURL(/#\/budget\/import$/);
+  await page.getByLabel('Budget workbook').setInputFiles(file);
+  await expect(page.getByText('3 months: August 2026 to October 2026.')).toBeVisible();
+
+  // One step when the labels match; the one that does not is offered as a new category, or mapped to another.
+  await expect(page.getByText('1 label has no category yet')).toBeVisible();
+  await expect(page.getByLabel('Needs: Čišćenje')).toHaveValue('new');
+  await page.getByLabel('Needs: Čišćenje').selectOption({ label: 'Other › Other needs (Needs)' });
+  await page.getByText('Adjust', { exact: true }).click();
+  await expect(page.getByLabel('Needs: Apoteka')).toHaveValue('budget-cat:needs:pharmacy');
+  await expect(page.getByLabel('The debt balance (STANJA) is')).toHaveValue('new');
+  await page.getByLabel('Bank & cash at the end of October 2026').fill('2500');
+
+  const preview = page.getByRole('table', { name: 'Totals per pot' });
+  await expect(cells(preview.getByRole('row').filter({ hasText: 'August 2026' }))).toHaveText(
+    ['August 2026', '€3,200.00', '€1,415.50', '€800.00', '€105.00', '€300.00', '€200.00', '14'],
+  );
+  await expectNoHorizontalScroll(page);
+  await page.getByRole('button', { name: 'Import 3 months' }).click();
+  await expect(page.getByText('Imported 3 months, 32 entries.')).toBeVisible();
+  expect((await page.evaluate(() => new Promise<number>((resolve) => {
+    const open = indexedDB.open('masterpiece');
+    open.onsuccess = () => { const r = open.result.transaction('snapshots').objectStore('snapshots').count(); r.onsuccess = () => { open.result.close(); resolve(r.result); }; };
+  })))).toBeGreaterThan(0);
+
+  await page.goto('./#/budget/month/2026-08');
+  await expect(potCard(page, 'Needs')).toContainText('Spent €1,415.50');
+  await expect(potCard(page, 'Savings & investments')).toContainText('Spent €800.00');
+  await expect(potCard(page, 'Wants')).toContainText('Spent €105.00');
+  await expect(potCard(page, 'Debts')).toContainText('Spent €300.00');
+  await expect(potCard(page, 'Emergency fund')).toContainText('Spent €200.00');
+  await page.goto('./#/budget/month/2026-09');
+  await expect(potCard(page, 'Needs')).toContainText('Spent €1,119.00');
+  const corrections = (await stored(page, 'budgetCorrections')).map((c) => [c.account.startsWith('debt:') ? 'debt' : c.account, c.ym, c.balance]).sort();
+  expect(corrections).toContainEqual(['bank', '2026-10', 250000]);
+  expect(corrections).toContainEqual(['investments', '2026-10', 1380000]);
+  expect(corrections).toContainEqual(['debt', '2026-10', 404000]);
+  expect((await stored(page, 'budgetCategories')).find((c) => c.id === 'budget-cat:needs:other-needs')?.synonyms).toEqual(['Čišćenje']);
+
+  // Importing again replaces the imported entries; it never doubles them.
+  await page.goto('./#/budget/import');
+  await page.getByLabel('Budget workbook').setInputFiles(file);
+  await expect(page.getByText('Every line matches a category.')).toBeVisible();
+  await expect(page.getByText('32 entries imported before are replaced.')).toBeVisible();
+  await page.getByRole('button', { name: 'Import 3 months' }).click();
+  await expect(page.getByText('Imported 3 months, 32 entries.')).toBeVisible();
+  expect(await storedEntries(page)).toHaveLength(32);
+
+  await page.goto('./#/budget');
+  await page.getByRole('link', { name: /^Export to Excel/ }).click();
+  await page.getByLabel('A range of months').check();
+  await page.getByLabel('From', { exact: true }).fill('2026-08');
+  await page.getByLabel('To', { exact: true }).fill('2026-10');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export to Excel' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe('budget-2026-08-to-2026-10.xlsx');
+  await expect(page.getByText('Exported.')).toBeVisible();
+  const book = XLSX.read(await fs.readFile(await saved.path()), { type: 'array' });
+  expect(book.SheetNames).toEqual(['Summary', 'August 2026', 'September 2026', 'October 2026']);
+  const summary = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets.Summary, { header: 1 });
+  expect(summary[1].slice(0, 8)).toEqual(['August 2026', 3200, 100, 1415.5, 800, 105, 300, 200]);
 });

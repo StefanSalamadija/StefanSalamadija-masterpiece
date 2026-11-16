@@ -127,6 +127,18 @@ function DashboardBody({ data }: { data: PlanData }) {
             <span class="alert-detail">Pots and categories across months, income, balances over time</span>
           </a>
         </li>
+        <li class="card alert-row">
+          <a class="alert-link" href="#/budget/import">
+            <span class="alert-title">Import from Excel</span>
+            <span class="alert-detail">Your budget workbook, a sheet per month</span>
+          </a>
+        </li>
+        <li class="card alert-row">
+          <a class="alert-link" href="#/budget/export">
+            <span class="alert-title">Export to Excel</span>
+            <span class="alert-detail">A month, a range or a year, a sheet per month</span>
+          </a>
+        </li>
       </ul>
     </>
   );
@@ -141,15 +153,3 @@ function DashboardData() {
 export function Dashboard() {
   return <BudgetFrame title="Budget"><DashboardData /></BudgetFrame>;
 }
-
-/** A Budget screen still to be built: it keeps the tabs and "+ Expense", so its link leads somewhere. */
-function Placeholder({ title }: { title: string }) {
-  return (
-    <BudgetFrame title={title}>
-      <p class="empty">This part of the budget is not ready yet.</p>
-    </BudgetFrame>
-  );
-}
-
-export const ImportBudget = () => <Placeholder title="Import from Excel" />;
-export const ExportBudget = () => <Placeholder title="Export to Excel" />;
