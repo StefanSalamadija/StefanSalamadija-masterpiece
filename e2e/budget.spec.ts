@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25 (October 2026).
@@ -13,6 +13,8 @@ const save = (page: Page) => page.getByRole('button', { name: 'Save', exact: tru
 const entries = (page: Page) => page.getByRole('list', { name: 'Entries' }).getByRole('listitem');
 const toConfirm = (page: Page) => page.getByRole('list', { name: 'To confirm' }).getByRole('listitem');
 const potCard = (page: Page, pot: string) => page.getByRole('region', { name: pot, exact: true });
+/** The cells of a table row, its header cell included. */
+const cells = (row: Locator) => row.locator('th, td');
 
 async function typeAmount(page: Page, amount: string): Promise<void> {
   for (const k of amount) await key(page, k).click();
@@ -724,6 +726,215 @@ test('budget plan: no horizontal scroll at 360 px', async ({ page }) => {
   for (const section of ['targets', 'categories', 'recurring', 'funds', 'debts', 'goals', 'assets', 'rotation', 'assumptions', 'start']) {
     await page.goto(`./#/budget/plan/${section}`);
     await expect(page.getByRole('link', { name: '← Plan' })).toBeVisible();
+    await expectNoHorizontalScroll(page);
+  }
+});
+
+// ---- Dashboard, forecast, net worth, scenarios, trends and charts ----
+
+const ETF = 'budget-cat:savings:index-funds-etfs-e-g-s-p-500';
+/** On board from July 2026 to February 2027, then 8 on and 4 off: March to June 2027 are 4 home months. */
+const ROTATION = {
+  salaryFrom: [{ ym: '2026-01', amount: 500000 }], periods: [{ signOn: '2026-07-01', signOff: '2027-02-28' }], patternOn: 8, patternOff: 4,
+  paidNextMonth: false, paidAtHomePct: 0,
+};
+
+/** Changes the stored budget settings (the budget must have been opened once, so that they exist). */
+async function patchSettings(page: Page, patch: Record<string, unknown>): Promise<void> {
+  const [current] = await stored(page, 'budgetSettings');
+  await seed(page, 'budgetSettings', [{ ...current, ...patch, assumptions: { ...current.assumptions, ...(patch.assumptions as object | undefined) } }]);
+}
+
+/** A ship, the budget opened once (which sets it up), then a plan: the rotation, salary, a Needs target and starting balances. */
+async function openWithPlan(page: Page, opts: { needs: number; settings?: Record<string, unknown>; bank?: boolean; extra?: () => Promise<void> }): Promise<void> {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget');
+  await expect(page.getByRole('link', { name: /^Starting balances/ })).toBeVisible();
+  await patchSettings(page, { rotation: ROTATION, ...opts.settings });
+  await seed(page, 'budgetMonths', [{ id: 'm-2026-10', ym: '2026-10', potTargets: { needs: { fromOn: { kind: 'amount', value: opts.needs } } }, categoryTargets: {} }]);
+  if (opts.bank !== false) await seed(page, 'budgetCorrections', [{ id: 'c-bank', account: 'bank', ym: '2026-09', balance: 300000 }]);
+  await opts.extra?.();
+  await page.reload();
+}
+
+/** Shows a chart as a table: the chart's own toggle, then its table, named as the chart is. */
+async function expectChartTable(page: Page, name: string): Promise<void> {
+  const figure = page.getByRole('figure', { name });
+  await expect(figure.getByRole('img', { name })).toBeVisible();
+  await figure.getByRole('button', { name: 'Show as table' }).click();
+  await expect(figure.getByRole('table', { name })).toBeVisible();
+  await expect(figure.getByRole('img', { name })).toHaveCount(0);
+  await figure.getByRole('button', { name: 'Show as chart' }).click();
+  await expect(figure.getByRole('img', { name })).toBeVisible();
+}
+
+test('budget forecast: without a bank balance it asks for one', async ({ page }) => {
+  await openWithPlan(page, { needs: 450000, bank: false });
+  await page.goto('./#/budget/forecast');
+  await expect(page.getByText('Enter your bank balance to see the forecast')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Starting balances' })).toBeVisible();
+});
+
+test('budget forecast: 4 home months bring free to spend below the buffer in a home month, and the lowest point', async ({ page }) => {
+  await openWithPlan(page, { needs: 450000, settings: { bufferCents: 200000 } });
+  await page.goto('./#/budget/forecast');
+  await page.getByLabel('Horizon').selectOption({ label: '12 months' });
+  const table = page.getByRole('table', { name: 'Forecast by month' });
+  await expect(table.getByRole('row')).toHaveCount(13);
+  // €3,000.00 at the end of September; +€5,000.00 salary and −€4,500.00 Needs on board, −€4,500.00 at home.
+  await expect(cells(table.getByRole('row').nth(1))).toHaveText(['October 2026', 'Onboard', '€5,000.00', '€4,500.00', '€3,500.00', '€3,500.00']);
+  await expect(cells(table.getByRole('row').filter({ hasText: 'March 2027' }))).toHaveText(['March 2027', 'Home', '€0.00', '€4,500.00', '€1,000.00', '€1,000.00']);
+  const warnings = page.getByRole('list', { name: 'Warnings' });
+  await expect(warnings).toContainText('Free to spend drops below €2,000.00 in March 2027');
+  await expect(warnings).toContainText('Bank goes negative in April 2027');
+  await expect(page.getByText('Lowest: −€12,500.00 in June 2027 (home)')).toBeVisible();
+  expect((await stored(page, 'budgetSettings'))[0].horizon).toBe(12);
+
+  const assumptions = page.getByRole('region', { name: 'Assumptions' });
+  await expect(assumptions).toContainText('Salary onboard: €5,000.00 a month');
+  await expect(assumptions).toContainText('8 months on, 4 off');
+  await expect(assumptions).toContainText('Needs: its targets');
+  await expect(assumptions).toContainText('Expected return: not entered');
+  await expect(assumptions.getByRole('link', { name: 'Edit rotation and pay' })).toHaveAttribute('href', '#/budget/plan/rotation');
+  await expect(assumptions.getByRole('link', { name: 'Edit assumptions' })).toHaveAttribute('href', '#/budget/plan/assumptions');
+  await expect(page.getByText('Projection — not a forecast or financial advice.')).toBeVisible();
+  await expectChartTable(page, 'Bank and free to spend by month');
+});
+
+/** The plan for the scenario tests: €2,000.00 of Needs, €50,000.00 invested, €1,000.00 a month into an ETF, and the rates. */
+async function openScenarioPlan(page: Page): Promise<void> {
+  await openWithPlan(page, {
+    needs: 200000,
+    settings: { assumptions: { yearlyReturnPct: 5, inflationPct: 2, withdrawalRatePct: 4, yearlySpendingCents: 2400000 } },
+    extra: async () => {
+      await seed(page, 'budgetCorrections', [{ id: 'c-inv', account: 'investments', ym: '2026-09', balance: 5000000 }]);
+      await seed(page, 'budgetRecurring', [{ id: 'tpl-etf', name: 'ETF', amount: 100000, categoryId: ETF, day: 5, startYm: '2026-10' }]);
+    },
+  });
+}
+
+test('budget scenarios: a car changes the lowest bank month and the freedom date, and Apply to plan makes the planned entry', async ({ page }) => {
+  await openScenarioPlan(page);
+  await page.goto('./#/budget/scenarios');
+  await expect(page.getByText('No scenarios yet.')).toBeVisible();
+  await page.getByLabel('Scenario name').fill('Car');
+  await page.getByRole('button', { name: 'Add scenario' }).click();
+  await expect(page).toHaveURL(/#\/budget\/scenarios\/[^/]+$/);
+  await expect(page.getByRole('heading', { name: 'Car' })).toBeVisible();
+
+  await page.getByLabel('Kind of change').selectOption({ label: 'One-off purchase or income' });
+  const change = page.getByRole('form', { name: 'New change' });
+  await change.getByLabel('What').fill('Car');
+  await change.getByLabel('Month').fill('2027-05');
+  await change.getByLabel('Amount').fill('18000');
+  await change.getByLabel('Pot').selectOption({ label: 'Wants' });
+  await change.getByRole('button', { name: 'Add change' }).click();
+  await page.getByLabel('Kind of change').selectOption({ label: 'Investment contribution from a month on' });
+  await change.getByLabel('From month').fill('2027-05');
+  await change.getByLabel('Each month').fill('500');
+  await change.getByRole('button', { name: 'Add change' }).click();
+  const changes = page.getByRole('list', { name: 'Changes' }).getByRole('listitem');
+  await expect(changes).toHaveCount(2);
+  await expect(changes.nth(0)).toContainText('Car: €18,000.00 in May 2027 (Wants)');
+  await expect(changes.nth(1)).toContainText('Investments: €500.00 a month from May 2027 on');
+
+  await page.getByRole('link', { name: '← Scenarios' }).click();
+  const compare = page.getByRole('table', { name: 'Compare' });
+  await expect(cells(compare.getByRole('row').first())).toHaveText(['', 'Base plan', 'Car']);
+  await expect(cells(compare.getByRole('row').filter({ hasText: 'Lowest bank' }))).toHaveText(['Lowest bank', '€1,000.00 in June 2027', '−€16,000.00 in June 2027']);
+  await expect(cells(compare.getByRole('row').filter({ hasText: 'Freedom date' }))).toHaveText(['Freedom date', 'January 2058', 'October 2071']);
+  await expect(cells(compare.getByRole('row').filter({ hasText: 'Net worth in 1 year' }))).toHaveText(['Net worth in 1 year', '€71,772.58', '€53,752.14']);
+  await expectChartTable(page, 'Net worth by month, base plan and scenarios');
+
+  await page.getByRole('link', { name: 'Car', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply to plan' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Planned purchase in May 2027: Car, €18,000.00');
+  await expect(dialog).toContainText('Investments: €500.00 a month from May 2027 on (replacing ETF)');
+  await expect(dialog).toContainText('A snapshot is taken first');
+  await dialog.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByText('Car is in the plan. A snapshot was taken first.')).toBeVisible();
+  const [scenario] = await stored(page, 'budgetScenarios');
+  const entry = (await storedEntries(page)).find((e) => e.id === `scenario:${scenario.id}:0:2027-05`);
+  expect(entry).toMatchObject({ kind: 'expense', date: '2027-05-01', amount: 1800000, status: 'planned', note: 'Car', oneOff: true, categoryId: 'budget-cat:wants:other-wants' });
+  expect(await stored(page, 'snapshots')).toHaveLength(1);
+  const templates = await stored(page, 'budgetRecurring');
+  expect(templates.map((t) => [t.name, t.amount, t.startYm, t.endYm])).toEqual(expect.arrayContaining([['ETF', 100000, '2026-10', '2027-04'], ['ETF', 50000, '2027-05', undefined]]));
+  await page.goto('./#/budget/month/2027-05');
+  await expect(toConfirm(page).filter({ hasText: 'Car' })).toContainText('€18,000.00');
+});
+
+test('budget net worth: the history after a correction, the savings rate and the freedom date', async ({ page }) => {
+  await openScenarioPlan(page);
+  await page.goto('./#/budget/net-worth');
+  const table = page.getByRole('table', { name: 'Net worth history' });
+  // €3,000.00 in the bank and €50,000.00 invested.
+  await expect(table.getByRole('row').filter({ hasText: 'September 2026' })).toContainText('€53,000.00');
+  await expect(page.getByText('At this plan: January 2058 (in 31 years 3 months)')).toBeVisible();
+  await expect(page.getByText('Projection — not a forecast or financial advice.').first()).toBeVisible();
+  await expect(page.getByText('an assumption, not advice')).toBeVisible();
+  await expect(page.getByText(/Freedom number: €600,000\.00 in today's euros/)).toBeVisible();
+  await expect(page.getByText(/grows smoothly through the year/)).toBeVisible();
+  await expect(page.getByText('Savings rate (12 months): no income recorded yet')).toBeVisible();
+  await expectChartTable(page, 'Net worth by month');
+
+  await page.goto('./#/budget/plan/start');
+  await page.getByLabel('Balances at the end of').fill('2026-10');
+  await page.getByLabel('Investments').fill('60000');
+  await page.getByRole('button', { name: 'Save starting balances' }).click();
+  await expect(page.getByText('Starting balances saved.')).toBeVisible();
+  await page.goto('./#/budget/net-worth');
+  await expect(table.getByRole('row').filter({ hasText: 'October 2026' })).toContainText('€63,000.00');
+});
+
+test('budget dashboard: pots, bank and free to spend, the next 3 months, funds due, warnings and the net worth line', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetFunds', [{ id: 'fund-ins', name: 'Insurance', amount: 30000, dueYm: '2026-12', startBalance: 10000 }]);
+  await seed(page, 'budgetEntries', [
+    { id: 'e-food', kind: 'expense', date: '2026-10-03', amount: 50000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+    { id: 'e-old', kind: 'expense', date: '2026-09-03', amount: 3500, categoryId: 'budget-cat:needs:training-gym', status: 'planned', note: 'Gym' },
+  ]);
+  await page.goto('./#/budget');
+  await expect(page.getByText('Bank & cash €2,500.00 · Free to spend €2,400.00')).toBeVisible();
+  const pots = page.getByRole('figure', { name: 'This month by pot' });
+  await expect(pots.getByRole('img', { name: 'This month by pot' })).toBeVisible();
+  await pots.getByRole('button', { name: 'Show as table' }).click();
+  await expect(cells(pots.getByRole('row').filter({ hasText: 'Needs' }))).toHaveText(['Needs', '€2,000.00', '€500.00', '25%']);
+  const next = page.getByRole('table', { name: 'The next 3 months' });
+  await expect(next.getByRole('row')).toHaveCount(4);
+  await expect(next.getByRole('row').nth(1)).toContainText('October 2026');
+  await expect(page.getByRole('list', { name: 'Funds due soon' })).toContainText('Insurance');
+  await expect(page.getByRole('list', { name: 'Funds due soon' })).toContainText('December 2026');
+  await expect(page.getByText('1 item to confirm in earlier months')).toBeVisible();
+  await expect(page.getByText(/^Net worth €[\d,.]+ · Freedom date: January 2058$/)).toBeVisible();
+});
+
+test('budget trends: per pot and category across months, income planned vs received, balances over time', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetEntries', [
+    { id: 'e-1', kind: 'expense', date: '2026-09-03', amount: 40000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+    { id: 'e-2', kind: 'expense', date: '2026-10-03', amount: 50000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+    { id: 'e-3', kind: 'income', date: '2026-10-01', amount: 500000, incomeSource: 'salary', status: 'actual' },
+  ]);
+  await page.goto('./#/budget/trends');
+  await expectChartTable(page, 'Spending by pot');
+  await page.getByLabel('Category').selectOption({ label: 'Groceries, food & drink' });
+  const category = page.getByRole('figure', { name: 'Groceries, food & drink by month' });
+  await category.getByRole('button', { name: 'Show as table' }).click();
+  await expect(category.getByRole('row').filter({ hasText: 'October 2026' })).toContainText('€500.00');
+  await expect(category.getByRole('row').filter({ hasText: 'September 2026' })).toContainText('€400.00');
+  await expectChartTable(page, 'Income planned and received');
+  await expectChartTable(page, 'Balances over time');
+});
+
+test('budget: every chart and screen fits 360 px', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetScenarios', [{ id: 'sc-long', name: 'A scenario with a long name about a car and a longer contract', changes: [
+    { kind: 'oneOff', ym: '2027-05', amount: 1800000, pot: 'wants', label: 'A car bought from the dealer in town' },
+  ] }]);
+  for (const path of ['', '/forecast', '/net-worth', '/scenarios', '/scenarios/sc-long', '/trends']) {
+    await page.goto(`./#/budget${path}`);
+    await expect(page.locator('figure svg').first()).toBeVisible();
     await expectNoHorizontalScroll(page);
   }
 });

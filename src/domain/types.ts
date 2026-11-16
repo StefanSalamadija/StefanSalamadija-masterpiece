@@ -181,7 +181,9 @@ export interface RotationSettings {
   paidNextMonth: boolean;
   paidAtHomePct: number;
 }
-export interface Assumptions { yearlyReturnPct?: number; withdrawalRatePct: number; inflationPct?: number; emergencyMonths: number; fundReminderDays: number }
+export interface Assumptions { yearlyReturnPct?: number; withdrawalRatePct: number; inflationPct?: number; emergencyMonths: number; fundReminderDays: number;
+  /** The user's own yearly spending for the freedom date; none: the average Needs + Wants of the last 12 tracked months. */
+  yearlySpendingCents?: Cents }
 export type ForecastMethod = 'targets' | 'average' | 'fixed';
 /** The budget's settings: one record, `key: 'budget'`. No `bufferCents` means the default buffer, a month of Needs. */
 export interface BudgetSettings extends BaseRecord { scope: 'personal'; key: 'budget'; rotation: RotationSettings; assumptions: Assumptions;

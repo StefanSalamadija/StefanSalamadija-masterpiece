@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
+import { reportError } from '../../app/errors';
 import { takeFlash } from '../../app/flash';
 import { listTemplates } from '../../db/forms';
 import { listForShip } from '../../db/records';
@@ -95,10 +96,40 @@ function FormsInProgress({ shipId }: { shipId: string }) {
   );
 }
 
+type BudgetAlertLine = { key: string; text: string; href: string };
+
+/**
+ * The personal budget alerts (base §3.8): on this device's Home only, never printed. The budget's own code is loaded on
+ * demand (with the Budget screens' chunk, once the budget is set up); this is just its count and short lines.
+ */
+function BudgetAlerts() {
+  const { db, shipToday } = useAppState();
+  const [alerts, setAlerts] = useState<BudgetAlertLine[]>([]);
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    // The budget's chunk is loaded only once the budget has been set up: before that it has nothing to say.
+    db.budgetSettings.count()
+      .then((n) => (n > 0 && live ? import('./budget') : undefined))
+      .then((m) => { if (m && live) stop = m.watchBudgetAlerts(db, shipToday, setAlerts, reportError); }, () => {});
+    return () => { live = false; stop?.(); };
+  }, [db, shipToday]);
+  if (alerts.length === 0) return null;
+  return (
+    <section class="alerts no-print" aria-label="Budget alerts">
+      <h2>Budget alerts</h2>
+      <p>{alerts.length} budget alert{alerts.length === 1 ? '' : 's'}</p>
+      <ul class="alert-list" role="list">
+        {alerts.map((a) => <li key={a.key} class="card alert-row"><a class="alert-link" href={a.href}><span class="alert-title">{a.text}</span></a></li>)}
+      </ul>
+    </section>
+  );
+}
+
 /**
  * The first screen: a backup reminder when one is due, the alerts of the ship, its forms in progress and the next clock
- * change, then the ways into Tools, the Budget (with "+ Expense", straight to quick add) and the Library. Nothing of the
- * budget's own code is imported here: it is a chunk of its own.
+ * change, the personal budget alerts, then the ways into Tools, the Budget (with "+ Expense", straight to quick add) and the
+ * Library. Nothing of the budget's own code is imported here: it is a chunk of its own.
  */
 export function Home() {
   const { settings, activeShip, nowUtc, persistence, clockChanges } = useAppState();
@@ -127,6 +158,7 @@ export function Home() {
       {activeShip && <Alerts key={activeShip.id} shipId={activeShip.id} maxMonthsOnboard={maxMonthsOnboardOf(activeShip)} />}
       {activeShip && <FormsInProgress key={activeShip.id} shipId={activeShip.id} />}
       {clockChange && <p class="clock-change">{clockChange}</p>}
+      <BudgetAlerts />
       <p>
         <a href="#/ship/particulars">Ship's data</a>
       </p>

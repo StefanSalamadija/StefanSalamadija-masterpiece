@@ -51,7 +51,8 @@ export type { ScenarioChange };
  *        contribution", in the first Savings & investments category);
  *      - the Savings & investments pot target set to that amount, as for a pot target change;
  *  - one-off → a planned entry to confirm on the 1st of its month, marked one-off: an expense in the pot's "Other …"
- *    category (else its first one; none without a pot), or other income;
+ *    category (else its first one; none without a pot), or other income, with the id
+ *    `scenario:<scenarioId>:<changeIndex>:<ym>` (as for a lump sum below);
  *  - extra debt → the monthly extra is added to the debt's extra steps from the current month or the debt's start on
  *    (its own steps keep their months: `addExtra`), which the forecast pays on top of
  *    the instalment until the debt is paid off; the lump sum is a planned payment on that debt, to confirm in its
@@ -353,12 +354,13 @@ export function applyToPlan(data: BudgetData, settings: BudgetSettings, s: Budge
       potExactly('savings', c.fromYm, c.monthly);
     } else if (c.kind === 'oneOff') {
       const date = `${c.ym}-01`;
+      const id = `scenario:${s.id}:${index}:${c.ym}`;
       if (c.income === true) {
-        entryWrites.push({ op: 'create', table: 'budgetEntries', fields: { kind: 'income', date, amount: c.amount, incomeSource: 'other', note: c.label, status: 'planned', oneOff: true } });
+        entryWrites.push({ op: 'create', table: 'budgetEntries', id, fields: { kind: 'income', date, amount: c.amount, incomeSource: 'other', note: c.label, status: 'planned', oneOff: true } });
         summary.push(`Planned income in ${monthName(c.ym)}: ${c.label}, ${formatMoney(c.amount)}`);
       } else {
         const categoryId = c.pot !== undefined ? categoryIn(data.budgetCategories, c.pot, 'other') : undefined;
-        entryWrites.push({ op: 'create', table: 'budgetEntries', fields: {
+        entryWrites.push({ op: 'create', table: 'budgetEntries', id, fields: {
           kind: 'expense', date, amount: c.amount, ...(categoryId !== undefined && { categoryId }), note: c.label, status: 'planned', oneOff: true,
         } });
         summary.push(`Planned purchase in ${monthName(c.ym)}: ${c.label}, ${formatMoney(c.amount)}`);

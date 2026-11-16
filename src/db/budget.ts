@@ -2,6 +2,7 @@ import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import { balancesByMonth } from '../budget/ledger';
 import { addMonths } from '../budget/months';
 import { plannedItemsFor } from '../budget/planned';
+import type { PlanWrite } from '../budget/scenarios';
 import { budgetMoneyOk, entryLinksOk } from '../budget/validate';
 import type {
   BaseRecord, BudgetAsset, BudgetCategory, BudgetCorrection, BudgetDebt, BudgetEntry, BudgetFund, BudgetFundMove, BudgetGoal, BudgetMonth,
@@ -279,4 +280,40 @@ export async function saveMonthNotes(db: MasterpieceDB, ym: Ym, notes: string): 
   } else if (text !== '') {
     await createBudgetRecord(db, 'budgetMonths', { ym, potTargets: {}, categoryTargets: {}, notes: text });
   }
+}
+
+/**
+ * Carries out "Apply to plan" (`applyToPlan`'s writes, in order) in one transaction: all of it is written, or nothing.
+ * The caller takes a snapshot first. A planned entry with an id of its own (`scenario:<id>:<change>:<ym>`) is written
+ * under it, and one already live under that id is left as it is, so applying twice, or on two devices, makes one entry.
+ */
+export function applyPlanWrites(db: MasterpieceDB, writes: PlanWrite[]): Promise<void> {
+  const tables = [db.budgetSettings, db.budgetMonths, db.budgetRecurring, db.budgetDebts, db.budgetEntries, db.settings];
+  return guardWrite(() =>
+    db.transaction('rw', tables, async () => {
+      for (const w of writes) {
+        if (w.table === 'budgetSettings') {
+          await updateBudgetRecord(db, 'budgetSettings', w.id, w.patch);
+        } else if (w.table === 'budgetMonths') {
+          if (w.op === 'create') await createBudgetRecord(db, 'budgetMonths', w.fields);
+          else await updateBudgetRecord(db, 'budgetMonths', w.id, { potTargets: w.patch.potTargets, categoryTargets: w.patch.categoryTargets });
+        } else if (w.table === 'budgetRecurring') {
+          if (w.op === 'create') await createBudgetRecord(db, 'budgetRecurring', w.fields);
+          else if (w.op === 'update') await updateBudgetRecord(db, 'budgetRecurring', w.id, w.patch);
+          else await deleteBudgetRecord(db, 'budgetRecurring', w.id);
+        } else if (w.table === 'budgetDebts') {
+          await updateBudgetRecord(db, 'budgetDebts', w.id, w.patch);
+        } else {
+          assertEntry(w.fields);
+          if (w.id === undefined) {
+            await createBudgetRecord(db, 'budgetEntries', w.fields);
+            continue;
+          }
+          const held = await db.budgetEntries.get(w.id);
+          if (held && !held.deleted) continue;
+          await createRecord<BudgetEntry>(db, 'budgetEntries', w.fields, { scope: 'personal', id: w.id });
+        }
+      }
+    }),
+  );
 }

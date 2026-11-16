@@ -3,6 +3,7 @@ import { useAppState } from '../../../app/AppState';
 import { POTS } from '../../../budget/catalog';
 import { averageMonthlyNeeds } from '../../../budget/goals';
 import { formatMoney } from '../../../budget/money';
+import { yearlySpending } from '../../../budget/yearlySpending';
 import { updateBudgetSettings } from '../../../db/budget';
 import type { Assumptions, BudgetSettings, Cents, ForecastMethod, PotId } from '../../../domain/types';
 import { useCurrentYm } from './Frame';
@@ -30,6 +31,7 @@ export function PlanAssumptions({ data }: { data: PlanData }) {
   const [withdrawal, setWithdrawal] = useState(rateText(a.withdrawalRatePct));
   const [inflation, setInflation] = useState(rateText(a.inflationPct));
   const [buffer, setBuffer] = useState(inputText(settings.bufferCents));
+  const [yearly, setYearly] = useState(inputText(a.yearlySpendingCents));
   const [months, setMonths] = useState(String(a.emergencyMonths));
   const [reminder, setReminder] = useState(String(a.fundReminderDays));
   const [horizon, setHorizon] = useState(String(settings.horizon));
@@ -44,13 +46,15 @@ export function PlanAssumptions({ data }: { data: PlanData }) {
   const withdrawalValue = typedRate(withdrawal);
   const inflationValue = typedRate(inflation);
   const bufferValue = typedMoney(buffer);
+  const yearlyValue = typedMoney(yearly);
   const monthsValue = typedWhole(months, 1, 24);
   const reminderValue = typedWhole(reminder, 0, 365);
   const fixedValues = Object.fromEntries(POTS.map((p) => [p.id, typedMoney(fixed[p.id] ?? '')])) as Record<PotId, Cents | undefined | 'invalid'>;
   const fixedOk = POTS.every((p) => methods[p.id] !== 'fixed' || typeof fixedValues[p.id] === 'number');
   const ok = retValue !== 'invalid' && typeof withdrawalValue === 'number' && withdrawalValue > 0 && inflationValue !== 'invalid'
-    && bufferValue !== 'invalid' && typeof monthsValue === 'number' && typeof reminderValue === 'number' && fixedOk;
+    && bufferValue !== 'invalid' && yearlyValue !== 'invalid' && typeof monthsValue === 'number' && typeof reminderValue === 'number' && fixedOk;
   const averageNeeds = averageMonthlyNeeds(data.entries, data.categories, currentYm);
+  const average = yearlySpending({ entries: data.entries, categories: data.categories, assumptions: { ...a, yearlySpendingCents: undefined }, currentYm });
   const edited = <T,>(set: (v: T) => void) => (v: T) => { set(v); setStatus(''); };
 
   const save = () => {
@@ -58,6 +62,7 @@ export function PlanAssumptions({ data }: { data: PlanData }) {
     const assumptions: Assumptions = {
       ...(retValue !== undefined && { yearlyReturnPct: retValue }), withdrawalRatePct: withdrawalValue as number,
       ...(inflationValue !== undefined && { inflationPct: inflationValue }), emergencyMonths: monthsValue as number, fundReminderDays: reminderValue as number,
+      ...(yearlyValue !== undefined && { yearlySpendingCents: yearlyValue }),
     };
     const fixedSpend: Partial<Record<PotId, Cents>> = {};
     for (const p of POTS) if (methods[p.id] === 'fixed') fixedSpend[p.id] = fixedValues[p.id] as Cents;
@@ -78,6 +83,9 @@ export function PlanAssumptions({ data }: { data: PlanData }) {
       <TextField label="Inflation (% a year)" value={inflation} onInput={edited(setInflation)} inputMode="decimal"
         hint="Yearly spending grows smoothly through the year at this rate (the forecast compounds it monthly). Empty until you enter it; 0% is allowed."
         error={inflationValue === 'invalid' ? RATE_ERROR : undefined} />
+      <TextField label="Yearly spending (for the freedom date)" value={yearly} onInput={edited(setYearly)} inputMode="decimal"
+        hint={`Empty: the average Needs + Wants of the last 12 tracked months, × 12 (${average.months === 0 ? 'no month tracked yet' : `${formatMoney(average.amount)} now`}).`}
+        error={yearlyValue === 'invalid' ? AMOUNT_ERROR : undefined} />
       <TextField label="Buffer" value={buffer} onInput={edited(setBuffer)} inputMode="decimal"
         hint={`Warn when free to spend drops below it. Empty: 1 × average monthly Needs (${formatMoney(averageNeeds)} now).`}
         error={bufferValue === 'invalid' ? AMOUNT_ERROR : undefined} />

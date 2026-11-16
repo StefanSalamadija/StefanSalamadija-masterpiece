@@ -277,9 +277,12 @@ describe('applyToPlan: what it writes', () => {
       { kind: 'oneOff', ym: '2027-04', amount: 30000, label: 'Sofa' }]);
     const { writes, summary } = applyToPlan(data(), SETTINGS, s, TODAY);
     expect(writes).toEqual([
-      { op: 'create', table: 'budgetEntries', fields: { kind: 'expense', date: '2027-05-01', amount: 1800000, categoryId: 'cat-other-needs', note: 'Car', status: 'planned', oneOff: true } },
-      { op: 'create', table: 'budgetEntries', fields: { kind: 'income', date: '2027-03-01', amount: 200000, incomeSource: 'other', note: 'Bonus', status: 'planned', oneOff: true } },
-      { op: 'create', table: 'budgetEntries', fields: { kind: 'expense', date: '2027-04-01', amount: 30000, note: 'Sofa', status: 'planned', oneOff: true } },
+      { op: 'create', table: 'budgetEntries', id: `scenario:${s.id}:0:2027-05`,
+        fields: { kind: 'expense', date: '2027-05-01', amount: 1800000, categoryId: 'cat-other-needs', note: 'Car', status: 'planned', oneOff: true } },
+      { op: 'create', table: 'budgetEntries', id: `scenario:${s.id}:1:2027-03`,
+        fields: { kind: 'income', date: '2027-03-01', amount: 200000, incomeSource: 'other', note: 'Bonus', status: 'planned', oneOff: true } },
+      { op: 'create', table: 'budgetEntries', id: `scenario:${s.id}:2:2027-04`,
+        fields: { kind: 'expense', date: '2027-04-01', amount: 30000, note: 'Sofa', status: 'planned', oneOff: true } },
     ]);
     expect(summary).toEqual([
       'Planned purchase in May 2027: Car, €18,000.00',

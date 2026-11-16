@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
+import { goalPlannedMonthly } from '../../../budget/alerts';
 import { POTS } from '../../../budget/catalog';
 import { averageMonthlyNeeds, emergencyOutlook, goalProgress } from '../../../budget/goals';
 import { formatMoney } from '../../../budget/money';
@@ -59,10 +60,7 @@ function GoalRow({ goal, data, onDelete }: { goal: BudgetGoal; data: PlanData; o
   if (editing) return <li class="budget-row"><GoalForm data={data} goal={goal} label={`Edit ${goal.name}`} submit="Save" onDone={() => setEditing(false)} /></li>;
   // What the plan puts towards it each month: its category's target, and the templates paying into that category.
   const plan = effectiveMonth(data.months, currentYm);
-  const planned = goal.categoryId === undefined ? 0 : (plan.categoryTargets[goal.categoryId]?.amount ?? 0)
-    + data.recurring.filter((t) => t.categoryId === goal.categoryId && t.startYm <= currentYm && (t.endYm === undefined || t.endYm >= currentYm))
-      .reduce((sum, t) => sum + t.amount, 0);
-  const p = goalProgress(goal, data.entries, currentYm, planned);
+  const p = goalProgress(goal, data.entries, currentYm, goalPlannedMonthly(goal, plan, data.recurring, currentYm));
   const category = data.categories.find((c) => c.id === goal.categoryId)?.name;
   return (
     <li class="card budget-row">

@@ -24,4 +24,11 @@ describe('budgetMoneyOk', () => {
     expect(budgetMoneyOk({ extraSteps: [{ fromYm: '2026-11', monthly: '5000' }] })).toBe(false);
     expect(budgetMoneyOk({ extraSteps: 5000 })).toBe(false);
   });
+
+  it("checks the settings' own yearly spending is whole cents", () => {
+    expect(budgetMoneyOk({ assumptions: { withdrawalRatePct: 4, yearlySpendingCents: 3000000 } })).toBe(true);
+    expect(budgetMoneyOk({ assumptions: { withdrawalRatePct: 4 } })).toBe(true);
+    expect(budgetMoneyOk({ assumptions: { withdrawalRatePct: 4, yearlySpendingCents: 30000.5 } })).toBe(false);
+    expect(budgetMoneyOk({ assumptions: 4 })).toBe(false);
+  });
 });

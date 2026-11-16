@@ -68,6 +68,62 @@
 .budget-debt-free { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .budget-edit h3 { margin: 0; font-size: 16px; }
 
+/* Charts: hand-made SVG in the theme's colours; series are told apart by dash as well as colour. */
+.chart { margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.chart-name { margin: 0 0 8px; font-weight: 600; overflow-wrap: anywhere; }
+.chart-svg { display: block; width: 100%; height: auto; max-width: 640px; }
+.chart-label { font-size: 9px; fill: var(--muted); font-family: var(--font-sans); }
+.chart-grid { stroke: var(--line); stroke-width: 0.5; }
+.chart-zero { stroke: var(--text); stroke-width: 0.8; }
+.chart-shade { fill: var(--muted); opacity: 0.14; }
+.chart-line { fill: none; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.series-0 { stroke: var(--accent); }
+.series-1 { stroke: var(--text); stroke-dasharray: 5 3; }
+.series-2 { stroke: var(--muted); stroke-dasharray: 1.5 2.5; }
+.series-3 { stroke: var(--red); stroke-dasharray: 7 2 1.5 2; }
+.series-4 { stroke: var(--amber); stroke-dasharray: 3 3; }
+.chart-bar { stroke-width: 1; }
+.bar-0 { fill: var(--bg); stroke: var(--muted); }
+.bar-1 { fill: var(--accent); stroke: var(--accent); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.chart-legend svg { flex: none; }
+.chart-toggle { margin: 8px 0 0; }
+.rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px 8px; }
+.ring { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; min-width: 0; }
+.ring svg { width: 72px; height: 72px; }
+.ring-track { fill: none; stroke: var(--line); stroke-width: 8; }
+.ring-value { fill: none; stroke: var(--accent); stroke-width: 8; }
+.ring-over { stroke: var(--red); }
+.ring-pct { font-size: 13px; font-weight: 600; fill: var(--text); font-family: var(--font-sans); }
+.ring-label { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.ring-detail { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+:root[data-theme='contrast'] .chart-line { stroke-width: 2.4; }
+:root[data-theme='contrast'] .chart-shade { opacity: 0.22; }
+:root[data-theme='contrast'] .chart, :root[data-theme='contrast'] .chart-bar { border-width: 2px; stroke-width: 1.5; }
+
+/* Tables of figures: a wide one scrolls on its own, never the page. */
+.table-scroll { max-width: 100%; overflow-x: auto; margin: 0 0 12px; }
+.chart-table, .budget-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.chart-table caption, .budget-table caption { text-align: left; font-weight: 600; padding: 0 0 6px; }
+.chart-table th, .chart-table td, .budget-table th, .budget-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.chart-table th:first-child, .budget-table th:first-child, .budget-table td:first-child { text-align: left; }
+.budget-table tr[data-home] th, .budget-table tr[data-home] td { background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.compare-table th, .compare-table td { white-space: normal; }
+.compare-table td, .compare-table thead th { min-width: 6.5em; }
+.budget-lines { margin: 0 0 12px; padding: 0 0 0 18px; line-height: 1.6; overflow-wrap: anywhere; }
+.budget-line { display: inline-flex; align-items: center; min-height: var(--target); font-weight: 600; overflow-wrap: anywhere; }
+.budget-note { margin: 0 0 12px; overflow-wrap: anywhere; }
+.scenario-change { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
 @media print {
   .budget-toast { display: none; }
+  .chart { border-color: #000; background: #fff; break-inside: avoid; }
+  .chart-label, .ring-pct { fill: #000; }
+  .chart-line, .chart-zero, .ring-value, .ring-over { stroke: #000; }
+  .chart-grid, .ring-track { stroke: #999; }
+  .chart-shade { fill: #000; opacity: 0.12; }
+  .bar-0 { fill: #fff; stroke: #000; }
+  .bar-1 { fill: #000; stroke: #000; }
+  .chart-legend, .ring-detail { color: #000; }
 }

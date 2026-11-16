@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CATEGORIES } from '../budget/catalog';
 import type { BudgetCategory, BudgetEntry, BudgetSettings } from '../domain/types';
 import {
-  addEntry, confirmSetAside, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, generatePlannedEntries, getBudgetSettings,
+  addEntry, applyPlanWrites, confirmSetAside, createBudgetRecord, deleteBudgetRecord, ensureBudgetSetup, entriesInMonth, generatePlannedEntries, getBudgetSettings,
   getMonth, listBudget, listCategories, plannedEntryId, saveMonthNotes, setAsideId, undoEntry, updateBudgetRecord, updateBudgetSettings, updateEntry,
 } from './budget';
 import { computeMerge, resolveMerge } from '../domain/merge';
@@ -350,6 +350,40 @@ describe('planned items on two devices', () => {
     await deleteBudgetRecord(db, 'budgetFundMoves', setAsideId(fund.id, '2026-10'));
     await confirmSetAside(db, fund.id, '2026-10', 11000);
     expect(await listBudget(db, 'budgetFundMoves')).toMatchObject([{ amount: 11000, deleted: false }]);
+    db.close();
+  });
+});
+
+describe('applyPlanWrites', () => {
+  it('writes the settings, a template and the planned entries, each scenario entry once however often it is applied', async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    const tpl = await createBudgetRecord(db, 'budgetRecurring', { name: 'ETF', amount: 100000, day: 5, startYm: '2026-10' });
+    const settings = await getBudgetSettings(db);
+    const writes = [
+      { op: 'update' as const, table: 'budgetSettings' as const, id: settings.id, patch: { assumptions: { ...settings.assumptions, yearlyReturnPct: 5 } } },
+      { op: 'update' as const, table: 'budgetRecurring' as const, id: tpl.id, patch: { endYm: '2027-04' } },
+      { op: 'create' as const, table: 'budgetRecurring' as const, fields: { name: 'ETF', amount: 50000, day: 5, startYm: '2027-05' } },
+      { op: 'create' as const, table: 'budgetEntries' as const, id: 'scenario:sc-1:0:2027-05',
+        fields: { kind: 'expense' as const, date: '2027-05-01', amount: 1800000, note: 'Car', status: 'planned' as const, oneOff: true } },
+    ];
+    await applyPlanWrites(db, writes);
+    await applyPlanWrites(db, writes.slice(3));
+    expect((await getBudgetSettings(db)).assumptions.yearlyReturnPct).toBe(5);
+    expect((await listBudget(db, 'budgetRecurring')).map((t) => [t.amount, t.startYm, t.endYm]).sort()).toEqual([[100000, '2026-10', '2027-04'], [50000, '2027-05', undefined]]);
+    const entries = await listBudget(db, 'budgetEntries');
+    expect(entries.map((e) => [e.id, e.amount, e.status, e.scope])).toEqual([['scenario:sc-1:0:2027-05', 1800000, 'planned', 'personal']]);
+    db.close();
+  });
+
+  it('writes nothing when one write is refused', async () => {
+    const db = freshDb();
+    await ensureBudgetSetup(db);
+    await expect(applyPlanWrites(db, [
+      { op: 'create', table: 'budgetRecurring', fields: { name: 'ETF', amount: 50000, day: 5, startYm: '2027-05' } },
+      { op: 'create', table: 'budgetEntries', id: 'scenario:x', fields: { kind: 'expense', date: '2027-05-01', amount: 0.5, status: 'planned' } },
+    ])).rejects.toThrow();
+    expect(await listBudget(db, 'budgetRecurring')).toEqual([]);
     db.close();
   });
 });

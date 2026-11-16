@@ -41,14 +41,15 @@ function isPlanEdit(value: unknown, valid: (v: unknown) => boolean): boolean {
 
 /**
  * The money fields of a budget record (or of a patch to one) that are there are whole cents, the nested ones too:
- * a month's pot and category targets, the settings' favourites, fixed spending and salaries, a scenario's changes and a
+ * a month's pot and category targets, the settings' favourites, fixed spending, salaries and yearly spending, a scenario's changes and a
  * debt's extra steps.
  * A nested field that is there must also have its shape (an object of targets, a list of favourites), since the sums
  * read it without checking again. Missing fields are not this function's business.
  */
 export function budgetMoneyOk(fields: Record<string, unknown>): boolean {
   if (!MONEY_FIELDS.every((key) => optionalCents(fields, key))) return false;
-  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes, extraSteps } = fields;
+  const { plannedIncome, potTargets, categoryTargets, favourites, fixedSpend, rotation, changes, extraSteps, assumptions } = fields;
+  if (assumptions !== undefined && !(isObject(assumptions) && optionalCents(assumptions, 'yearlySpendingCents'))) return false;
   if (extraSteps !== undefined && !(Array.isArray(extraSteps) && extraSteps.every((s) => isObject(s) && isCents(s.monthly)))) return false;
   if (plannedIncome !== undefined && !isPlanEdit(plannedIncome, isCents)) return false;
   if (potTargets !== undefined

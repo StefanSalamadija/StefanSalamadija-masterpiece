@@ -36,7 +36,7 @@ import { useAppLock } from './useAppLock';
 
 type BudgetScreens = typeof import('../ui/screens/budget');
 /** A Budget screen: every one is in the budget chunk, loaded on demand, so the budget's code stays out of the main chunk. */
-const budget = (name: keyof BudgetScreens) => lazyScreen(() => import('../ui/screens/budget').then((m) => m[name]));
+const budget = (name: Exclude<keyof BudgetScreens, 'watchBudgetAlerts'>) => lazyScreen(() => import('../ui/screens/budget').then((m) => m[name]));
 
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {

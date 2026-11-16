@@ -19,16 +19,17 @@ import { padText } from './quickAddView';
 /* What the Plan screens share: the budget's data, the typed amounts and rates, a save that runs once, the frame of a
  * Plan section, and the "This month only" / "From this month on" dialog. */
 
-/** Every budget table the Plan screens read, kept up to date. Deleted records are left out. */
+/** Every budget table, kept up to date (the scenarios in the order they were made). Deleted records are left out. */
 export function usePlanData() {
   const { db } = useAppState();
   return useLive(async () => {
-    const [categories, months, recurring, funds, fundMoves, debts, goals, assets, corrections, entries, settings] = await Promise.all([
+    const [categories, months, recurring, funds, fundMoves, debts, goals, assets, corrections, entries, scenarios, settings] = await Promise.all([
       listCategories(db), listBudget(db, 'budgetMonths'), listBudget(db, 'budgetRecurring'), listBudget(db, 'budgetFunds'),
       listBudget(db, 'budgetFundMoves'), listBudget(db, 'budgetDebts'), listBudget(db, 'budgetGoals'), listBudget(db, 'budgetAssets'),
-      listBudget(db, 'budgetCorrections'), listBudget(db, 'budgetEntries'), getBudgetSettings(db),
+      listBudget(db, 'budgetCorrections'), listBudget(db, 'budgetEntries'), listBudget(db, 'budgetScenarios'), getBudgetSettings(db),
     ]);
-    return { categories, months, recurring, funds, fundMoves, debts, goals, assets, corrections, entries, settings };
+    scenarios.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1));
+    return { categories, months, recurring, funds, fundMoves, debts, goals, assets, corrections, entries, scenarios, settings };
   }, [db]);
 }
 
@@ -39,7 +40,7 @@ export function budgetDataOf(data: PlanData): BudgetData {
   return {
     budgetCategories: data.categories, budgetEntries: data.entries, budgetMonths: data.months, budgetRecurring: data.recurring, budgetFunds: data.funds,
     budgetFundMoves: data.fundMoves, budgetDebts: data.debts, budgetGoals: data.goals, budgetAssets: data.assets, budgetCorrections: data.corrections,
-    budgetScenarios: [],
+    budgetScenarios: data.scenarios,
   };
 }
 
