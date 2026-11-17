@@ -1,6 +1,6 @@
 # Masterpiece piece 7: phone redesign
 
-Status: draft for the user's review. Mockups: the canvas "Masterpiece phone redesign" (four screens: Today Home and Ship hub, each in Day and Night red), approved by the user as drawn.
+Status: approved by the user (2026-11-17). Mockups: the canvas "Masterpiece phone redesign" (four screens: Today Home and Ship hub, each in Day and Night red), approved by the user as drawn.
 
 ## 1. Intent
 
