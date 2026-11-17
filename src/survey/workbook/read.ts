@@ -227,17 +227,27 @@ function readParticulars(initial: SheetView, final: SheetView, warnings: string[
       warnings.push(`The FINAL sheet has its own ${name} (${value}), which differs from INITIAL's (${own}). The app uses ${own} for both, and writes it on FINAL when it fills the workbook in.`);
     }
   }
+  const finalKeel = keelPlates(final);
+  if (finalKeel && finalKeel.some((v) => v !== ship.keelPlateCorr)) {
+    warnings.push(`The FINAL sheet has its own keel plate corrections (${finalKeel.join(', ')}), which differ from INITIAL's (${ship.keelPlateCorr}). The app uses ${ship.keelPlateCorr} for all three marks, and writes it on FINAL when it fills the workbook in.`);
+  }
   return ship;
+}
+
+/** A sheet's keel plate corrections under the forward, midships and aft marks (0 if blank), or none without the label. */
+function keelPlates(sheet: SheetView): number[] | undefined {
+  const label = sheet.find(KEEL_LABELS);
+  if (!label) return undefined;
+  return draftColumns(sheet).map((span) => {
+    const cell = span && sheet.slotIn(label.r, span.from, span.to);
+    return (cell && sheet.number(cell)) ?? 0;
+  });
 }
 
 /** The forward keel-plate correction (0 if blank), with a warning if the midships or aft one differs. */
 function readKeelPlate(initial: SheetView, warnings: string[]): number {
-  const label = initial.find(KEEL_LABELS);
-  if (!label) return 0;
-  const values = draftColumns(initial).map((span) => {
-    const cell = span && initial.slotIn(label.r, span.from, span.to);
-    return (cell && initial.number(cell)) ?? 0;
-  });
+  const values = keelPlates(initial);
+  if (!values) return 0;
   if (values.some((v) => v !== values[0])) {
     warnings.push(`The INITIAL sheet's keel plate corrections differ (${values.join(', ')}). The app uses one for all three marks: ${values[0]}.`);
   }
@@ -448,6 +458,12 @@ function readCells(sheet: SheetView): Partial<Record<CellKey, string>> {
     for (const [key, labels] of [['finalOwnDA', ['da=']], ['finalOwnLBP', ['lbp=']]] as const) {
       const label = sheet.find(labels);
       if (label) put(key, sheet.next(label, 'value'));
+    }
+    // FINAL's own typed keel plate corrections (I2): no formula on FINAL reads INITIAL's, so the fill writes these too.
+    const keel = sheet.find(KEEL_LABELS);
+    if (keel) {
+      const keys = ['finalOwnKeelF', 'finalOwnKeelM', 'finalOwnKeelA'] as const;
+      draftColumns(sheet).forEach((span, i) => put(keys[i], span && sheet.slotIn(keel.r, span.from, span.to)));
     }
   }
   return cells;

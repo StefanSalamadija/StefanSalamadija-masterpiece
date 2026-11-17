@@ -56,7 +56,7 @@ export function surveyFileName(shipName: string, date: string, kind: string): st
 
 const NUMBER_KEYS = new Set<CellKey>([
   'fP', 'fS', 'mP', 'mS', 'aP', 'aS', 'density', 'ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other',
-  'comparedQty', 'blQty', 'windBft', 'swell', 'finalOwnDA', 'finalOwnLBP',
+  'comparedQty', 'blQty', 'windBft', 'swell', 'finalOwnDA', 'finalOwnLBP', 'finalOwnKeelF', 'finalOwnKeelM', 'finalOwnKeelA',
   'shipLbp', 'shipTrimLbp', 'shipDF', 'shipDM', 'shipDA', 'shipBeam', 'shipLightShip', 'shipKeelF', 'shipKeelM', 'shipKeelA',
 ]);
 const kindOf = (key: CellKey): FieldKind =>
@@ -134,6 +134,8 @@ function valuesFor(sheet: SurveySheet, survey: DraftSurvey, ship: DraftSurveyShi
     values.comparedQty = numberText(survey.comparedQty);
     values.finalOwnDA = numberText(ship.dA);
     values.finalOwnLBP = numberText(ship.lbp);
+    // FINAL's own keel plate corrections (I2): its corrected drafts read these, not INITIAL's.
+    values.finalOwnKeelF = values.finalOwnKeelM = values.finalOwnKeelA = numberText(ship.keelPlateCorr);
   }
   return values;
 }

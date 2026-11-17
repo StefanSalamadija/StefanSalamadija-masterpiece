@@ -207,6 +207,9 @@ describe('fillSurveyWorkbook: the ship’s particulars (I1)', () => {
     // FINAL's own dA and LBP agree with INITIAL's.
     expect(cell(pkg, 'FINAL', cellMap.FINAL.finalOwnLBP!)?.text).toBe('151.25');
     expect(cell(pkg, 'FINAL', cellMap.FINAL.finalOwnDA!)?.text).toBe('3.2');
+    // FINAL's own typed keel plate corrections too (I2): no formula on FINAL refers to INITIAL's.
+    expect(['I16', 'Q16', 'Z16'].map((ref) => cell(pkg, 'FINAL', ref)?.text)).toEqual(['0.012', '0.012', '0.012']);
+    expect([cellMap.FINAL.finalOwnKeelF, cellMap.FINAL.finalOwnKeelM, cellMap.FINAL.finalOwnKeelA]).toEqual(['I16', 'Q16', 'Z16']);
   });
 
   it('refuses a cell map from before the particulars were mapped, and asks for a re-import', () => {

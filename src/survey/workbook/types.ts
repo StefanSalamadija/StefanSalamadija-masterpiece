@@ -4,7 +4,7 @@ export type SurveySheet = 'INITIAL' | 'FINAL';
 /**
  * A survey input that has a cell in the company workbook: the text and number fields of `DraftSurvey`, its six drafts
  * (`fP` … `aS`) and its deductibles (`ballast` … `other`) by their own keys, and on FINAL the sheet's own dA and LBP
- * (`finalOwnDA`, `finalOwnLBP`), which the fill checks or writes there.
+ * (`finalOwnDA`, `finalOwnLBP`) and keel plate corrections (`finalOwnKeelF/M/A`), which the fill writes there.
  *
  * Two more are in the INITIAL sheet's title line, which FINAL and the DS Report read: `operation`, the cell under
  * "DRAFT SURVEY CALCULATION" that holds "Loading of" or "Discharging of", and `cargoTitle`, the cargo written after it
@@ -16,7 +16,7 @@ export type CellKey =
   | 'fP' | 'fS' | 'mP' | 'mS' | 'aP' | 'aS' | 'density'
   | 'ballast' | 'freshWater' | 'vlsfo' | 'lsmgo' | 'lubOil' | 'other'
   | 'comparedQty' | 'blQty' | 'remarks' | 'surveyor' | 'chiefOfficer'
-  | 'finalOwnDA' | 'finalOwnLBP'
+  | 'finalOwnDA' | 'finalOwnLBP' | 'finalOwnKeelF' | 'finalOwnKeelM' | 'finalOwnKeelA'
   | ShipCellKey;
 
 /**

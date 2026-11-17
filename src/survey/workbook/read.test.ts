@@ -112,6 +112,18 @@ describe('readSurveyWorkbook: the ship data and look-up ranges', () => {
     expect(warnings.join(' ')).toMatch(/FINAL.*dA/);
   });
 
+  it('warns when FINAL’s own keel plate corrections differ from INITIAL’s', () => {
+    const { ship, warnings } = read({ edit: (book) => { book.Sheets.FINAL.Q16 = { t: 'n', v: 0.02 }; } });
+    expect(ship.keelPlateCorr).toBe(0);
+    expect(warnings).toEqual([expect.stringMatching(/FINAL sheet has its own keel plate corrections \(0, 0\.02, 0\).*INITIAL's \(0\).*writes it on FINAL/)]);
+  });
+
+  it('maps FINAL’s keel plate cells only when they are typed', () => {
+    const { cellMap } = read({ edit: (book) => { book.Sheets.FINAL.Q16 = { t: 'n', v: 0, f: 'INITIAL!Q16' }; } });
+    expect(cellMap.FINAL).toMatchObject({ finalOwnKeelF: 'I16', finalOwnKeelA: 'Z16' });
+    expect(cellMap.FINAL.finalOwnKeelM).toBeUndefined();
+  });
+
   it('follows the look-up start rows written in the formulas', () => {
     const edit = (book: XLSX.WorkBook) => {
       for (const cell of Object.values(book.Sheets.FINAL)) {
@@ -147,6 +159,7 @@ describe('readSurveyWorkbook: the input cells', () => {
     expect(cellMap.FINAL).toEqual({
       terminal: 'Z6', date: 'Z7', blQty: 'P8', timeFrom: 'Z8', timeTill: 'AC8', windBft: 'R9', swell: 'Z9', ...drafts, density: 'Y29',
       ...deductibles, comparedQty: 'Y37', remarks: 'P41', surveyor: 'E47', chiefOfficer: 'S47', finalOwnDA: 'Z11', finalOwnLBP: 'E11',
+      finalOwnKeelF: 'I16', finalOwnKeelM: 'Q16', finalOwnKeelA: 'Z16',
     });
     expect(missingCells(cellMap)).toEqual([]);
     expect(warnings).toEqual([]);
