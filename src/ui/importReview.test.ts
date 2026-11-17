@@ -150,6 +150,32 @@ describe('recordTitle', () => {
   });
 });
 
+describe('the draft survey records in the review', () => {
+  it('names each by what it is', () => {
+    expect(recordTitle('draftSurveyShips', rec({ shipId: 's1', lbp: 100 }))).toBe('Draft survey ship data');
+    expect(recordTitle('hydroTables', rec({ shipId: 's1', rows: [{}, {}] }))).toBe('Hydrostatic table: 2 rows');
+    expect(recordTitle('hydroTables', rec({ shipId: 's1', rows: 'x' }))).toBe('Hydrostatic table: 0 rows');
+    expect(recordTitle('draftSurveys', rec({ shipId: 's1', kind: 'initial', port: 'Port A', date: '2026-11-15' }))).toBe('Initial draft survey: Port A — 2026-11-15');
+    expect(recordTitle('draftSurveys', rec({ shipId: 's1', kind: 'bogus' }))).toBe('Draft survey: (no port) — (no date)');
+    expect(recordTitle('surveyTemplates', rec({ shipId: 's1', fileName: 'survey.xlsx' }))).toBe('Draft survey workbook: survey.xlsx');
+  });
+
+  it('shows a survey change by its words, a table by its size and a workbook by its file, not by its cells', () => {
+    expect(changedFields('draftSurveys', rec({ shipId: 's1', kind: 'final', initialId: 'a', density: 1.025 }), rec({ shipId: 's1', kind: 'final', initialId: 'b', density: 1.02 })))
+      .toEqual([{ label: 'Density', local: '1.025', incoming: '1.02' }]);
+    expect(changedFields('hydroTables', rec({ shipId: 's1', rows: [{ draft: 2 }] }), rec({ shipId: 's1', rows: [{ draft: 2 }, { draft: 2.1 }] })))
+      .toEqual([{ label: 'Hydrostatic table', local: '1 row', incoming: '2 rows' }]);
+    expect(changedFields('surveyTemplates', rec({ shipId: 's1', fileName: 'a.xlsx', fileBase64: 'AAAA', cellMap: { INITIAL: {}, FINAL: {} } }),
+      rec({ shipId: 's1', fileName: 'a.xlsx', fileBase64: 'AAAAAAAA', cellMap: { INITIAL: { port: 'C5' }, FINAL: {} } })))
+      .toEqual([{ label: 'File', local: 'a.xlsx (3 bytes)', incoming: 'a.xlsx (6 bytes)' }]);
+  });
+
+  it('names the LCF confirmation in words, not by its key', () => {
+    const [change] = changedFields('draftSurveyShips', rec({ shipId: 's1', lbp: 100 }), rec({ shipId: 's1', lbp: 100, lcfConfirmed: true }));
+    expect(change?.label).toBe('LCF checked against the stability booklet');
+  });
+});
+
 describe('changedFields', () => {
   it('lists the fields that differ by the words of the crew form, and no others', () => {
     expect(changedFields('crew', crew({ nationality: 'Croatian' }), crew({ nationality: 'Montenegrin', updatedAt: '2026-02-01T00:00:00.000Z' })))
@@ -379,9 +405,9 @@ describe('conflictViews', () => {
 
   it('works on a plan the merge made', () => {
     const local: Tables = { ships: [], crew: [crew({ nationality: 'Croatian', updatedAt: '2026-03-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
-    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [] };
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [] };
     const incoming: Tables = { ships: [], crew: [crew({ nationality: 'Montenegrin', updatedAt: '2026-04-01T00:00:00.000Z' })], voyages: [], certificates: [], clockChanges: [], crewDocuments: [], formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
-    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [] };
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [] };
     const merged = computeMerge(local, incoming, undefined);
     expect(conflictViews(merged)).toHaveLength(1);
     expect(conflictViews(merged)[0].changes).toEqual([{ label: 'Nationality', local: 'Croatian', incoming: 'Montenegrin' }]);
@@ -391,7 +417,7 @@ describe('conflictViews', () => {
 describe("a merge of the contract length, the planned relief, the ship's limit and its crew list columns", () => {
   const tables = (extra: Partial<Tables>): Tables => ({ ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
     formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
-    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], ...extra,
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [], ...extra,
   });
   const decide = (plan: MergePlan, choice: 'local' | 'incoming') =>
     resolveMerge(plan, { conflicts: Object.fromEntries(plan.items.map((i) => [conflictKey(i), choice])), applyDeletions: false }, '2026-10-25T12:00:00.000Z', 'device-c');

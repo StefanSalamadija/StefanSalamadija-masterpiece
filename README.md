@@ -68,6 +68,22 @@ Home → **Budget** (or **+ Expense**, or long-press the app icon → *Add expen
 - **Scenarios:** compare "what if" plans side by side; **Apply to plan** makes one your real plan.
 - **Excel:** import your existing budget workbook once (Budget → Import), and export months or years to Excel.
 
+## Draft survey
+
+Ship → **Draft survey**: draft surveys at the loading and discharging ports, offline, worked exactly as the company's draft-survey workbook works them (its own look-ups and approximations included), so the numbers match the workbook.
+
+1. **Import the ship's data once.** **Ship data** → **Import ship data from workbook**, pick the company workbook (`.xlsx`) and check what was found: the particulars, the hydrostatic table and the look-up ranges. **Save ship data.** The particulars can be edited there later: the app works every survey with them, and the export writes them into the workbook's INITIAL sheet (and FINAL's own dA and LBP), so Excel works with the same ones.
+2. **Survey.** **New initial survey** (or **New constant check**), then a **New final** or a **New interim** from it. Type the six draft readings, the density and the deductibles in tonnes; the result and every calculation line show as you type. Nothing is shown while an input is missing or outside the table's range.
+3. **Report and workbook.** The report in the workbook's DS Report layout: **Print / Save PDF**. **Export company workbook** gives the company's own workbook with this survey's inputs in it (an initial survey or constant check on INITIAL, a final or interim on FINAL, with its initial survey); Excel recalculates it when it is opened. Only the input cells and the ship's particulars change. A workbook imported before the particulars were written asks you to import it again first. If the stored workbook no longer fits, the export is refused with the reason, and the numbers and the report still work.
+
+Good to know:
+
+- **Difference.** Cargo is always shown positive, as loaded or discharged. The difference is cargo − compared quantity (B/L or shore figure), in tonnes and %. So it differs from the workbook's own difference cell (FINAL Y38, compared quantity − change in nett displacement): when loading it has the opposite sign, and when discharging the workbook's cell does not give the difference at all. The exported file keeps the workbook's own formula.
+- **Interims** use the FINAL sheet's formulas against their initial survey. The workbook's "FINAL (2)" sheet is never used or written.
+- **LCF source: confirm it.** The workbook's "LCF from midship" and "LCB Tabled" columns look swapped. The app uses the workbook's column by default, so results match the company sheet, and shows the other choice as a check line. Check the LCF against the ship's stability booklet, then set **LCF source** under **Ship data** and tick **Checked against the stability booklet**.
+- **Still open:** how Excel's VLOOKUP compares a worked-out draft with the table (whether it sees 0.7 + 0.1 as 0.8) waits for a one-cell test in Excel. Until then the app compares at Excel's 15 significant digits; the two rules differ only when a draft falls a hair below a table row.
+- The ship's data and surveys belong to the ship: they are in full backups and handovers, and stay on your devices otherwise.
+
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.

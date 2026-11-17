@@ -48,6 +48,7 @@ const SHIP_LINKS = [
   { label: 'Certificates', href: '#/ship/certificates' },
   { label: 'Voyage', href: '#/ship/voyage' },
   { label: "Ship's time", href: '#/ship/time' },
+  { label: 'Draft survey', href: '#/ship/survey' },
 ];
 
 /** The bottom bar: Home, Ship, Forms, Profiles and Settings. */

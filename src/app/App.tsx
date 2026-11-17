@@ -40,6 +40,10 @@ type BudgetScreens = typeof import('../ui/screens/budget');
 /** A Budget screen: every one is in the budget chunk, loaded on demand, so the budget's code stays out of the main chunk. */
 const budget = (name: Exclude<keyof BudgetScreens, 'watchBudgetAlerts'>) => lazyScreen(() => import('../ui/screens/budget').then((m) => m[name]));
 
+type SurveyScreens = typeof import('../ui/screens/survey');
+/** A draft survey screen: all are in the survey chunk, loaded on demand. */
+const survey = (name: keyof SurveyScreens) => lazyScreen(() => import('../ui/screens/survey').then((m) => m[name]));
+
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
@@ -58,6 +62,11 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/expiring': Expiring,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
+  '/ship/survey': survey('Surveys'),
+  '/ship/survey/data': survey('ShipData'),
+  '/ship/survey/:id': survey('SurveyForm'),
+  // The report is drawn by the survey screen (it reads the path), so it adds no screen of its own to the main chunk.
+  '/ship/survey/:id/report': survey('SurveyForm'),
   '/forms': Forms,
   '/forms/:id/setup': FormSetup,
   // Loaded on demand, so that the fill screen and its helpers stay out of the main chunk.

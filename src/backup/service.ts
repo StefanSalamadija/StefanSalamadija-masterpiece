@@ -9,8 +9,9 @@ import { computeMerge, resolveMerge } from '../domain/merge';
 import type { MergeDecisions, MergePlan } from '../domain/merge';
 import { shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import { BUDGET_TABLES, TABLE_NAMES } from '../domain/types';
-import type { BudgetTableName, ClockChange, ShipProfile, SyncRecord, TableName, Tables } from '../domain/types';
+import type { BudgetTableName, ClockChange, ShipProfile, SurveyTableName, SyncRecord, TableName, Tables } from '../domain/types';
 import { budgetMoneyOk, entryLinksOk, isCents } from '../budget/validate';
+import { hydroRowsOk, isFiniteNumber, isOptionalFinite } from '../domain/survey';
 import { isBase64 } from './crypto';
 import {
   BackupTooLargeError, DamagedFileError, MAX_BACKUP_FILE_BYTES, StaleReviewError, openBackup, sealBackup, validatePassword,
@@ -183,6 +184,49 @@ function hasBudgetShape(name: BudgetTableName, r: Record<string, unknown>): bool
   }
 }
 
+const LCF_SOURCES: ReadonlySet<unknown> = new Set(['workbook', 'tabled']);
+const SURVEY_KINDS: ReadonlySet<unknown> = new Set(['initial', 'interim', 'final', 'constant']);
+const SURVEY_OPERATIONS: ReadonlySet<unknown> = new Set(['loading', 'discharging']);
+const DRAFT_KEYS = ['fP', 'fS', 'mP', 'mS', 'aP', 'aS'] as const;
+const DEDUCTIBLE_KEYS = ['ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other'] as const;
+
+/** An object whose `keys` are each a finite number or absent: a survey's drafts or deductibles. */
+function optionalFiguresOk(value: unknown, keys: readonly string[]): boolean {
+  return isObject(value) && keys.every((key) => isOptionalFinite(value[key]));
+}
+
+/** A survey sheet's look-up ranges: the start draft of each, a finite number. */
+function sheetRangesOk(value: unknown): boolean {
+  return isObject(value) && isFiniteNumber(value.dispTpcMtcFrom) && isFiniteNumber(value.lcfFrom);
+}
+
+/** A template's cell map: an INITIAL and a FINAL sheet, each mapping inputs to cell addresses. */
+function cellMapOk(value: unknown): boolean {
+  return isObject(value) && [value.INITIAL, value.FINAL].every((sheet) => isObject(sheet) && Object.values(sheet).every((cell) => typeof cell === 'string'));
+}
+
+/**
+ * The fields of each draft survey table that the survey sums read without checking again: every figure a finite number,
+ * the hydrostatic rows in strictly increasing draft order, and the kinds, operations and LCF sources the app knows.
+ */
+function hasSurveyFields(name: SurveyTableName, r: Record<string, unknown>): boolean {
+  switch (name) {
+    case 'draftSurveyShips':
+      return ['lbp', 'dF', 'dM', 'dA', 'beam', 'keelPlateCorr', 'lightShip'].every((key) => isFiniteNumber(r[key]))
+        && ['summerDraught', 'summerDwt', 'depth', 'gt'].every((key) => isOptionalFinite(r[key]))
+        && LCF_SOURCES.has(r.lcfSource) && isObject(r.ranges) && sheetRangesOk(r.ranges.initial) && sheetRangesOk(r.ranges.final)
+        && isOptionalText(r.sourceName) && isOptionalText(r.importedAt)
+        && (r.lcfConfirmed === undefined || typeof r.lcfConfirmed === 'boolean');
+    case 'hydroTables': return hydroRowsOk(r.rows);
+    case 'draftSurveys':
+      return SURVEY_KINDS.has(r.kind) && SURVEY_OPERATIONS.has(r.operation) && isOptionalText(r.initialId)
+        && ['port', 'terminal', 'cargo', 'holds', 'date', 'timeFrom', 'timeTill', 'remarks', 'surveyor', 'chiefOfficer'].every((key) => isOptionalText(r[key]))
+        && ['windBft', 'swell', 'density', 'comparedQty', 'blQty'].every((key) => isOptionalFinite(r[key]))
+        && optionalFiguresOk(r.drafts, DRAFT_KEYS) && optionalFiguresOk(r.deductibles, DEDUCTIBLE_KEYS);
+    case 'surveyTemplates': return typeof r.fileName === 'string' && isBase64Text(r.fileBase64) && cellMapOk(r.cellMap);
+  }
+}
+
 /**
  * What a record of `name` needs beyond what every record needs: what it belongs to, and what the app reads from it
  * without checking again. Every table but the ships and the personal ones (the libraries and the budget) belongs to a ship by its `shipId`.
@@ -209,6 +253,8 @@ function hasOwnFields(name: TableName, r: Record<string, unknown>): boolean {
     case 'formLastValues': return typeof r.code === 'string' && isObject(r.values) && isOptionalText(r.revision);
     // A photo is found by its draft.
     case 'formPhotos': return typeof r.draftId === 'string' && isBase64Text(r.jpegBase64);
+    // The draft survey's tables (see `hasSurveyFields`).
+    case 'draftSurveyShips': case 'hydroTables': case 'draftSurveys': case 'surveyTemplates': return hasSurveyFields(name, r);
     default: return true;
   }
 }

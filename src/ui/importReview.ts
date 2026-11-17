@@ -135,6 +135,19 @@ const LABELS: Record<TableName, Record<string, string>> = {
     rotation: 'Rotation', assumptions: 'Assumptions', meCrewId: 'Me (crew record)', favourites: 'Favourites', bufferCents: 'Buffer',
     forecastMethod: 'Forecast method', fixedSpend: 'Fixed spending', horizon: 'Horizon (months)',
   },
+  draftSurveyShips: {
+    lbp: 'LBP (m)', dF: 'dF (m)', dM: 'dM (m)', dA: 'dA (m)', beam: 'Beam (m)', keelPlateCorr: 'Keel plate correction (m)', lightShip: 'Light ship (t)',
+    summerDraught: 'Summer draught (m)', summerDwt: 'Summer deadweight (t)', depth: 'Depth moulded (m)', gt: 'GT', lcfSource: 'LCF source',
+    ranges: 'Look-up ranges', sourceName: 'Imported from', importedAt: 'Imported at',
+    lcfConfirmed: 'LCF checked against the stability booklet',
+  },
+  hydroTables: { rows: 'Hydrostatic table' },
+  draftSurveys: {
+    kind: 'Kind', operation: 'Operation', port: 'Port', terminal: 'Terminal', cargo: 'Cargo', holds: 'Holds', date: 'Date', timeFrom: 'Time from',
+    timeTill: 'Time till', windBft: 'Wind (Bft)', swell: 'Swell (m)', drafts: 'Drafts', density: 'Density', deductibles: 'Deductibles',
+    comparedQty: 'Compared quantity (t)', blQty: 'B/L quantity (t)', remarks: 'Remarks', surveyor: 'Surveyor', chiefOfficer: 'Chief Officer',
+  },
+  surveyTemplates: { fileName: 'File name' },
 };
 
 /**
@@ -150,7 +163,19 @@ const HIDDEN_OF: Partial<Record<TableName, ReadonlySet<string>>> = {
   formDrafts: new Set(['templateId', 'code', 'photoIds']), formLastValues: new Set(['code']), formPhotos: new Set(['draftId', 'jpegBase64']),
   // Where an entry came from (a template, an import cell, a fund record's entry) is bookkeeping too, as is the settings' key.
   budgetEntries: new Set(['recurringId', 'importKey']), budgetFundMoves: new Set(['entryId']), budgetSettings: new Set(['key']),
+  // A survey's link to its initial survey is bookkeeping; a workbook's file and its cell map are data, as a form template's are.
+  draftSurveys: new Set(['initialId']), surveyTemplates: new Set(['fileBase64', 'cellMap']),
 };
+
+const SURVEY_KIND_LABELS: Record<string, string> = {
+  initial: 'Initial draft survey', interim: 'Interim draft survey', final: 'Final draft survey', constant: 'Constant check',
+};
+
+/** "120 rows": a hydrostatic table, by its size. */
+function rowsText(rows: unknown): string {
+  const count = Array.isArray(rows) ? rows.length : 0;
+  return `${count} ${count === 1 ? 'row' : 'rows'}`;
+}
 
 /** The budget's fields that hold whole cents, shown as money. */
 const MONEY_FIELDS: ReadonlySet<string> = new Set(['amount', 'balance', 'startBalance', 'instalment', 'plannedIncome', 'bufferCents']);
@@ -222,6 +247,7 @@ function show(key: string, value: unknown): string {
   if (key === 'plannedIncome' && isObject(value)) return plannedIncomeText(value);
   if (key === 'values' && isObject(value)) return valuesText(value);
   if (key === 'setup' && isObject(value)) return setupText(value);
+  if (key === 'rows' && Array.isArray(value)) return rowsText(value);
   return plainText(JSON.stringify(value), MAX_VALUE);
 }
 
@@ -271,7 +297,7 @@ export function changedFields(table: TableName, local: SyncRecord, incoming: Syn
     if (deepEqual(mine[key], theirs[key])) continue;
     changes.push({ label: labels[key] ?? (plainText(key, MAX_TITLE) || EMPTY_VALUE), local: show(key, mine[key]), incoming: show(key, theirs[key]) });
   }
-  const file = table === 'formTemplates' ? fileChange(local, incoming) : undefined;
+  const file = table === 'formTemplates' || table === 'surveyTemplates' ? fileChange(local, incoming) : undefined;
   if (file) {
     // After the revision, else after the status (which always comes first), else first.
     const revision = changes.findIndex((c) => c.label === 'Revision');
@@ -328,6 +354,13 @@ export function recordTitle(table: TableName, record: SyncRecord): string {
     case 'budgetCorrections': return `Budget balance: ${nameOf(r.account, '(no account)')} — ${nameOf(r.ym, '(no month)')}`;
     case 'budgetScenarios': return `Budget scenario: ${nameOf(r.name, '(no name)')}`;
     case 'budgetSettings': return 'Budget settings';
+    case 'draftSurveyShips': return 'Draft survey ship data';
+    case 'hydroTables': return `Hydrostatic table: ${rowsText(r.rows)}`;
+    case 'draftSurveys': {
+      const kind = typeof r.kind === 'string' && SURVEY_KIND_LABELS[r.kind] ? SURVEY_KIND_LABELS[r.kind] : 'Draft survey';
+      return `${kind}: ${nameOf(r.port, '(no port)')} — ${nameOf(r.date, '(no date)')}`;
+    }
+    case 'surveyTemplates': return `Draft survey workbook: ${nameOf(r.fileName, '(no name)')}`;
   }
 }
 

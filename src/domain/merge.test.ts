@@ -29,7 +29,7 @@ function cert(id: string, updatedAt: string, patch: Partial<Certificate> = {}): 
 const EMPTY: Tables = {
   ships: [], crew: [], voyages: [], certificates: [], clockChanges: [], crewDocuments: [],
   formTemplates: [], formDrafts: [], formLastValues: [], formPhotos: [], libraryDocs: [], libraryFolders: [],
-    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [],
+    budgetCategories: [], budgetEntries: [], budgetMonths: [], budgetRecurring: [], budgetFunds: [], budgetFundMoves: [], budgetDebts: [], budgetGoals: [], budgetAssets: [], budgetCorrections: [], budgetScenarios: [], budgetSettings: [], draftSurveyShips: [], hydroTables: [], draftSurveys: [], surveyTemplates: [],
 };
 const T = (crew: SyncRecord[]): Tables => ({ ...EMPTY, crew });
 
