@@ -59,12 +59,15 @@ export function themeButtonLabel(s: ThemeSettings, shipNow: string): string {
 
 /**
  * What the first-paint script in index.html needs to work out the theme by itself (the `mp-night` mirror): the window,
- * the ship's offset from UTC in minutes, and the held theme with its end. Null when automatic night is off.
+ * the ship's offset from UTC in minutes, the held theme with its end, and the next clock change still to come (`at`, in
+ * UTC milliseconds, and `next`, the offset from then on), so a change that comes while the app is closed is followed.
+ * Only the next one: after two or more changes while closed the first paint can be off until the app has started.
+ * Null when automatic night is off.
  */
-export function nightMirror(s: ThemeSettings, offsetMinutes: number): string | null {
+export function nightMirror(s: ThemeSettings, offsetMinutes: number, nextChange?: { at: number; next: number }): string | null {
   if (!s.nightAuto) return null;
   const held = s.themeOverride ? { override: s.themeOverride.theme, until: s.themeOverride.until } : {};
-  return JSON.stringify({ from: s.nightFrom, to: s.nightTo, offset: offsetMinutes, ...held });
+  return JSON.stringify({ from: s.nightFrom, to: s.nightTo, offset: offsetMinutes, ...held, ...nextChange });
 }
 
 /** The times the From and To lists offer: every quarter hour, 00:00 to 23:45. */

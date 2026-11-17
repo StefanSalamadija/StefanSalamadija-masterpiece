@@ -112,6 +112,8 @@ describe('the first-paint script and automatic night', () => {
     theme: 'day', nightAuto: true, nightFrom: '18:00', nightTo: '06:00', ...over,
   });
 
+  const shipLocal = (nowMs: number, offset: number) => toShipLocal(new Date(nowMs), offset).dateTime;
+
   /** What the app mirrors for `s` at `offset`, as `AppState` writes it with `mirrorTheme`. */
   function mirrored(s: ThemeSettings, offset: number): Record<string, string> {
     const night = nightMirror(s, offset);
@@ -138,6 +140,45 @@ describe('the first-paint script and automatic night', () => {
     const nowMs = Date.parse(instant);
     const expected = effectiveTheme(s, toShipLocal(new Date(nowMs), offset).dateTime);
     expect(runFirstPaint(mirrored(s, offset), { nowMs })).toEqual({ theme: expected, meta: BAR_BG[expected] });
+  });
+
+  it('paints an override seen days after its end as the window or the base theme says', () => {
+    const s = settings({ themeOverride: { theme: 'contrast', until: '2026-11-17T06:00' } });
+    for (const instant of ['2026-11-20T00:00:00Z', '2026-11-20T09:00:00Z']) { // 03:00 and 12:00 on board, three days on
+      const nowMs = Date.parse(instant);
+      const expected = effectiveTheme(s, toShipLocal(new Date(nowMs), 180).dateTime);
+      expect(runFirstPaint(mirrored(s, 180), { nowMs }).theme).toBe(expected);
+    }
+    expect(runFirstPaint(mirrored(s, 180), { nowMs: Date.parse('2026-11-20T00:00:00Z') }).theme).toBe('red');
+  });
+
+  describe('a clock change that came while the app was closed', () => {
+    // At 17:30 on board (14:30Z) the clocks go forward an hour, to UTC+04:00. The mirror was saved before that.
+    const at = Date.parse('2026-11-17T14:30:00Z');
+    const night = (extra: Record<string, unknown>) =>
+      JSON.stringify({ ...JSON.parse(nightMirror(settings(), 180) ?? ''), ...extra });
+
+    it('is taken into account: at 18:31 on board the first paint is Night red', () => {
+      const nowMs = Date.parse('2026-11-17T14:31:00Z'); // 17:31 at the old offset, 18:31 at the new one
+      const stored = { [THEME_STORAGE_KEY]: 'day', [NIGHT_STORAGE_KEY]: night({ at, next: 240 }) };
+      expect(runFirstPaint(stored, { nowMs })).toEqual({ theme: 'red', meta: BAR_BG.red });
+      const live = shipLocal(nowMs, 240);
+      expect(effectiveTheme(settings(), live)).toBe('red');
+    });
+
+    it('is not used before it comes', () => {
+      const nowMs = Date.parse('2026-11-17T14:29:00Z'); // 17:29 on board
+      const stored = { [THEME_STORAGE_KEY]: 'day', [NIGHT_STORAGE_KEY]: night({ at, next: 240 }) };
+      expect(runFirstPaint(stored, { nowMs })).toEqual({ theme: 'day', meta: BAR_BG.day });
+    });
+
+    it('paints the base theme when the offset it brings is missing or not a number', () => {
+      const nowMs = Date.parse('2026-11-17T16:00:00Z');
+      for (const extra of [{ at }, { at, next: 'soon' }]) {
+        const stored = { [THEME_STORAGE_KEY]: 'dark', [NIGHT_STORAGE_KEY]: night(extra) };
+        expect(runFirstPaint(stored, { nowMs })).toEqual({ theme: 'dark', meta: BAR_BG.dark });
+      }
+    });
   });
 
   it('paints the base theme when the night mirror is corrupt or has no offset', () => {

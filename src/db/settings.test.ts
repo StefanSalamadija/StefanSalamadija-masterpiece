@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PinSettings, Settings } from '../domain/types';
 import { openDb } from './schema';
-import { getSettings, normaliseSettings, removePin, updatePin, updateSettings } from './settings';
+import { clearThemeOverride, getSettings, normaliseSettings, removePin, updatePin, updateSettings } from './settings';
 
 const freshDb = () => openDb('t-' + crypto.randomUUID());
 const pin = (over: Partial<PinSettings> = {}): PinSettings => ({
@@ -165,5 +165,25 @@ describe('the automatic night settings', () => {
     expect('themeOverride' in cleared).toBe(false);
     expect('themeOverride' in ((await db.settings.get('device')) ?? {})).toBe(false);
     expect(cleared.nightAuto).toBe(true);
+  });
+});
+
+describe('clearThemeOverride', () => {
+  const held = { theme: 'contrast' as const, until: '2026-11-17T06:00' };
+
+  it('deletes the stored override when it is the one expected', async () => {
+    const db = freshDb();
+    await updateSettings(db, { nightAuto: true, themeOverride: held });
+    const after = await clearThemeOverride(db, { ...held });
+    expect('themeOverride' in after).toBe(false);
+    expect('themeOverride' in ((await db.settings.get('device')) ?? {})).toBe(false);
+  });
+
+  it('leaves a different override alone, such as one a tap has just written', async () => {
+    const db = freshDb();
+    const fresh = { theme: 'day' as const, until: '2026-11-17T18:00' };
+    await updateSettings(db, { nightAuto: true, themeOverride: fresh });
+    expect((await clearThemeOverride(db, held)).themeOverride).toEqual(fresh);
+    expect((await db.settings.get('device'))?.themeOverride).toEqual(fresh);
   });
 });

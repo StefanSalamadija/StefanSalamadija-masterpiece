@@ -8,8 +8,10 @@
       The script puts the theme on <html> before the page is first painted, so night never starts with a white frame, and
       gives the browser's status bar the colour of that theme's bars (BAR_BG in src/ui/theme.ts). localStorage only mirrors
       the settings (mirrorTheme): mp-theme is the base theme (`night` is Dark, as before piece 7), and mp-night, when
-      automatic night is on, holds the window, the ship's offset and any held theme (nightMirror in src/ui/themeSchedule.ts),
-      from which it works out ship's time now, as effectiveTheme does. The app corrects it all from IndexedDB when it starts.
+      automatic night is on, holds the window, the ship's offset, any held theme and the next clock change (nightMirror in
+      src/ui/themeSchedule.ts), from which it works out ship's time now, as effectiveTheme does. Only the next clock change
+      is known: after two or more while the app was closed, the first paint can be off until the app corrects it all from
+      IndexedDB when it starts.
     -->
     <script>
       try {
@@ -18,7 +20,7 @@
         try {
           var n = JSON.parse(localStorage.getItem('mp-night'));
           if (n && typeof n.offset == 'number') {
-            var now = new Date(Date.now() + n.offset * 6e4).toISOString().slice(0, 16), h = now.slice(11), f = n.from, e = n.to;
+            var now = new Date(Date.now() + (n.at <= Date.now() ? n.next : n.offset) * 6e4).toISOString().slice(0, 16), h = now.slice(11), f = n.from, e = n.to;
             if (ok.test(n.override) && now < n.until) t = n.override;
             else if (f < e ? h >= f && h < e : f > e && (h >= f || h < e)) t = 'red';
           }

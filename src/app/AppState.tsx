@@ -3,10 +3,10 @@ import type { ComponentChildren } from 'preact';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { listForShip } from '../db/records';
 import { getDb, type MasterpieceDB } from '../db/schema';
-import { normaliseSettings, updateSettings } from '../db/settings';
+import { clearThemeOverride, normaliseSettings } from '../db/settings';
 import { liveActiveShipId, listShips } from '../db/ships';
 import { requestPersistentStorage } from '../db/storage';
-import { deviceOffsetMinutes, shipOffsetAt, toShipLocal } from '../domain/shipTime';
+import { deviceOffsetMinutes, nextScheduledChange, shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import type { ClockChange, Settings, ShipProfile, Theme } from '../domain/types';
 import { applyTheme, mirrorTheme } from '../ui/theme';
 import { effectiveTheme, nightMirror, overrideActive } from '../ui/themeSchedule';
@@ -106,6 +106,14 @@ function useNow(stepMs: number): Date {
   return now;
 }
 
+/** The next clock change still to come, for the first-paint mirror: its instant and the offset in force from then on. */
+function nextChangeFor(changes: ClockChange[], now: Date): { at: number; next: number } | undefined {
+  const change = nextScheduledChange(changes, now);
+  if (!change) return undefined;
+  const at = Date.parse(change.effectiveAt);
+  return { at, next: shipOffsetAt(changes, new Date(at)) }; // of several at the same instant, the last one wins
+}
+
 /** Loads the device settings, the active ship and its clock changes, and keeps them current for everything below. */
 export function AppStateProvider({ children }: { children: ComponentChildren }) {
   const db = getDb();
@@ -141,7 +149,7 @@ export function AppStateProvider({ children }: { children: ComponentChildren }) 
 
   const theme = state?.theme;
   const base = state?.settings.theme;
-  const night = state ? nightMirror(state.settings, state.offsetMinutes) : null;
+  const night = state ? nightMirror(state.settings, state.offsetMinutes, nextChangeFor(state.clockChanges, state.nowUtc)) : null;
   // A layout effect runs before the browser paints, so a theme switch never shows a frame with the old palette. The mirror
   // in localStorage is what index.html works the first paint of the next start out from.
   useLayoutEffect(() => {
@@ -150,15 +158,22 @@ export function AppStateProvider({ children }: { children: ComponentChildren }) 
     mirrorTheme(base, night);
   }, [theme, base, night]);
 
-  // A held theme whose end has come is cleared, once: the key goes, so automatic night takes over again.
+  // A held theme whose end has come is cleared, once, and only if it is still the one stored: the key goes, so automatic
+  // night takes over again. The guard re-arms once nothing has expired, so an identical override made later (after the
+  // clocks go back) is cleared too.
   const held = state?.settings.themeOverride;
-  const expired = held && !overrideActive(state.settings, state.shipNow) ? `${held.theme} ${held.until}` : undefined;
+  const expired = held && !overrideActive(state.settings, state.shipNow) ? held : undefined;
+  const expiredKey = expired && `${expired.theme} ${expired.until}`;
   const clearing = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!expired || clearing.current === expired) return;
-    clearing.current = expired;
-    updateSettings(db, { themeOverride: undefined }).catch(reportError);
-  }, [db, expired]);
+    if (!expired || !expiredKey) {
+      clearing.current = undefined;
+      return;
+    }
+    if (clearing.current === expiredKey) return;
+    clearing.current = expiredKey;
+    clearThemeOverride(db, expired).catch(reportError);
+  }, [db, expiredKey]); // `expired` is read for its value, which `expiredKey` stands for
 
   // Nothing is drawn until the first read is done, so the welcome screen never flashes up for a device that has ships.
   return state ? <AppStateContext.Provider value={state}>{children}</AppStateContext.Provider> : null;

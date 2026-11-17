@@ -94,6 +94,23 @@ export function updateSettings(db: MasterpieceDB, patch: Partial<Settings>): Pro
 }
 
 /**
+ * Clears a held theme whose end has come, but only if the stored one is still `expected`: an override written meanwhile
+ * (a tap, another tab) is kept. The key itself goes.
+ */
+export function clearThemeOverride(db: MasterpieceDB, expected: NonNullable<Settings['themeOverride']>): Promise<Settings> {
+  return guardWrite(() =>
+    db.transaction('rw', db.settings, async () => {
+      const current = await readOrCreate(db);
+      const held = current.themeOverride;
+      if (!held || held.theme !== expected.theme || held.until !== expected.until) return current;
+      const { themeOverride: _cleared, ...rest } = current;
+      await db.settings.put(rest);
+      return rest;
+    }),
+  );
+}
+
+/**
  * Changes the stored passcode settings (lockout, lock time, fingerprint, hash) from what is stored now, in one
  * transaction, so a stale copy held by the screen never overwrites a newer one. Does nothing when no passcode is set.
  * `change` runs inside the transaction: it must be synchronous. When it hands back the very object it was given,

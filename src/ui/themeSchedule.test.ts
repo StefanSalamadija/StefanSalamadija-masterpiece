@@ -80,6 +80,13 @@ describe('effectiveTheme', () => {
     expect(effectiveTheme(s, '2026-11-17T05:00')).toBe('day');
   });
 
+  it('ignores an override seen days after its end', () => {
+    const s = auto({ themeOverride: { theme: 'contrast', until: '2026-11-17T06:00' } });
+    expect(effectiveTheme(s, '2026-11-20T03:00')).toBe('red');
+    expect(effectiveTheme(s, '2026-11-20T12:00')).toBe('day');
+    expect(themeButtonLabel(s, '2026-11-20T03:00')).toBe('Theme: Night red, automatic');
+  });
+
   it('follows a clock change, since ship-local times are compared as they are', () => {
     const s = auto({ themeOverride: { theme: 'contrast', until: '2026-11-17T06:00' } });
     expect(effectiveTheme(s, '2026-11-17T05:30')).toBe('contrast');
@@ -140,6 +147,16 @@ describe('nightMirror', () => {
     expect(JSON.parse(nightMirror(s, -330) ?? '')).toEqual({
       from: '20:15', to: '05:45', offset: -330, override: 'contrast', until: '2026-11-18T05:45',
     });
+  });
+});
+
+describe('nightMirror and the next clock change', () => {
+  it('adds the instant of the next clock change and the offset it brings', () => {
+    const at = Date.parse('2026-11-17T14:30:00Z');
+    expect(JSON.parse(nightMirror(auto(), 180, { at, next: 240 }) ?? '')).toEqual({
+      from: '18:00', to: '06:00', offset: 180, at, next: 240,
+    });
+    expect(nightMirror(base(), 180, { at, next: 240 })).toBeNull();
   });
 });
 

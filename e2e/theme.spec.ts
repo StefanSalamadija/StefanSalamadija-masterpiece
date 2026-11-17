@@ -100,6 +100,26 @@ test.describe('automatic night before the app starts', () => {
     await expect(html(page)).toHaveAttribute('data-theme', 'red');
     expect(await page.evaluate(STATUS_BAR)).toBe('#000000');
   });
+
+  test('a clock change that comes while the app is closed is followed by the first paint', async ({ page }) => {
+    await autoNightAt(page, '2026-11-17T14:20:00Z'); // 17:20 on board
+    await page.goto('./#/ship/time');
+    await page.getByLabel("Change at (ship's time)").fill('2026-11-17T17:30');
+    await page.getByLabel('New offset').selectOption({ label: 'UTC+04:00' });
+    await page.getByRole('button', { name: 'Schedule' }).click();
+    await expect(page.getByRole('list', { name: 'History' }).getByRole('listitem')).toHaveCount(2);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('mp-night') ?? '{}').next)).toBe(240);
+    await expect(html(page)).toHaveAttribute('data-theme', 'day');
+
+    // The app is closed, so nothing rewrites the mirror, and the clocks go forward at 17:30 meanwhile. From then on the
+    // app's own scripts never load, so only the inline script in index.html can set the theme.
+    await page.goto('about:blank');
+    await page.route('**/assets/*.js', (route) => route.abort());
+    await page.clock.runFor(11 * 60_000); // 14:31Z: 17:31 at the old offset, 18:31 at the new one
+    await page.goto('./');
+    await expect(html(page)).toHaveAttribute('data-theme', 'red');
+    expect(await page.evaluate(STATUS_BAR)).toBe('#000000');
+  });
 });
 
 test('with automatic night off, a tap changes the base theme and a reload keeps it', async ({ page }) => {
