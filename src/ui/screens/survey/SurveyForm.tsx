@@ -9,6 +9,7 @@ import { Field } from '../../components/Field';
 import { useDraftSaver } from '../../useDraftSaver';
 import { calculationLines, comparedName, fixed, fromDraft, KIND_TITLES, NUMBER_KEYS, signed, toDraft, workOut, WRONG_WAY } from './surveyView';
 import type { NumberKey, Problem, SurveyDraft, TextKey, Worked } from './surveyView';
+import { Report } from './Report';
 import { surveyWhere } from './Surveys';
 import { useSurveyData } from './useSurveyData';
 
@@ -26,9 +27,12 @@ const DETAILS: [TextKey | NumberKey, string, ('date' | 'time')?][] = [
 const fieldError = (problem: Problem | undefined, field: string): FieldError | undefined =>
   problem && { field, severity: problem.severity, message: problem.message };
 
-/** `/ship/survey/:id`: one survey's inputs, as they are read at the marks, and its figures worked out live. */
+/**
+ * `/ship/survey/:id`: one survey's inputs, as they are read at the marks, and its figures worked out live. Also
+ * `/ship/survey/:id/report`, the survey's DS Report: one screen entry for both keeps the report's code in this chunk.
+ */
 export function SurveyForm() {
-  const { params } = useRoute();
+  const { path, params } = useRoute();
   const data = useSurveyData();
   if (!data) return <section class="screen"><p class="live" role="status">Loading…</p></section>;
   const survey = data.surveys.find((s) => s.id === params.id);
@@ -42,16 +46,20 @@ export function SurveyForm() {
     );
   }
   const initial = survey.initialId === undefined ? undefined : data.surveys.find((s) => s.id === survey.initialId);
+  if (path === '/ship/survey/:id/report') return <Report survey={survey} initial={initial} ship={data.ship} hydro={data.hydro} />;
+  const linked = data.surveys.filter((s) => s.initialId === survey.id).length;
   // A new key starts the form afresh for another survey; edits elsewhere to this one don't overwrite what is being typed.
-  return <Editor key={survey.id} survey={survey} initial={initial} ship={data.ship} hydro={data.hydro} />;
+  return <Editor key={survey.id} survey={survey} initial={initial} ship={data.ship} hydro={data.hydro} linked={linked} />;
 }
 
-function Editor({ survey, initial, ship, hydro }: { survey: DraftSurvey; initial?: DraftSurvey; ship: DraftSurveyShip; hydro: HydroTable }) {
+function Editor({ survey, initial, ship, hydro, linked }: { survey: DraftSurvey; initial?: DraftSurvey; ship: DraftSurveyShip; hydro: HydroTable; linked: number }) {
   const { db, activeShip } = useAppState();
   const [draft, setDraft] = useState<SurveyDraft>(() => toDraft(survey));
   const [status, setStatus] = useState<'saved' | 'saving' | undefined>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const closed = useRef(false);
+  /** The latest draft typed: "Saved" is shown only once it is the one saved. */
+  const latest = useRef(draft);
   const operationId = useId();
 
   const { fields, problems } = useMemo(() => fromDraft(survey, draft), [draft]);
@@ -62,12 +70,13 @@ function Editor({ survey, initial, ship, hydro }: { survey: DraftSurvey; initial
 
   const saver = useDraftSaver<SurveyDraft>(async (state) => {
     await saveSurvey(db, activeShip!.id, fromDraft(survey, state).fields, survey.id);
-    setStatus('saved');
+    if (state === latest.current) setStatus('saved');
   }, () => !closed.current);
 
   const set = (key: keyof SurveyDraft, value: string): void => {
     const next = { ...draft, [key]: value } as SurveyDraft;
     setDraft(next);
+    latest.current = next;
     setStatus('saving');
     saver.schedule(next);
   };
@@ -78,14 +87,20 @@ function Editor({ survey, initial, ship, hydro }: { survey: DraftSurvey; initial
       error={fieldError(problems[key as NumberKey], key)} hint={hint} />
   );
 
-  const remove = (): void => {
-    closed.current = true;
+  const remove = async (): Promise<void> => {
+    closed.current = true; // nothing more is saved from here
     saver.cancel();
-    deleteSurvey(db, survey.id).then(() => navigate('/ship/survey'), (err: unknown) => {
+    try {
+      await saver.idle(); // a save already running finishes before the survey is deleted
+      await deleteSurvey(db, survey.id);
+      navigate('/ship/survey');
+    } catch (err) {
       closed.current = false;
       reportError(err);
-    });
+    }
   };
+  const deleteBody = `The ${KIND_TITLES[survey.kind].toLowerCase()} and its figures are deleted.`
+    + (linked > 0 ? ` Its ${linked} final and interim survey${linked === 1 ? '' : 's'} stay, but show no result without it.` : '');
 
   return (
     <section class="screen survey">
@@ -94,6 +109,7 @@ function Editor({ survey, initial, ship, hydro }: { survey: DraftSurvey; initial
         <h2>{KIND_TITLES[survey.kind]}</h2>
         <span class="save-status" role="status">{status === 'saved' ? 'Saved' : status === 'saving' ? 'Saving…' : ''}</span>
       </div>
+      <p class="no-print"><a href={`#/ship/survey/${survey.id}/report`} class="btn btn-small btn-outline">Report and workbook</a></p>
       {!ownOperation && (
         <p class="helper-text">
           {initial ? `Worked against the initial survey${surveyWhere(initial) && ` of ${surveyWhere(initial)}`}, ${initial.operation}.` : 'Its initial survey has been deleted.'}
@@ -140,8 +156,8 @@ function Editor({ survey, initial, ship, hydro }: { survey: DraftSurvey; initial
         <button type="button" class="btn btn-outline btn-danger" onClick={() => setConfirmDelete(true)}>Delete survey</button>
       </p>
       {confirmDelete && (
-        <ConfirmDialog title="Delete this survey?" body={`The ${KIND_TITLES[survey.kind].toLowerCase()} and its figures are deleted.`}
-          confirmLabel="Delete" danger onConfirm={remove} onCancel={() => setConfirmDelete(false)} />
+        <ConfirmDialog title="Delete this survey?" body={deleteBody}
+          confirmLabel="Delete" danger onConfirm={() => void remove()} onCancel={() => setConfirmDelete(false)} />
       )}
     </section>
   );

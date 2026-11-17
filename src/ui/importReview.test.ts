@@ -169,6 +169,11 @@ describe('the draft survey records in the review', () => {
       rec({ shipId: 's1', fileName: 'a.xlsx', fileBase64: 'AAAAAAAA', cellMap: { INITIAL: { port: 'C5' }, FINAL: {} } })))
       .toEqual([{ label: 'File', local: 'a.xlsx (3 bytes)', incoming: 'a.xlsx (6 bytes)' }]);
   });
+
+  it('names the LCF confirmation in words, not by its key', () => {
+    const [change] = changedFields('draftSurveyShips', rec({ shipId: 's1', lbp: 100 }), rec({ shipId: 's1', lbp: 100, lcfConfirmed: true }));
+    expect(change?.label).toBe('LCF checked against the stability booklet');
+  });
 });
 
 describe('changedFields', () => {

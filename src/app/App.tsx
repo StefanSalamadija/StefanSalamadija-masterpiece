@@ -65,6 +65,8 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/survey': survey('Surveys'),
   '/ship/survey/data': survey('ShipData'),
   '/ship/survey/:id': survey('SurveyForm'),
+  // The report is drawn by the survey screen (it reads the path), so it adds no screen of its own to the main chunk.
+  '/ship/survey/:id/report': survey('SurveyForm'),
   '/forms': Forms,
   '/forms/:id/setup': FormSetup,
   // Loaded on demand, so that the fill screen and its helpers stay out of the main chunk.

@@ -22,6 +22,12 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/crew/print').path).toBe('/ship/crew/print');
   });
 
+  it('picks the survey out of the draft survey report route', () => {
+    expect(matchRoute('#/ship/survey/s1/report')).toEqual({ path: '/ship/survey/:id/report', params: { id: 's1' } });
+    expect(matchRoute('#/ship/survey/s1')).toEqual({ path: '/ship/survey/:id', params: { id: 's1' } });
+    expect(matchRoute('#/ship/survey/data').path).toBe('/ship/survey/data');
+  });
+
   it('picks the crew member and the document out of the document routes, and the fixed word new before the document id', () => {
     expect(matchRoute('#/ship/crew/3f2a/documents/new')).toEqual({ path: '/ship/crew/:id/documents/new', params: { id: '3f2a' } });
     expect(matchRoute('#/ship/crew/3f2a/documents/d9')).toEqual({ path: '/ship/crew/:id/documents/:docId', params: { id: '3f2a', docId: 'd9' } });

@@ -24,6 +24,7 @@ const ROUTES = [
   '/ship/survey',
   '/ship/survey/data',
   '/ship/survey/:id',
+  '/ship/survey/:id/report',
   '/forms',
   '/forms/:id/setup',
   '/forms/:id/fill',

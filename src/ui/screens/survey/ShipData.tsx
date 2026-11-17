@@ -1,9 +1,9 @@
 import { useId, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
-import { saveHydro, saveSurveyShip, saveTemplate } from '../../../db/survey';
+import { saveSurveyImport, saveSurveyShip } from '../../../db/survey';
 import type { SurveyShipFields } from '../../../db/survey';
-import { parseDecimal } from '../../../domain/numbers';
+import { looksLikeThousands, parseDecimal } from '../../../domain/numbers';
 import type { DraftSurveyShip, FieldError, HydroRow, LcfSource, SheetRanges } from '../../../domain/types';
 // Types only: the reader comes with SheetJS, which is loaded when a file is chosen (see `readFile`).
 import type { ImportedWorkbook } from '../../../survey/workbook/read';
@@ -27,16 +27,17 @@ async function readFile(file: File): Promise<Loaded | { problem: string }> {
 }
 
 type NumberKey = 'lbp' | 'dF' | 'dM' | 'dA' | 'beam' | 'keelPlateCorr' | 'lightShip' | 'summerDraught' | 'summerDwt' | 'depth' | 'gt';
-const PARTICULARS: { key: NumberKey; label: string; unit: string; required?: boolean; positive?: boolean }[] = [
+/** `tonnes`: "6,850" would be read as 6.85 t, so a thousands-like entry is refused, as the ship's particulars refuse it. */
+const PARTICULARS: { key: NumberKey; label: string; unit: string; required?: boolean; positive?: boolean; tonnes?: boolean }[] = [
   { key: 'lbp', label: 'LBP', unit: 'm', required: true, positive: true },
   { key: 'dF', label: 'dF', unit: 'm', required: true },
   { key: 'dM', label: 'dM', unit: 'm', required: true },
   { key: 'dA', label: 'dA', unit: 'm', required: true },
   { key: 'beam', label: 'Beam', unit: 'm', required: true, positive: true },
   { key: 'keelPlateCorr', label: 'Keel plate correction', unit: 'm', required: true },
-  { key: 'lightShip', label: 'Light ship', unit: 't', required: true },
+  { key: 'lightShip', label: 'Light ship', unit: 't', required: true, tonnes: true },
   { key: 'summerDraught', label: 'Summer draught', unit: 'm' },
-  { key: 'summerDwt', label: 'Summer deadweight', unit: 't' },
+  { key: 'summerDwt', label: 'Summer deadweight', unit: 't', tonnes: true },
   { key: 'depth', label: 'Depth moulded', unit: 'm' },
   { key: 'gt', label: 'GT', unit: '' },
 ];
@@ -73,12 +74,14 @@ export function ShipData() {
     const before = data?.ship;
     // A re-import replaces the table and the particulars; the user's LCF choice stays, if the new table still allows it.
     const lcfSource: LcfSource = before?.lcfSource === 'tabled' && hasTabled(l.book.hydro) ? 'tabled' : 'workbook';
-    await saveHydro(db, shipId, l.book.hydro);
-    await saveSurveyShip(db, shipId, {
-      ...l.book.ship, lcfSource, lcfConfirmed: lcfSource === before?.lcfSource ? before.lcfConfirmed : undefined,
-      sourceName: l.fileName, importedAt: new Date().toISOString(),
+    await saveSurveyImport(db, shipId, {
+      hydro: l.book.hydro,
+      ship: {
+        ...l.book.ship, lcfSource, lcfConfirmed: lcfSource === before?.lcfSource ? before.lcfConfirmed : undefined,
+        sourceName: l.fileName, importedAt: new Date().toISOString(),
+      },
+      template: { fileName: l.fileName, bytes: l.bytes, cellMap: l.book.cellMap },
     });
-    await saveTemplate(db, shipId, { fileName: l.fileName, bytes: l.bytes, cellMap: l.book.cellMap });
   };
 
   const confirm = (l: Loaded): void => {
@@ -156,8 +159,11 @@ function ParticularsForm({ ship, tabled, onSaved }: { ship: DraftSurveyShip; tab
   const values: Partial<Record<NumberKey, number>> = {};
   const errors: Partial<Record<NumberKey, FieldError>> = {};
   for (const p of PARTICULARS) {
-    const value = parseDecimal(draft[p.key], { signed: true });
-    if (value === 'invalid') errors[p.key] = { field: p.key, severity: 'error', message: 'Enter a number, e.g. 12,5.' };
+    const value = parseDecimal(draft[p.key], { signed: true, rejectThousandsLike: p.tonnes });
+    if (value === 'invalid') {
+      const message = p.tonnes && looksLikeThousands(draft[p.key]) ? 'Enter the number without thousands separators, e.g. 6850.4.' : 'Enter a number, e.g. 12,5.';
+      errors[p.key] = { field: p.key, severity: 'error', message };
+    }
     else if (value === undefined && p.required) errors[p.key] = { field: p.key, severity: 'error', message: 'Required.' };
     else if (value !== undefined && p.positive && value <= 0) errors[p.key] = { field: p.key, severity: 'error', message: 'Must be above 0.' };
     if (typeof value === 'number') values[p.key] = value;

@@ -139,6 +139,7 @@ const LABELS: Record<TableName, Record<string, string>> = {
     lbp: 'LBP (m)', dF: 'dF (m)', dM: 'dM (m)', dA: 'dA (m)', beam: 'Beam (m)', keelPlateCorr: 'Keel plate correction (m)', lightShip: 'Light ship (t)',
     summerDraught: 'Summer draught (m)', summerDwt: 'Summer deadweight (t)', depth: 'Depth moulded (m)', gt: 'GT', lcfSource: 'LCF source',
     ranges: 'Look-up ranges', sourceName: 'Imported from', importedAt: 'Imported at',
+    lcfConfirmed: 'LCF checked against the stability booklet',
   },
   hydroTables: { rows: 'Hydrostatic table' },
   draftSurveys: {

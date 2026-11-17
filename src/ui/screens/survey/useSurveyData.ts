@@ -1,12 +1,11 @@
 import { useAppState } from '../../../app/AppState';
-import { getHydro, getSurveyShip, getTemplate, listSurveys } from '../../../db/survey';
-import type { DraftSurvey, DraftSurveyShip, HydroTable, SurveyTemplate } from '../../../domain/types';
+import { getHydro, getSurveyShip, listSurveys } from '../../../db/survey';
+import type { DraftSurvey, DraftSurveyShip, HydroTable } from '../../../domain/types';
 import { useLive } from '../../useLive';
 
 export interface SurveyData {
   ship?: DraftSurveyShip;
   hydro?: HydroTable;
-  template?: SurveyTemplate;
   /** The ship's live surveys, newest first. */
   surveys: DraftSurvey[];
 }
@@ -16,9 +15,8 @@ export function useSurveyData(): SurveyData | undefined {
   const { db, activeShip } = useAppState();
   const shipId = activeShip?.id ?? '';
   return useLive(async () => {
-    const [ship, hydro, template, surveys] = await Promise.all([
-      getSurveyShip(db, shipId), getHydro(db, shipId), getTemplate(db, shipId), listSurveys(db, shipId),
-    ]);
-    return { ship, hydro, template, surveys };
+    // Not the template: its file is large, and only the workbook export reads it (when it is made).
+    const [ship, hydro, surveys] = await Promise.all([getSurveyShip(db, shipId), getHydro(db, shipId), listSurveys(db, shipId)]);
+    return { ship, hydro, surveys };
   }, [db, shipId]);
 }

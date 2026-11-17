@@ -122,3 +122,20 @@ export function saveTemplate(db: MasterpieceDB, shipId: string, input: SurveyTem
     fileName: input.fileName, fileBase64: toBase64(input.bytes), cellMap: input.cellMap,
   });
 }
+
+/** What an import of the company workbook saves: the table, the ship's data and the workbook itself. */
+export interface SurveyImport { hydro: HydroRow[]; ship: SurveyShipFields; template: SurveyTemplateInput }
+
+/**
+ * Saves an imported workbook in one transaction: the hydrostatic table, the ship's data and the template are all
+ * replaced, or (when any write fails) none is, so a new table never sits with old particulars.
+ */
+export function saveSurveyImport(db: MasterpieceDB, shipId: string, saved: SurveyImport): Promise<void> {
+  return guardWrite(() =>
+    db.transaction('rw', [db.hydroTables, db.draftSurveyShips, db.surveyTemplates, db.settings], async () => {
+      await saveHydro(db, shipId, saved.hydro);
+      await saveSurveyShip(db, shipId, saved.ship);
+      await saveTemplate(db, shipId, saved.template);
+    }),
+  );
+}

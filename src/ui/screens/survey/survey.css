@@ -32,3 +32,17 @@
 .survey-preview { margin: 16px 0; }
 .survey-preview p { overflow-wrap: anywhere; }
 .survey-warnings { padding-left: 18px; }
+
+/* The DS Report: drawn as the paper it becomes, with the base app's sheet styles (theme.css, print.css). */
+.survey-report { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); }
+.survey-report-table td { text-align: right; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.survey-report-table th[scope='row'] { font-weight: 500; white-space: normal; }
+.survey-report-totals th[scope='row'] { font-weight: 600; }
+.survey-report-remarks { margin: 0; overflow-wrap: anywhere; }
+@media print {
+  .survey-report { margin: 0; padding: 0; border: 0; border-radius: 0; font-size: 10pt; }
+  .survey-report .sheet-table-wrap { overflow: visible; }
+  .survey-report .sheet-table { font-size: 9pt; }
+  .survey-report .sheet-table th, .survey-report .sheet-table td { padding: 2px 5px; border-color: #000000; }
+  .survey-report .sheet-table tr, .survey-report .sheet-sign { break-inside: avoid; }
+}

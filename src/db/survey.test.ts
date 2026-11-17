@@ -7,7 +7,7 @@ import type { MasterpieceDB } from './schema';
 import { getSettings } from './settings';
 import { createShip, deleteShip } from './ships';
 import {
-  deleteSurvey, getHydro, getSurveyShip, getTemplate, listSurveys, saveHydro, saveSurvey, saveSurveyShip, saveTemplate,
+  deleteSurvey, getHydro, getSurveyShip, getTemplate, listSurveys, saveHydro, saveSurvey, saveSurveyImport, saveSurveyShip, saveTemplate,
 } from './survey';
 import type { SurveyShipFields } from './survey';
 
@@ -130,6 +130,26 @@ describe('the company workbook template', () => {
     const again = await saveTemplate(db, shipId, { fileName: 'survey2.xlsx', bytes, cellMap });
     expect(again.id).toBe(saved.id);
     expect((await getTemplate(db, shipId))?.fileName).toBe('survey2.xlsx');
+  });
+});
+
+describe('saving an imported workbook', () => {
+  const template = { fileName: 'made-up.xlsx', bytes: new Uint8Array([1, 2, 3]), cellMap };
+
+  it('writes the table, the ship data and the template together', async () => {
+    await saveSurveyImport(db, shipId, { hydro: rows, ship: shipData, template });
+    expect((await getHydro(db, shipId))?.rows).toEqual(rows);
+    expect(await getSurveyShip(db, shipId)).toMatchObject(shipData);
+    expect((await getTemplate(db, shipId))?.fileName).toBe('made-up.xlsx');
+  });
+
+  it('is one transaction: when the template can’t be written, the table and the ship data stay as they were', async () => {
+    await saveSurveyImport(db, shipId, { hydro: rows, ship: shipData, template });
+    const put = vi.spyOn(db.surveyTemplates, 'put').mockRejectedValueOnce(new Error('disk full'));
+    await expect(saveSurveyImport(db, shipId, { hydro: rows.slice(0, 1), ship: { ...shipData, lbp: 120 }, template })).rejects.toThrow();
+    put.mockRestore();
+    expect((await getHydro(db, shipId))?.rows).toEqual(rows);
+    expect((await getSurveyShip(db, shipId))?.lbp).toBe(100);
   });
 });
 

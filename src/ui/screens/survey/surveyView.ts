@@ -140,9 +140,11 @@ const m4 = (x: number) => `${fixed(x, 4)} m`;
 const t3 = (x: number) => `${fixed(x, 3)} t`;
 
 /**
- * Every intermediate line, in the workbook's order: the sheet's drafts block (rows 15 to 23), then its left column of
- * hydrostatics (I25 to I34), then its right column of displacements (Y25 to Y34). The three marks' lines are
- * `marks` (forward, midships, aft); the rest are `lines`.
+ * Every intermediate line, each after the figures it is worked from: the sheet's drafts block (rows 15 to 23), then its
+ * left column of hydrostatics (I25 to I34), then its right column of displacements (Y25 to Y34). Rows 20 to 23 are in
+ * dependency order, not the sheet's strict column order: the apparent trim and the means (right column) first, then
+ * the list and the deflection (left column), which are worked from them. The three marks' lines are `marks` (forward,
+ * midships, aft); the rest are `lines`.
  */
 export function calculationLines(ship: DraftSurveyShip, worked: Worked): { marks: { label: string; values: [string, string, string] }[]; lines: Line[] } {
   const r = worked.sheet;
