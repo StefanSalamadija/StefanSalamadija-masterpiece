@@ -424,6 +424,26 @@ function readCells(sheet: SheetView): Partial<Record<CellKey, string>> {
     });
   }
 
+  if (sheet.name === 'INITIAL') {
+    // The particulars (ruling I1): kept even when the cell is a formula, so that the export refuses it rather than
+    // leave the workbook working with other particulars than the app's. The trim LBP is kept only when it is typed: as
+    // a formula it follows "LBP =". So are the midships and aft keel plate corrections, which may follow the forward one.
+    const keep = (key: CellKey, p: Pos | undefined) => { if (p) cells[key] = sheet.address(p); };
+    for (const [key, labels] of [['shipLbp', ['lbp=']], ['shipDF', ['df=']], ['shipDM', ['dm=']], ['shipDA', ['da=']], ['shipBeam', ['beam']],
+      ['shipLightShip', ['light ship weight', 'light ship', 'lightship']]] as const) {
+      const label = sheet.find(labels);
+      keep(key, label && sheet.next(label, 'value'));
+    }
+    const trim = sheet.find(['lbp']);
+    put('shipTrimLbp', trim && sheet.next(trim, 'value'));
+    const keel = sheet.find(KEEL_LABELS);
+    if (keel) {
+      const [f, m, a] = draftColumns(sheet).map((span) => span && sheet.slotIn(keel.r, span.from, span.to));
+      keep('shipKeelF', f);
+      put('shipKeelM', m);
+      put('shipKeelA', a);
+    }
+  }
   if (sheet.name === 'FINAL') {
     for (const [key, labels] of [['finalOwnDA', ['da=']], ['finalOwnLBP', ['lbp=']]] as const) {
       const label = sheet.find(labels);

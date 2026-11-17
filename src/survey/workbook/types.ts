@@ -16,7 +16,16 @@ export type CellKey =
   | 'fP' | 'fS' | 'mP' | 'mS' | 'aP' | 'aS' | 'density'
   | 'ballast' | 'freshWater' | 'vlsfo' | 'lsmgo' | 'lubOil' | 'other'
   | 'comparedQty' | 'blQty' | 'remarks' | 'surveyor' | 'chiefOfficer'
-  | 'finalOwnDA' | 'finalOwnLBP';
+  | 'finalOwnDA' | 'finalOwnLBP'
+  | ShipCellKey;
+
+/**
+ * The ship's particulars on INITIAL (ruling I1): the cells the app's ship record comes from at import, which the export
+ * writes back from the record so that Excel works with the same particulars as the app. `shipTrimLbp` is the "LBP" the
+ * trim corrections use (I28 in the company layout), and `shipKeelF/M/A` the keel plate correction under each mark.
+ */
+export type ShipCellKey =
+  | 'shipLbp' | 'shipTrimLbp' | 'shipDF' | 'shipDM' | 'shipDA' | 'shipBeam' | 'shipLightShip' | 'shipKeelF' | 'shipKeelM' | 'shipKeelA';
 
 /**
  * Where each input goes in the company workbook, per sheet: an A1 cell address such as `"C12"`, found from the labels

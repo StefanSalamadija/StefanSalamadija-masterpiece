@@ -8,11 +8,14 @@ import type { CellKey, CellMap, SurveySheet } from './types';
 /**
  * The inputs a sheet must have a cell for before the workbook can be filled in: the six drafts, the density and the
  * deductibles on both, the operation on INITIAL (FINAL and the DS Report follow it), and on FINAL the compared quantity
- * and the sheet's own dA and LBP. The other fields (port, dates, names, weather, remarks …) are written when their cell
+ * and the sheet's own dA and LBP; and on INITIAL the ship's particulars the app reads (the LBP, the mark distances, the
+ * beam and the light ship), which the export writes from the ship record. The trim LBP and the keel plate corrections
+ * are written when their cells are found. The other fields (port, dates, names, weather, remarks …) are written when their cell
  * is found and left out otherwise; on FINAL most of them are formulas on INITIAL, so they have no cell there.
  */
 export const REQUIRED_CELLS: Record<SurveySheet, readonly CellKey[]> = {
-  INITIAL: ['operation', 'fP', 'fS', 'mP', 'mS', 'aP', 'aS', 'density', 'ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other'],
+  INITIAL: ['operation', 'fP', 'fS', 'mP', 'mS', 'aP', 'aS', 'density', 'ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other',
+    'shipLbp', 'shipDF', 'shipDM', 'shipDA', 'shipBeam', 'shipLightShip'],
   FINAL: ['fP', 'fS', 'mP', 'mS', 'aP', 'aS', 'density', 'ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other',
     'comparedQty', 'finalOwnDA', 'finalOwnLBP'],
 };
@@ -26,6 +29,9 @@ export const CELL_NAMES: Record<CellKey, string> = {
   ballast: 'Ballast', freshWater: 'Fresh Water', vlsfo: 'VLSFO', lsmgo: 'LSMGO', lubOil: 'Lub Oil', other: 'Other',
   comparedQty: 'Shore Scale / B/L figure', blQty: 'BL Q-ty', remarks: 'Remarks', surveyor: 'Surveyor', chiefOfficer: 'Ch. Off.',
   finalOwnDA: 'dA', finalOwnLBP: 'LBP',
+  shipLbp: 'LBP =', shipTrimLbp: 'LBP (trim corrections)', shipDF: 'dF =', shipDM: 'dM =', shipDA: 'dA =', shipBeam: 'Beam',
+  shipLightShip: 'Light Ship Weight', shipKeelF: 'Keel Plate Corr. (forward)', shipKeelM: 'Keel Plate Corr. (midships)',
+  shipKeelA: 'Keel Plate Corr. (aft)',
 };
 
 /**

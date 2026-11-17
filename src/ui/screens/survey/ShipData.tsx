@@ -8,7 +8,7 @@ import type { DraftSurveyShip, FieldError, HydroRow, LcfSource, SheetRanges } fr
 // Types only: the reader comes with SheetJS, which is loaded when a file is chosen (see `readFile`).
 import type { ImportedWorkbook } from '../../../survey/workbook/read';
 import { Field } from '../../components/Field';
-import { fixed } from './surveyView';
+import { fixed, tableSummary } from './surveyView';
 import { useSurveyData } from './useSurveyData';
 
 interface Loaded { fileName: string; bytes: Uint8Array; book: ImportedWorkbook }
@@ -43,8 +43,6 @@ const PARTICULARS: { key: NumberKey; label: string; unit: string; required?: boo
 ];
 
 const withUnit = (value: number | undefined, unit: string) => (value === undefined ? '—' : unit ? `${value} ${unit}` : String(value));
-const tableSummary = (rows: readonly HydroRow[]) =>
-  `Hydrostatic table: ${rows.length} rows, ${fixed(rows[0].draft, 3)} m to ${fixed(rows[rows.length - 1].draft, 3)} m`;
 const rangeLine = (sheet: string, r: SheetRanges) => `${sheet} look-ups from ${fixed(r.dispTpcMtcFrom, 3)} m (LCF from ${fixed(r.lcfFrom, 3)} m)`;
 const hasTabled = (rows: readonly HydroRow[]) => rows.length > 0 && rows.every((r) => r.lcfTabledMid !== undefined);
 

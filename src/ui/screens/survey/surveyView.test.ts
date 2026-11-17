@@ -3,7 +3,7 @@ import { FAKE_FINAL, FAKE_INITIAL, makeSurveyWorkbook } from '../../../../e2e/fi
 import type { DraftSurvey, DraftSurveyShip } from '../../../domain/types';
 import { OUT_OF_RANGE } from '../../../survey/calc';
 import { readSurveyWorkbook } from '../../../survey/workbook/read';
-import { calculationLines, fixed, fromDraft, INITIAL_MISSING, NUMBER_ERROR, resultLine, signed, toDraft, workOut } from './surveyView';
+import { calculationLines, fixed, fromDraft, INITIAL_MISSING, NUMBER_ERROR, resultLine, signed, tableSummary, toDraft, workOut } from './surveyView';
 import type { Worked } from './surveyView';
 
 const book = readSurveyWorkbook(makeSurveyWorkbook());
@@ -78,5 +78,12 @@ describe('workOut', () => {
   it('gives no result outside the table, or without the initial survey', () => {
     expect(workOut(ship, book.hydro, { ...initial, drafts: { ...initial.drafts, mP: 9.5, mS: 9.5 } })).toEqual({ error: OUT_OF_RANGE });
     expect(workOut(ship, book.hydro, final, undefined)).toEqual({ error: INITIAL_MISSING });
+  });
+});
+
+describe('tableSummary', () => {
+  it('gives the rows and the draft range, and says when there is no table instead of failing', () => {
+    expect(tableSummary(book.hydro)).toBe('Hydrostatic table: 61 rows, 1.000 m to 6.900 m');
+    expect(tableSummary([])).toBe('No hydrostatic table: import the workbook again');
   });
 });

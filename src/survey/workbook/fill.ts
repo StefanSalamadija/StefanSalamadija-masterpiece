@@ -57,6 +57,7 @@ export function surveyFileName(shipName: string, date: string, kind: string): st
 const NUMBER_KEYS = new Set<CellKey>([
   'fP', 'fS', 'mP', 'mS', 'aP', 'aS', 'density', 'ballast', 'freshWater', 'vlsfo', 'lsmgo', 'lubOil', 'other',
   'comparedQty', 'blQty', 'windBft', 'swell', 'finalOwnDA', 'finalOwnLBP',
+  'shipLbp', 'shipTrimLbp', 'shipDF', 'shipDM', 'shipDA', 'shipBeam', 'shipLightShip', 'shipKeelF', 'shipKeelM', 'shipKeelA',
 ]);
 const kindOf = (key: CellKey): FieldKind =>
   NUMBER_KEYS.has(key) ? 'number' : key === 'date' ? 'date' : key === 'timeFrom' || key === 'timeTill' ? 'time' : 'text';
@@ -122,6 +123,13 @@ function valuesFor(sheet: SurveySheet, survey: DraftSurvey, ship: DraftSurveyShi
   if (sheet === 'INITIAL') {
     values.operation = OPERATION_TEXT[operation];
     values.cargoTitle = survey.cargo;
+    // The ship record's particulars (ruling I1), so that Excel works the survey with the same ones as the app.
+    const keel = numberText(ship.keelPlateCorr);
+    Object.assign(values, {
+      shipLbp: numberText(ship.lbp), shipTrimLbp: numberText(ship.lbp), shipDF: numberText(ship.dF), shipDM: numberText(ship.dM),
+      shipDA: numberText(ship.dA), shipBeam: numberText(ship.beam), shipLightShip: numberText(ship.lightShip),
+      shipKeelF: keel, shipKeelM: keel, shipKeelA: keel,
+    });
   } else {
     values.comparedQty = numberText(survey.comparedQty);
     values.finalOwnDA = numberText(ship.dA);
@@ -147,6 +155,7 @@ function clearCells(text: string, refs: ReadonlySet<string>): { text: string; st
 }
 
 const REFUSED = "The company workbook can't be filled in from the app";
+const REIMPORT_PARTICULARS = 'Re-import the ship data workbook to export.';
 const REIMPORT = 'Import the company workbook again under Ship data, or check its labels. The numbers and the report still work.';
 
 /**
@@ -160,6 +169,8 @@ export function fillSurveyWorkbook(input: FillInput): FilledWorkbook | { error: 
   if (input.other) jobs.push({ sheet: 'FINAL', survey: input.other });
   if (jobs.length === 0) return { error: 'There is no survey to write.' };
 
+  // A template imported before the particulars were mapped (ruling I1) can't be made to agree with the app.
+  if (input.initial && !Object.keys(input.cellMap.INITIAL ?? {}).some((key) => key.startsWith('ship'))) return { error: REIMPORT_PARTICULARS };
   const missing = missingCells(input.cellMap, jobs.map((j) => j.sheet));
   if (missing.length > 0) {
     return { error: `${REFUSED}: ${missing.join(', ')} ${missing.length === 1 ? "wasn't" : "weren't"} found in it. ${REIMPORT}` };

@@ -139,6 +139,9 @@ describe('readSurveyWorkbook: the input cells', () => {
       operation: 'H3', cargoTitle: 'O3', port: 'Z5', cargo: 'P6', terminal: 'Z6', holds: 'P7', date: 'Z7', blQty: 'P8',
       timeFrom: 'Z8', timeTill: 'AC8', windBft: 'R9', swell: 'Z9', ...drafts, density: 'Z29', ...deductibles,
       remarks: 'P37', surveyor: 'E47', chiefOfficer: 'S47',
+      // The ship's particulars, so that the export writes the ship record's (I1).
+      shipLbp: 'E11', shipTrimLbp: 'I28', shipDF: 'J11', shipDM: 'R11', shipDA: 'Z11', shipBeam: 'I21', shipLightShip: 'Y33',
+      shipKeelF: 'I16', shipKeelM: 'Q16', shipKeelA: 'Z16',
     });
     // On FINAL the ship and voyage fields are formulas on INITIAL, so they are not inputs there.
     expect(cellMap.FINAL).toEqual({
@@ -166,6 +169,16 @@ describe('readSurveyWorkbook: the input cells', () => {
   it('a moved draft heading leaves its drafts unmapped', () => {
     const result = read({ edit: (book) => { moveCell(book.Sheets.FINAL, 'X12', 'AT12'); } });
     expect(missingCells(result.cellMap)).toEqual(['FINAL: Aft port draft', 'FINAL: Aft starboard draft']);
+  });
+
+  it('keeps a particular’s cell even when it is a formula, so the export can refuse it; the trim LBP only when it is typed', () => {
+    const result = read({ edit: (book) => {
+      book.Sheets.INITIAL.I21 = { t: 'n', v: 24.6, f: 'FINAL!I21' };
+      book.Sheets.INITIAL.I28 = { t: 'n', v: 150, f: 'E11' };
+    } });
+    expect(result.cellMap.INITIAL.shipBeam).toBe('I21');
+    expect(result.cellMap.INITIAL.shipTrimLbp).toBeUndefined();
+    expect(result.cellMap.FINAL.shipLbp).toBeUndefined();
   });
 
   it('an input cell that holds a formula is not an input', () => {

@@ -192,6 +192,40 @@ describe('fillSurveyWorkbook: an initial and a final survey together', () => {
   });
 });
 
+describe('fillSurveyWorkbook: the ship’s particulars (I1)', () => {
+  const edited: DraftSurveyShip = { ...ship, lbp: 151.25, dF: -2.5, dM: 0.4, dA: 3.2, beam: 24.8, lightShip: 6901.5, keelPlateCorr: 0.012 };
+  const { pkg } = filled({ ship: edited, initial, other: final });
+  const at = (ref: string) => cell(pkg, 'INITIAL', ref)?.text;
+
+  it('writes the edited LBP, mark distances, beam, light ship and keel plate correction on INITIAL', () => {
+    expect(at('E11')).toBe('151.25');
+    expect(at('I28')).toBe('151.25'); // the LBP the trim corrections use
+    expect([at('J11'), at('R11'), at('Z11')]).toEqual(['-2.5', '0.4', '3.2']);
+    expect(at('I21')).toBe('24.8');
+    expect(at('Y33')).toBe('6901.5');
+    expect([at('I16'), at('Q16'), at('Z16')]).toEqual(['0.012', '0.012', '0.012']);
+    // FINAL's own dA and LBP agree with INITIAL's.
+    expect(cell(pkg, 'FINAL', cellMap.FINAL.finalOwnLBP!)?.text).toBe('151.25');
+    expect(cell(pkg, 'FINAL', cellMap.FINAL.finalOwnDA!)?.text).toBe('3.2');
+  });
+
+  it('refuses a cell map from before the particulars were mapped, and asks for a re-import', () => {
+    const old: CellMap = {
+      INITIAL: Object.fromEntries(Object.entries(cellMap.INITIAL).filter(([key]) => !key.startsWith('ship'))),
+      FINAL: { ...cellMap.FINAL },
+    };
+    expect(refusal({ initial, cellMap: old })).toBe('Re-import the ship data workbook to export.');
+    // A final alone writes no particulars, so it does not need them.
+    expect('error' in fillSurveyWorkbook(input({ other: final, cellMap: old }))).toBe(false);
+  });
+
+  it('refuses a particular whose cell is a formula or a label, and writes nothing', () => {
+    const map = (change: Partial<CellMap['INITIAL']>): CellMap => ({ INITIAL: { ...cellMap.INITIAL, ...change }, FINAL: { ...cellMap.FINAL } });
+    expect(refusal({ initial, cellMap: map({ shipBeam: 'I20' }) })).toMatch(/INITIAL: Beam \(I20\) is a formula/);
+    expect(refusal({ initial, cellMap: map({ shipLightShip: 'AC33' }) })).toMatch(/INITIAL: Light Ship Weight \(AC33\) holds “MT”/);
+  });
+});
+
 describe('fillSurveyWorkbook: a changed template is refused, and nothing is written', () => {
   const withMap = (sheet: 'INITIAL' | 'FINAL', change: Partial<Record<keyof CellMap['INITIAL'], string | undefined>>): CellMap => {
     const map: CellMap = { INITIAL: { ...cellMap.INITIAL }, FINAL: { ...cellMap.FINAL } };

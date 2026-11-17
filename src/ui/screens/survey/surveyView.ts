@@ -38,6 +38,15 @@ export function comparedName(operation: SurveyOperation): string {
   return operation === 'loading' ? 'Shore scale' : 'B/L figure';
 }
 
+/**
+ * "Hydrostatic table: 61 rows, 1.000 m to 6.900 m", or that there is none: a backup merge can leave the ship's data
+ * with an empty or deleted table, and the ship data screen must then offer the import, not fail.
+ */
+export function tableSummary(rows: readonly HydroRow[]): string {
+  if (rows.length === 0) return 'No hydrostatic table: import the workbook again';
+  return `Hydrostatic table: ${rows.length} rows, ${fixed(rows[0]!.draft, 3)} m to ${fixed(rows[rows.length - 1]!.draft, 3)} m`;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The form
 
