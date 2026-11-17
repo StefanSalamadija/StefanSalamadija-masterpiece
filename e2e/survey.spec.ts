@@ -289,7 +289,7 @@ test('survey: a template whose input cells were not found is not filled in, and 
   await page.getByRole('link', { name: 'Report and workbook' }).click();
   await expect(page.getByRole('article', { name: 'DRAFT SURVEY REPORT' })).toContainText('Constant (initial)');
   await page.getByRole('button', { name: 'Export company workbook' }).click();
-  await expect(page.getByRole('alert')).toContainText("can't be filled in from the app: INITIAL: Ballast weren't found");
+  await expect(page.getByRole('alert')).toContainText("can't be filled in from the app: INITIAL: Ballast wasn't found");
   await expect(page.getByRole('article', { name: 'DRAFT SURVEY REPORT' })).toBeVisible();
 });
 

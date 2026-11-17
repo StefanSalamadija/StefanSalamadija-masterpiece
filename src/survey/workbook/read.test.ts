@@ -158,7 +158,7 @@ describe('readSurveyWorkbook: the input cells', () => {
     const result = read({ edit: (book) => { moveCell(book.Sheets.INITIAL, 'B37', 'AT60'); } });
     expect(result.cellMap.INITIAL.ballast).toBeUndefined();
     expect(missingCells(result.cellMap)).toEqual(['INITIAL: Ballast']);
-    expect(result.warnings).toEqual([expect.stringMatching(/can't be filled in.*INITIAL: Ballast/)]);
+    expect(result.warnings).toEqual([expect.stringMatching(/can't be filled in.*INITIAL: Ballast wasn't found\./)]);
     expect(result.hydro).toHaveLength(61);
     expect(result.ship.lbp).toBe(FAKE_SHIP.lbp);
   });

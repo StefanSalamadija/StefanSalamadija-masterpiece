@@ -161,7 +161,9 @@ export function fillSurveyWorkbook(input: FillInput): FilledWorkbook | { error: 
   if (jobs.length === 0) return { error: 'There is no survey to write.' };
 
   const missing = missingCells(input.cellMap, jobs.map((j) => j.sheet));
-  if (missing.length > 0) return { error: `${REFUSED}: ${missing.join(', ')} weren't found in it. ${REIMPORT}` };
+  if (missing.length > 0) {
+    return { error: `${REFUSED}: ${missing.join(', ')} ${missing.length === 1 ? "wasn't" : "weren't"} found in it. ${REIMPORT}` };
+  }
 
   let pkg: Package;
   let sheets: SheetModel[];
@@ -182,7 +184,12 @@ export function fillSurveyWorkbook(input: FillInput): FilledWorkbook | { error: 
     if (!sheet) return { error: `${REFUSED}: it has no ${name} sheet. ${REIMPORT}` };
     const operation = survey.kind === 'constant' ? 'loading' : survey.operation;
     const given = valuesFor(name, survey, input.ship, operation);
+    // Two inputs on one cell: the second would overwrite the first, so it is refused rather than left to the read-back.
+    const taken = new Map<string, CellKey>();
     for (const [key, ref] of Object.entries(input.cellMap[name]) as [CellKey, string][]) {
+      const first = taken.get(ref);
+      if (first !== undefined) { problems.push(`${name}: ${CELL_NAMES[first]} and ${CELL_NAMES[key]} (${ref}) are the same cell`); continue; }
+      taken.set(ref, key);
       const why = unsafe(sheet, ref, key);
       if (why) { problems.push(`${name}: ${CELL_NAMES[key]} (${ref}) ${why}`); continue; }
       const value = given[key];

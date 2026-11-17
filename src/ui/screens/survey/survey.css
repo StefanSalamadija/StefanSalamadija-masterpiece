@@ -39,10 +39,7 @@
 .survey-report-table th[scope='row'] { font-weight: 500; white-space: normal; }
 .survey-report-totals th[scope='row'] { font-weight: 600; }
 .survey-report-remarks { margin: 0; overflow-wrap: anywhere; }
+/* On paper the report drops its screen frame; its tables and signatures print by print.css's sheet rules. */
 @media print {
   .survey-report { margin: 0; padding: 0; border: 0; border-radius: 0; font-size: 10pt; }
-  .survey-report .sheet-table-wrap { overflow: visible; }
-  .survey-report .sheet-table { font-size: 9pt; }
-  .survey-report .sheet-table th, .survey-report .sheet-table td { padding: 2px 5px; border-color: #000000; }
-  .survey-report .sheet-table tr, .survey-report .sheet-sign { break-inside: avoid; }
 }

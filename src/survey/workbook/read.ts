@@ -169,7 +169,7 @@ export function readSurveyWorkbook(bytes: Uint8Array): ImportedWorkbook | { erro
   const cellMap: CellMap = { INITIAL: readCells(initial), FINAL: readCells(final) };
   const notFound = missingCells(cellMap);
   if (notFound.length > 0) {
-    warnings.push(`The company workbook can't be filled in from the app: ${notFound.join(', ')} weren't found. `
+    warnings.push(`The company workbook can't be filled in from the app: ${notFound.join(', ')} ${notFound.length === 1 ? "wasn't" : "weren't"} found. `
       + 'Its labels may have been moved or renamed. The numbers and the report still work.');
   }
   return { ship: { ...particulars, lcfSource: 'workbook', ranges }, hydro: table.rows, cellMap, warnings };

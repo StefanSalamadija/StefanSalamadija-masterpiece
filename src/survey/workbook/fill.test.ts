@@ -116,6 +116,31 @@ describe('fillSurveyWorkbook: an initial survey', () => {
     expect(cell(original, 'INITIAL', cellMap.INITIAL.port!)?.text).toBe(FAKE_INITIAL.port);
   });
 
+  it('clears a shared-string cell and lowers the shared strings count to match', () => {
+    // One fill's output keeps its text in shared strings: used as the template of a second fill, port and cargo are cleared.
+    const first = fillSurveyWorkbook(input({ initial }));
+    if ('error' in first) throw new Error(first.error);
+    const firstPkg = readPackage(first.bytes);
+    const port = cellMap.INITIAL.port!;
+    const cargo = cellMap.INITIAL.cargo!;
+    expect(cell(firstPkg, 'INITIAL', port)?.type).toBe('s');
+    expect(cell(firstPkg, 'INITIAL', cargo)?.type).toBe('s');
+
+    const second = fillSurveyWorkbook(input({ bytes: first.bytes, initial: { ...initial, port: undefined, cargo: undefined } }));
+    if ('error' in second) throw new Error(second.error);
+    const pkg2 = readPackage(second.bytes);
+    expect(cell(pkg2, 'INITIAL', port)?.text ?? '').toBe('');
+    expect(cell(pkg2, 'INITIAL', cargo)?.text ?? '').toBe('');
+
+    const references = (p: Package) => loadWorkbook(p).sheets
+      .map((s) => (partText(p, s.path)!.match(/<c\b[^>]*\bt="s"[^>]*>(?:(?!<\/c>)[\s\S])*?<v>/g) ?? []).length)
+      .reduce((a, b) => a + b, 0);
+    const countOf = (p: Package) => Number(/<(?:\w+:)?sst\b[^>]*?\bcount="(\d+)"/.exec(partText(p, 'xl/sharedStrings.xml')!)![1]);
+    expect(countOf(firstPkg)).toBe(references(firstPkg));
+    expect(references(pkg2)).toBeLessThan(references(firstPkg));
+    expect(countOf(pkg2)).toBe(references(pkg2));
+  });
+
   it('sets the workbook to recalculate fully when it is opened', () => {
     expect(partText(pkg, 'xl/workbook.xml')).toMatch(/<calcPr\b[^>]*fullCalcOnLoad="1"/);
   });
@@ -180,7 +205,9 @@ describe('fillSurveyWorkbook: a changed template is refused, and nothing is writ
   it('refuses a cell map with a required input missing, naming it', () => {
     const error = refusal({ initial, cellMap: withMap('INITIAL', { ballast: undefined }) });
     expect(error).toMatch(/can't be filled in/);
-    expect(error).toContain('INITIAL: Ballast');
+    expect(error).toContain("INITIAL: Ballast wasn't found in it.");
+    const two = refusal({ initial, cellMap: withMap('INITIAL', { ballast: undefined, density: undefined }) });
+    expect(two).toMatch(/INITIAL: (Ballast|Density), INITIAL: (Ballast|Density) weren't found in it\./);
   });
 
   it('asks only for the sheets it writes', () => {
@@ -204,6 +231,12 @@ describe('fillSurveyWorkbook: a changed template is refused, and nothing is writ
 
   it('refuses a cell inside a merged block that is not its first cell', () => {
     expect(refusal({ initial, cellMap: withMap('INITIAL', { fP: 'J13' }) })).toMatch(/Forward port draft.*J13.*merged/);
+  });
+
+  it('refuses two inputs that point to the same cell, naming both', () => {
+    const error = refusal({ initial, cellMap: withMap('INITIAL', { fS: cellMap.INITIAL.fP }) });
+    expect(error).toMatch(/can't be filled in/);
+    expect(error).toContain(`INITIAL: Forward port draft and Forward starboard draft (${cellMap.INITIAL.fP}) are the same cell`);
   });
 
   it('refuses a file that is not the workbook', () => {

@@ -156,7 +156,7 @@ These sit under **Ship → Draft survey**, a new Ship chip, and are lazy-loaded:
 - **How the cells are found:** the input cells are detected once from the labels when the template is imported, e.g. the cell to the right of "Port" in the Forward column on INITIAL. The map is stored with the template.
 - **Untouched:** formulas, styles and every other part of the workbook. Writing reuses the forms engine's Excel writer (`src/forms`, Excel cell writing that leaves other parts byte-identical).
 - **Recalculation:** the workbook is set to recalculate fully when opened (`fullCalcOnLoad`), so Excel shows the results.
-- **Sheet choice:** initial → INITIAL, final → FINAL, interim → "FINAL (2)". A combined Initial + Final export writes both sheets, and the DS Report then shows both.
+- **Sheet choice:** initial or constant check → INITIAL, final or interim → FINAL (§2: interims follow the FINAL layout). "FINAL (2)" is never written. A combined Initial + Final export writes both sheets, and the DS Report then shows both.
 - **File name:** `Draft_Survey_<Ship>_<YYYY-MM-DD>_<kind>.xlsx`. It is shared or downloaded like other files.
 - **A changed template:** if the input cells can't be found, the fill is refused with a plain message, and the report and numbers still work.
 
