@@ -93,8 +93,24 @@ test('Night red draws nothing but red and black on Home, Settings and the crew f
   await expectRedOnly(page);
   await page.goto('./#/ship/crew/new');
   await expect(page.getByRole('heading', { name: 'Add crew member' })).toBeVisible();
-  await expect(page.locator('input[type="date"]').first()).toBeVisible();
-  await page.locator('input[type="date"]').first().focus();
+  // A date with a value, and its first segment focused: the browser highlights the segment it is in.
+  const date = page.getByLabel('Date of birth');
+  await date.fill('1980-03-14');
+  await date.click({ position: { x: 16, y: 24 } });
+  await expect(date).toBeFocused();
+  await expectRedOnly(page);
+});
+
+test('Night red draws ticked checkboxes and placeholders in red', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew/print');
+  const ticked = page.locator('input[type="checkbox"]:checked').first();
+  await expect(ticked).toBeVisible();
+  await ticked.focus();
+  await expectRedOnly(page);
+  await page.goto('./#/budget/add');
+  await expect(page.locator('input[placeholder]').first()).toBeVisible();
   await expectRedOnly(page);
 });
 

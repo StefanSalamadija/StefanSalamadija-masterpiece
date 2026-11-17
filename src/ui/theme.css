@@ -248,9 +248,107 @@
   color: var(--on-accent);
 }
 
+/* Fields take the page's text colour rather than the browser's field colour (white under the dark color-scheme). */
+input,
+select,
+textarea {
+  color: inherit;
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
 /* The native date and time pickers' icon: drawn red in Night red. */
 ::-webkit-calendar-picker-indicator {
   filter: var(--picker-filter);
+}
+
+/*
+ * Night red: the browser highlights the date or time segment being edited in its own blue. The segments stay transparent,
+ * and the focused one is marked in the theme's own mark colours instead.
+ */
+:root[data-theme='red'] ::-webkit-datetime-edit-year-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-month-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-day-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-hour-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-minute-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-second-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-millisecond-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-ampm-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-week-field {
+  background: transparent;
+  color: var(--text);
+}
+
+:root[data-theme='red'] ::-webkit-datetime-edit-year-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-month-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-day-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-hour-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-minute-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-second-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-millisecond-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-ampm-field:focus,
+:root[data-theme='red'] ::-webkit-datetime-edit-week-field:focus {
+  background: var(--mark-bg);
+  color: var(--mark-text);
+}
+
+/*
+ * Night red: the browser draws a ticked checkbox and a chosen radio with a white mark, whatever accent-color says. Here
+ * they are drawn by hand: a red outline, and a red tick or dot. They stay native inputs, so the keyboard, the focus ring
+ * (--focus) and the label around them work as before.
+ */
+:root[data-theme='red'] input[type='checkbox'],
+:root[data-theme='red'] input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0;
+  border: 2px solid var(--text);
+  border-radius: 4px;
+  background: var(--surface-0);
+  color: var(--text);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+:root[data-theme='red'] input[type='radio'] {
+  border-radius: 50%;
+}
+
+:root[data-theme='red'] .check input {
+  width: 24px;
+  height: 24px;
+}
+
+:root[data-theme='red'] input[type='checkbox']:checked::before {
+  content: '';
+  width: 0.35em;
+  height: 0.65em;
+  margin-top: -0.15em;
+  border-right: 3px solid var(--text);
+  border-bottom: 3px solid var(--text);
+  transform: rotate(45deg);
+}
+
+:root[data-theme='red'] input[type='radio']:checked::before {
+  content: '';
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+:root[data-theme='red'] input[type='checkbox']:disabled,
+:root[data-theme='red'] input[type='radio']:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* The browser's autofill paints its own pale fill: keep the field in the theme. */

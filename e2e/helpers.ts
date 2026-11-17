@@ -111,47 +111,90 @@ export async function setTheme(page: Page, theme: ThemeLabel): Promise<void> {
 
 /**
  * Fails when anything on the page is drawn in a colour that is neither near black nor red (spec §5: nothing bright, white
- * or blue in Night red). It reads, for <html>, <body> and every element under them, each computed colour CSS can set, and
- * skips only fully transparent ones. Every image and canvas must also be filtered (`--media-filter`).
+ * or blue in Night red). Two checks:
+ * - Styles. For <html> and every element under it, and for its ::before, ::after, ::marker and ::placeholder, it reads every
+ *   computed colour CSS can set: colours, borders, outline, fill, stroke, caret, accent, text decoration, SVG stop, flood
+ *   and lighting colours, and the colours inside box-shadow, text-shadow and background-image (gradients). Only fully
+ *   transparent ones are skipped. Every image and canvas must also be filtered (`--media-filter`).
+ * - Pixels. A full-page screenshot, for what styles cannot reach (native controls such as the date-segment highlight and
+ *   the checkbox tick): no pixel may have green or blue above about half its red, beyond a small tolerance for smoothing.
  */
 export async function expectRedOnly(page: Page): Promise<void> {
   const problems = await page.evaluate(() => {
     const PROPS = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
-      'outline-color', 'fill', 'stroke', 'caret-color', 'accent-color', 'text-decoration-color'];
+      'outline-color', 'fill', 'stroke', 'caret-color', 'accent-color', 'text-decoration-color', 'stop-color', 'flood-color',
+      'lighting-color', 'column-rule-color', 'text-emphasis-color', '-webkit-text-fill-color', '-webkit-text-stroke-color',
+      'box-shadow', 'text-shadow', 'background-image'];
+    const PSEUDOS = ['', '::before', '::after', '::marker', '::placeholder'];
     const isRedOrBlack = (r: number, g: number, b: number): boolean =>
       (r <= 0x20 && g <= 0x20 && b <= 0x20) || (g <= 0.45 * r && b <= 0.45 * r);
-    /** [r, g, b, alpha] in 0–255 (alpha 0–1), or undefined for a value that is not a colour (none, auto, url). */
-    const parse = (value: string): number[] | undefined => {
-      let m = /^rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)(?:,? \/? ?([\d.]+))?\)$/.exec(value);
-      if (m) return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
-      m = /^color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.]+))?\)$/.exec(value);
-      if (m) return [Number(m[1]) * 255, Number(m[2]) * 255, Number(m[3]) * 255, m[4] === undefined ? 1 : Number(m[4])];
-      return undefined;
+    /** Every colour written in a computed value, as [r, g, b, alpha] (0–255, alpha 0–1). */
+    const colours = (value: string): { text: string; rgba: number[] }[] => {
+      const found: { text: string; rgba: number[] }[] = [];
+      for (const m of value.matchAll(/rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)(?:,? \/? ?([\d.]+))?\)/g)) {
+        found.push({ text: m[0], rgba: [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])] });
+      }
+      for (const m of value.matchAll(/color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.]+))?\)/g)) {
+        found.push({ text: m[0], rgba: [Number(m[1]) * 255, Number(m[2]) * 255, Number(m[3]) * 255, m[4] === undefined ? 1 : Number(m[4])] });
+      }
+      return found;
     };
-    const describe = (el: Element): string => {
+    const describe = (el: Element, pseudo: string): string => {
       const id = el.id ? `#${el.id}` : '';
       const cls = typeof el.className === 'string' && el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : '';
-      return `${el.tagName.toLowerCase()}${id}${cls}`;
+      return `${el.tagName.toLowerCase()}${id}${cls}${pseudo}`;
     };
     const found: string[] = [];
     const elements = [document.documentElement, ...document.documentElement.querySelectorAll('*')];
     for (const el of elements) {
-      const style = getComputedStyle(el);
-      for (const prop of PROPS) {
-        const value = style.getPropertyValue(prop);
-        if (value === 'transparent' || value === 'none' || value === 'auto' || value === 'currentcolor') continue;
-        const rgba = parse(value);
-        if (!rgba) {
-          if (/^(rgb|color|hsl|lab|lch|oklab|oklch|#)/.test(value)) found.push(`${describe(el)} ${prop}: ${value} (unparsed)`);
-          continue;
+      for (const pseudo of PSEUDOS) {
+        if (pseudo === '::placeholder' && !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) continue;
+        if (pseudo === '::marker' && getComputedStyle(el).display !== 'list-item') continue;
+        const style = getComputedStyle(el, pseudo || null);
+        if ((pseudo === '::before' || pseudo === '::after') && (style.content === 'none' || style.content === 'normal')) continue;
+        for (const prop of PROPS) {
+          // These three paint only on their own SVG elements (their initial values elsewhere draw nothing).
+          if (prop === 'lighting-color' && !/^fe(Diffuse|Specular)Lighting$/.test(el.tagName)) continue;
+          if (prop === 'flood-color' && !/^fe(Flood|DropShadow)$/.test(el.tagName)) continue;
+          if (prop === 'stop-color' && el.tagName !== 'stop') continue;
+          const value = style.getPropertyValue(prop);
+          if (!value || value === 'none') continue;
+          const parsed = colours(value);
+          if (parsed.length === 0 && /\b(hsla?|lab|lch|oklab|oklch)\(|#[0-9a-f]{3}/i.test(value)) found.push(`${describe(el, pseudo)} ${prop}: ${value} (unparsed)`);
+          for (const { text, rgba: [r, g, b, a] } of parsed) {
+            if (a !== 0 && !isRedOrBlack(r, g, b)) found.push(`${describe(el, pseudo)} ${prop}: ${text}`);
+          }
         }
-        const [r, g, b, a] = rgba;
-        if (a === 0) continue;
-        if (!isRedOrBlack(r, g, b)) found.push(`${describe(el)} ${prop}: ${value}`);
       }
-      if ((el.tagName === 'IMG' || el.tagName === 'CANVAS') && style.filter === 'none') found.push(`${describe(el)} is not filtered`);
+      if ((el.tagName === 'IMG' || el.tagName === 'CANVAS') && getComputedStyle(el).filter === 'none') found.push(`${describe(el, '')} is not filtered`);
     }
     return [...new Set(found)];
   });
   expect(problems, 'colours that are not red or black in Night red').toEqual([]);
+
+  const shot = await page.screenshot({ fullPage: true, animations: 'disabled', caret: 'hide' });
+  const pixels = await page.evaluate(async (src) => {
+    const image = new Image();
+    image.src = src;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const TOLERANCE = 12; // smoothing at the edge of red on black
+    let count = 0;
+    const examples: string[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+      if (g > 0.5 * r + TOLERANCE || b > 0.5 * r + TOLERANCE) {
+        count += 1;
+        const at = i / 4;
+        if (examples.length < 5) examples.push(`(${at % canvas.width}, ${Math.floor(at / canvas.width)}) rgb(${r}, ${g}, ${b})`);
+      }
+    }
+    return { count, examples };
+  }, `data:image/png;base64,${shot.toString('base64')}`);
+  expect(pixels, 'pixels that are not red or black in Night red').toEqual({ count: 0, examples: [] });
 }
