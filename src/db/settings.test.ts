@@ -97,9 +97,73 @@ describe('the stored theme', () => {
   });
 
   it('normaliseSettings turns an unknown theme into day and leaves the rest alone', () => {
-    const raw = { key: 'device', deviceId: 'd', deviceName: 'Laptop', backupReminderDays: 7, lastSync: {}, theme: 'purple' } as unknown as Settings;
+    const raw = {
+      key: 'device', deviceId: 'd', deviceName: 'Laptop', backupReminderDays: 7, lastSync: {}, theme: 'purple',
+      nightAuto: false, nightFrom: '18:00', nightTo: '06:00',
+    } as unknown as Settings;
     expect(normaliseSettings(raw)).toEqual({ ...raw, theme: 'day' });
     const fine: Settings = { ...raw, theme: 'red' };
     expect(normaliseSettings(fine)).toEqual(fine);
+  });
+});
+
+describe('the automatic night settings', () => {
+  const raw = (over: Record<string, unknown> = {}) =>
+    ({ key: 'device', deviceId: 'd', deviceName: 'Laptop', backupReminderDays: 7, lastSync: {}, theme: 'day', ...over }) as unknown as Settings;
+
+  it('are off, from 18:00 to 06:00, on a new device', async () => {
+    const s = await getSettings(freshDb());
+    expect([s.nightAuto, s.nightFrom, s.nightTo, s.themeOverride]).toEqual([false, '18:00', '06:00', undefined]);
+  });
+
+  it('are filled with the defaults for a record stored before they existed', async () => {
+    const db = freshDb();
+    const current = await getSettings(db);
+    const { nightAuto: _a, nightFrom: _f, nightTo: _t, ...old } = current;
+    await db.settings.put(old as Settings);
+    const s = await getSettings(db);
+    expect([s.nightAuto, s.nightFrom, s.nightTo]).toEqual([false, '18:00', '06:00']);
+    expect((await updateSettings(db, { backupReminderDays: 3 })).nightFrom).toBe('18:00');
+  });
+
+  it('keep valid values', () => {
+    const fine = raw({ nightAuto: true, nightFrom: '20:15', nightTo: '05:45', themeOverride: { theme: 'contrast', until: '2026-11-18T05:45' } });
+    expect(normaliseSettings(fine)).toEqual(fine);
+  });
+
+  it('replace a time that is not HH:MM with the default', () => {
+    const s = normaliseSettings(raw({ nightAuto: true, nightFrom: '25:00', nightTo: 6 }));
+    expect([s.nightFrom, s.nightTo]).toEqual(['18:00', '06:00']);
+    expect(normaliseSettings(raw({ nightAuto: 'yes' })).nightAuto).toBe(false);
+  });
+
+  it('drop an override with an unknown theme or an end that is not a ship-local date and time', () => {
+    for (const themeOverride of [
+      { theme: 'purple', until: '2026-11-18T06:00' },
+      { theme: 'dark', until: '2026-11-18 06:00' },
+      { theme: 'dark', until: '2026-02-30T06:00' },
+      { theme: 'dark' },
+      'dark',
+      null,
+    ]) {
+      const s = normaliseSettings(raw({ nightAuto: true, themeOverride }));
+      expect('themeOverride' in s).toBe(false);
+    }
+  });
+
+  it('drop a stored bad override on the next read', async () => {
+    const db = freshDb();
+    const current = await getSettings(db);
+    await db.settings.put({ ...current, themeOverride: { theme: 'purple', until: 'soon' } } as unknown as Settings);
+    expect((await getSettings(db)).themeOverride).toBeUndefined();
+  });
+
+  it('lose the override key itself when it is cleared', async () => {
+    const db = freshDb();
+    await updateSettings(db, { nightAuto: true, themeOverride: { theme: 'dark', until: '2026-11-18T06:00' } });
+    const cleared = await updateSettings(db, { themeOverride: undefined });
+    expect('themeOverride' in cleared).toBe(false);
+    expect('themeOverride' in ((await db.settings.get('device')) ?? {})).toBe(false);
+    expect(cleared.nightAuto).toBe(true);
   });
 });

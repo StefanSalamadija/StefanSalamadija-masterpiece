@@ -1,5 +1,6 @@
 import type { PinSettings, Settings } from '../domain/types';
-import { readTheme } from '../ui/theme';
+import { isValidLocalDateTime } from '../domain/dates';
+import { readTheme, THEMES } from '../domain/theme';
 import type { MasterpieceDB } from './schema';
 import { guardWrite } from './storage';
 
@@ -17,16 +18,47 @@ function defaultSettings(): Settings {
     backupReminderDays: 7,
     lastSync: {},
     theme: 'day',
+    ...NIGHT_DEFAULTS,
   };
 }
 
+/** Automatic night is off until it is turned on, and runs from 18:00 to 06:00 ship's time (spec §8). */
+export const NIGHT_DEFAULTS = { nightAuto: false, nightFrom: '18:00', nightTo: '06:00' } as const;
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const isOverride = (value: unknown): value is NonNullable<Settings['themeOverride']> => {
+  const o = value as Settings['themeOverride'];
+  return typeof o === 'object' && o !== null && THEMES.includes(o.theme) && typeof o.until === 'string' && isValidLocalDateTime(o.until);
+};
+
 /**
- * Stored settings as the app uses them: a theme stored before piece 7 (`night`), or one that is not known, is read as
- * `readTheme` reads it. Every read of the settings goes through here.
+ * Stored settings as the app uses them, so every read of the settings goes through here:
+ * - a theme stored before piece 7 (`night`), or one that is not known, is read as `readTheme` reads it;
+ * - the automatic-night fields of a record from before they existed get their defaults, and a time that is not `HH:MM`
+ *   is replaced by its default;
+ * - an override with an unknown theme, or an end that is not a ship-local date and time, is dropped (the key goes).
+ * A record that needs none of this is handed back as it is.
  */
 export function normaliseSettings(raw: Settings): Settings {
   const theme = readTheme(raw.theme);
-  return theme === raw.theme ? raw : { ...raw, theme };
+  const nightAuto = typeof raw.nightAuto === 'boolean' ? raw.nightAuto : NIGHT_DEFAULTS.nightAuto;
+  const nightFrom = typeof raw.nightFrom === 'string' && HHMM.test(raw.nightFrom) ? raw.nightFrom : NIGHT_DEFAULTS.nightFrom;
+  const nightTo = typeof raw.nightTo === 'string' && HHMM.test(raw.nightTo) ? raw.nightTo : NIGHT_DEFAULTS.nightTo;
+  const badOverride = 'themeOverride' in raw && !isOverride(raw.themeOverride);
+  if (theme === raw.theme && nightAuto === raw.nightAuto && nightFrom === raw.nightFrom && nightTo === raw.nightTo && !badOverride) {
+    return raw;
+  }
+  const { themeOverride, ...rest } = raw;
+  const keep = themeOverride !== undefined && !badOverride;
+  return { ...rest, theme, nightAuto, nightFrom, nightTo, ...(keep ? { themeOverride } : {}) };
+}
+
+/** `settings` without the keys whose value is undefined, so a setting cleared with `undefined` is gone, not stored empty. */
+function withoutUndefined(settings: Settings): Settings {
+  const out = { ...settings } as Record<string, unknown>;
+  for (const key of Object.keys(out)) if (out[key] === undefined) delete out[key];
+  return out as unknown as Settings;
 }
 
 /** The stored settings, created with defaults if there are none yet. Runs inside a read-write transaction on `settings`. */
@@ -46,12 +78,15 @@ export async function getSettings(db: MasterpieceDB): Promise<Settings> {
   return guardWrite(() => db.transaction('rw', db.settings, async () => readOrCreate(db)));
 }
 
-/** Merges `patch` into the stored settings. The device id (and the record key) never change. */
+/**
+ * Merges `patch` into the stored settings. The device id (and the record key) never change. A key patched to `undefined`
+ * (such as `{ themeOverride: undefined }`) is removed, as `removePin` removes the passcode.
+ */
 export function updateSettings(db: MasterpieceDB, patch: Partial<Settings>): Promise<Settings> {
   return guardWrite(() =>
     db.transaction('rw', db.settings, async () => {
       const current = await readOrCreate(db);
-      const updated: Settings = { ...current, ...patch, key: DEVICE_KEY, deviceId: current.deviceId };
+      const updated = withoutUndefined({ ...current, ...patch, key: DEVICE_KEY, deviceId: current.deviceId });
       await db.settings.put(updated);
       return updated;
     }),

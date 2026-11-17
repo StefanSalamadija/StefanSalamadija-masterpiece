@@ -4,19 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0B2545" />
+    <!--
+      The script puts the theme on <html> before the page is first painted, so night never starts with a white frame, and
+      gives the browser's status bar the colour of that theme's bars (BAR_BG in src/ui/theme.ts). localStorage only mirrors
+      the settings (mirrorTheme): mp-theme is the base theme (`night` is Dark, as before piece 7), and mp-night, when
+      automatic night is on, holds the window, the ship's offset and any held theme (nightMirror in src/ui/themeSchedule.ts),
+      from which it works out ship's time now, as effectiveTheme does. The app corrects it all from IndexedDB when it starts.
+    -->
     <script>
-      // Puts the last theme on <html> before the page is first painted, so night mode never starts with a white frame, and
-      // gives the browser's status bar the colour of that theme's bars (BAR_BG in src/ui/theme.ts). localStorage only
-      // mirrors the setting; the app corrects it from IndexedDB when it starts. `night` is Dark, as it was before piece 7.
       try {
-        var theme = localStorage.getItem('mp-theme');
-        if (theme === 'night') theme = 'dark';
-        var bar = { day: '#0B2545', dark: '#0E1B2B', red: '#000000', contrast: '#000000' };
-        if (theme === 'day' || theme === 'dark' || theme === 'red' || theme === 'contrast') {
-          document.documentElement.dataset.theme = theme;
-          document.querySelector('meta[name="theme-color"]').setAttribute('content', bar[theme]);
+        var t = localStorage.getItem('mp-theme'), ok = /^(day|dark|red|contrast)$/;
+        if (t === 'night') t = 'dark';
+        try {
+          var n = JSON.parse(localStorage.getItem('mp-night'));
+          if (n && typeof n.offset == 'number') {
+            var now = new Date(Date.now() + n.offset * 6e4).toISOString().slice(0, 16), h = now.slice(11), f = n.from, e = n.to;
+            if (ok.test(n.override) && now < n.until) t = n.override;
+            else if (f < e ? h >= f && h < e : f > e && (h >= f || h < e)) t = 'red';
+          }
+        } catch (x) {}
+        if (ok.test(t)) {
+          document.documentElement.dataset.theme = t;
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', { day: '#0B2545', dark: '#0E1B2B', red: '#000000', contrast: '#000000' }[t]);
         }
-      } catch (e) {}
+      } catch (x) {}
     </script>
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icon-192.png" />

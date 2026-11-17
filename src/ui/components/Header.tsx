@@ -3,7 +3,8 @@ import { reportError } from '../../app/errors';
 import { updateSettings } from '../../db/settings';
 import { formatOffset, toShipLocal } from '../../domain/shipTime';
 import type { Theme } from '../../domain/types';
-import { logoMode, nextTheme, THEME_LABELS } from '../theme';
+import { logoMode } from '../theme';
+import { themeButtonLabel, themeTap } from '../themeSchedule';
 import { LogoMark } from './LogoMark';
 
 function ThemeIcon({ theme }: { theme: Theme }) {
@@ -28,14 +29,16 @@ function ThemeIcon({ theme }: { theme: Theme }) {
   );
 }
 
-/** The top bar: brand, the active ship's name, the ship's clock and the theme button. */
+/**
+ * The top bar: brand, the active ship's name, the ship's clock and the theme button. The button shows the theme on screen;
+ * a tap changes the base theme, or, while automatic night is on, holds the next theme until the next switch (`themeTap`).
+ */
 export function Header() {
-  const { db, settings, activeShip, offsetMinutes, nowUtc } = useAppState();
-  const { theme } = settings;
+  const { db, settings, activeShip, offsetMinutes, nowUtc, shipNow, theme } = useAppState();
 
   async function cycleTheme(): Promise<void> {
     try {
-      await updateSettings(db, { theme: nextTheme(theme) });
+      await updateSettings(db, themeTap(settings, shipNow));
     } catch (err) {
       reportError(err);
     }
@@ -56,8 +59,10 @@ export function Header() {
             <span class="clock-time">{toShipLocal(nowUtc, offsetMinutes).time}</span>{' '}
             <span class="clock-zone">LT ({formatOffset(offsetMinutes)})</span>
           </div>
-          <button type="button" class="theme-btn no-print" aria-label={`Theme: ${THEME_LABELS[theme]}`} onClick={cycleTheme}>
+          <button type="button" class="theme-btn no-print" aria-label={themeButtonLabel(settings, shipNow)} onClick={cycleTheme}>
             <ThemeIcon theme={theme} />
+            {/* "Automatic": shown whenever automatic night is on, a held theme included (the label says which). */}
+            {settings.nightAuto && <span class="theme-auto" aria-hidden="true">A</span>}
           </button>
         </div>
       </div>

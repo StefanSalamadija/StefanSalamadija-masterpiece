@@ -58,7 +58,7 @@ function EraseDialog({ onCancel, focusFallback }: { onCancel: () => void; focusF
  * the lockout survives a reload. It fails closed: a lockout that cannot be read is the longest lock, never no lock.
  */
 export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () => void }) {
-  const { db, settings, activeShip } = useAppState();
+  const { db, activeShip, theme } = useAppState();
   const fingerprint = pin.fingerprint;
   const fingerprintAvailable = useFingerprintAvailable() === true;
   const [view, setView] = useState<'fingerprint' | 'passcode'>(fingerprint ? 'fingerprint' : 'passcode');
@@ -151,7 +151,7 @@ export function LockScreen({ pin, onUnlock }: { pin: PinSettings; onUnlock: () =
   return (
     <main class="lock">
       <div class="lock-card">
-        <LogoMark size={64} mode={logoMode(settings.theme)} />
+        <LogoMark size={64} mode={logoMode(theme)} />
         <h1>Masterpiece is locked</h1>
         {shipName && <p class="lock-ship">{shipName}</p>}
 

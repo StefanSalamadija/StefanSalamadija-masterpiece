@@ -1,4 +1,8 @@
 import type { Theme } from '../domain/types';
+import { THEMES } from '../domain/theme';
+
+// The theme list and the reading of a stored theme live in the domain, so the database code needs nothing from the UI.
+export { THEMES, readTheme } from '../domain/theme';
 
 /** Where the base theme is mirrored in localStorage. index.html reads it before the app starts. */
 export const THEME_STORAGE_KEY = 'mp-theme';
@@ -12,9 +16,6 @@ export const THEME_LABELS: Record<Theme, string> = {
   red: 'Night red',
   contrast: 'High contrast',
 };
-
-/** Every theme, in the order the header button goes through them and the Settings select lists them. */
-export const THEMES: readonly Theme[] = ['day', 'dark', 'red', 'contrast'];
 
 /**
  * The colour of each theme's bars (`--bar-bg` in theme.css), which the browser's status bar takes through
@@ -30,12 +31,6 @@ export const BAR_BG: Record<Theme, string> = {
 /** The theme after `theme` when the header button is tapped: Day, Dark, Night red, High contrast, and round again. */
 export function nextTheme(theme: Theme): Theme {
   return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-}
-
-/** A stored theme as a theme: the navy `night` of before piece 7 is now Dark, and anything unknown is Day. */
-export function readTheme(value: unknown): Theme {
-  if (value === 'night') return 'dark';
-  return THEMES.includes(value as Theme) ? (value as Theme) : 'day';
 }
 
 /** Puts `theme` on `<html data-theme>`, where theme.css picks it up, and its bar colour on the browser's status bar. */
