@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectNoHorizontalScroll, expectRedOnly, freshApp, setTheme, setupShip } from './helpers';
 
 test('first ship and header clock', async ({ page }) => {
   await freshApp(page);
@@ -17,18 +17,38 @@ test('first ship and header clock', async ({ page }) => {
   await expect(page.getByTestId('ship-clock')).toHaveText('12:01 LT (UTC+03:00)');
 });
 
-test('theme cycles, persists, and prints black on white', async ({ page }) => {
+const BODY = () => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.body).color];
+const STATUS_BAR = () => document.querySelector('meta[name="theme-color"]')?.getAttribute('content');
+
+test('the theme button cycles Day, Dark, Night red and High contrast, each theme persists, and print is black on white', async ({ page }) => {
   await freshApp(page); await setupShip(page);
+  const html = page.locator('html');
+  await expect(html).toHaveAttribute('data-theme', 'day');
+  expect(await page.evaluate(STATUS_BAR)).toBe('#0B2545');
+
   await page.getByRole('button', { name: 'Theme: Day' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
-  const [bg, fg] = await page.evaluate(() => [getComputedStyle(document.body).backgroundColor, getComputedStyle(document.body).color]);
-  expect(bg).toBe('rgb(11, 22, 34)');      // night: dark navy #0B1622
-  expect(fg).toBe('rgb(230, 237, 245)');   // #E6EDF5
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(BODY)).toEqual(['rgb(11, 22, 34)', 'rgb(230, 237, 245)']); // Dark keeps today's navy: #0B1622, #E6EDF5
+  expect(await page.evaluate(STATUS_BAR)).toBe('#0E1B2B');
+
+  await page.getByRole('button', { name: 'Theme: Dark' }).click();
+  await expect(html).toHaveAttribute('data-theme', 'red');
+  expect(await page.evaluate(BODY)).toEqual(['rgb(0, 0, 0)', 'rgb(224, 74, 58)']); // Night red: #000000, #E04A3A
+  expect(await page.evaluate(STATUS_BAR)).toBe('#000000');
+  await expectRedOnly(page);
+
   await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+  await expect(html).toHaveAttribute('data-theme', 'red');
   await page.emulateMedia({ media: 'print' });
-  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(255, 255, 255)');
-  expect(await page.evaluate(() => getComputedStyle(document.body).color)).toBe('rgb(0, 0, 0)');
+  expect(await page.evaluate(BODY)).toEqual(['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+  await page.emulateMedia({ media: 'screen' });
+
+  await page.getByRole('button', { name: 'Theme: Night red' }).click();
+  await expect(html).toHaveAttribute('data-theme', 'contrast');
+  expect(await page.evaluate(STATUS_BAR)).toBe('#000000');
+  await page.getByRole('button', { name: 'Theme: High contrast' }).click();
+  await expect(html).toHaveAttribute('data-theme', 'day');
+  expect(await page.evaluate(STATUS_BAR)).toBe('#0B2545');
 });
 
 test('the Theme select in Settings and the header button are one setting, and a reload keeps it', async ({ page }) => {
@@ -37,17 +57,17 @@ test('the Theme select in Settings and the header button are one setting, and a 
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   const select = page.getByLabel('Theme', { exact: true });
   const html = page.locator('html');
-  await expect(select.locator('option')).toHaveText(['Day', 'Night', 'High contrast']);
+  await expect(select.locator('option')).toHaveText(['Day', 'Dark', 'Night red', 'High contrast']);
   await expect(select).toHaveValue('day');
   await expect(html).toHaveAttribute('data-theme', 'day');
 
-  await select.selectOption({ label: 'Night' });
-  await expect(html).toHaveAttribute('data-theme', 'night');
-  await expect(page.getByRole('button', { name: 'Theme: Night' })).toBeVisible();
+  await select.selectOption({ label: 'Dark' });
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('button', { name: 'Theme: Dark' })).toBeVisible();
   await page.reload();
-  await expect(html).toHaveAttribute('data-theme', 'night');
-  await expect(page.getByRole('button', { name: 'Theme: Night' })).toBeVisible();
-  await expect(select).toHaveValue('night');
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('button', { name: 'Theme: Dark' })).toBeVisible();
+  await expect(select).toHaveValue('dark');
 
   await select.selectOption({ label: 'High contrast' });
   await expect(html).toHaveAttribute('data-theme', 'contrast');
@@ -58,8 +78,55 @@ test('the Theme select in Settings and the header button are one setting, and a 
   await expect(html).toHaveAttribute('data-theme', 'day');
   await expect(select).toHaveValue('day');
   await page.getByRole('button', { name: 'Theme: Day' }).click();
-  await expect(select).toHaveValue('night');
+  await expect(select).toHaveValue('dark');
+  await page.getByRole('button', { name: 'Theme: Dark' }).click();
+  await expect(select).toHaveValue('red');
   await expectNoHorizontalScroll(page);
+});
+
+test('Night red draws nothing but red and black on Home, Settings and the crew form', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await expectRedOnly(page);
+  await page.goto('./#/');
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
+  await expectRedOnly(page);
+  await page.goto('./#/ship/crew/new');
+  await expect(page.getByRole('heading', { name: 'Add crew member' })).toBeVisible();
+  await expect(page.locator('input[type="date"]').first()).toBeVisible();
+  await page.locator('input[type="date"]').first().focus();
+  await expectRedOnly(page);
+});
+
+test('a device that stored the old Night theme opens in Dark', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.evaluate(() => new Promise<void>((done, failed) => {
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => failed(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const store = db.transaction('settings', 'readwrite').objectStore('settings');
+      const get = store.get('device');
+      get.onsuccess = () => {
+        const put = store.put({ ...get.result, theme: 'night' });
+        put.onsuccess = () => { db.close(); done(); };
+        put.onerror = () => failed(put.error);
+      };
+    };
+  }));
+  await page.evaluate(() => localStorage.setItem('mp-theme', 'night'));
+  await page.goto('./#/settings');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByLabel('Theme', { exact: true })).toHaveValue('dark');
+  await expect(page.getByRole('button', { name: 'Theme: Dark' })).toBeVisible();
+});
+
+test('the installed app starts on black, whatever the theme', async ({ page }) => {
+  await page.goto('./');
+  const href = await page.locator('link[rel="manifest"]').getAttribute('href');
+  const manifest = await (await page.request.get(new URL(href!, page.url()).toString())).json();
+  expect([manifest.theme_color, manifest.background_color]).toEqual(['#000000', '#000000']);
 });
 
 test('welcome asks for a ship name, and links to the import screen', async ({ page }) => {
@@ -107,16 +174,26 @@ test.describe('theme before the app starts', () => {
   test('the stored theme is on <html> before any script of the app runs, and a bad value is ignored', async ({ page }) => {
     await freshApp(page); await setupShip(page);
     await page.getByRole('button', { name: 'Theme: Day' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
+    await page.getByRole('button', { name: 'Theme: Dark' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'red');
 
     // From here on the app's own scripts never load, so only the inline script in index.html can set the theme.
     await page.route('**/assets/*.js', (route) => route.abort());
     await page.reload();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night');
-    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(11, 22, 34)');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'red');
+    expect(await page.evaluate(BODY)).toEqual(['rgb(0, 0, 0)', 'rgb(224, 74, 58)']);
+    expect(await page.evaluate(STATUS_BAR)).toBe('#000000');
+
+    // A mirror from before piece 7 still says night: it paints Dark.
+    await page.evaluate(() => localStorage.setItem('mp-theme', 'night'));
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    expect(await page.evaluate(BODY)).toEqual(['rgb(11, 22, 34)', 'rgb(230, 237, 245)']);
+    expect(await page.evaluate(STATUS_BAR)).toBe('#0E1B2B');
 
     await page.evaluate(() => localStorage.setItem('mp-theme', 'purple'));
     await page.reload();
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
+    expect(await page.evaluate(STATUS_BAR)).toBe('#0B2545');
   });
 });

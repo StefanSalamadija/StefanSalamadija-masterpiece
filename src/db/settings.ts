@@ -1,4 +1,5 @@
 import type { PinSettings, Settings } from '../domain/types';
+import { readTheme } from '../ui/theme';
 import type { MasterpieceDB } from './schema';
 import { guardWrite } from './storage';
 
@@ -19,10 +20,19 @@ function defaultSettings(): Settings {
   };
 }
 
+/**
+ * Stored settings as the app uses them: a theme stored before piece 7 (`night`), or one that is not known, is read as
+ * `readTheme` reads it. Every read of the settings goes through here.
+ */
+export function normaliseSettings(raw: Settings): Settings {
+  const theme = readTheme(raw.theme);
+  return theme === raw.theme ? raw : { ...raw, theme };
+}
+
 /** The stored settings, created with defaults if there are none yet. Runs inside a read-write transaction on `settings`. */
 async function readOrCreate(db: MasterpieceDB): Promise<Settings> {
   const found = await db.settings.get(DEVICE_KEY);
-  if (found) return found;
+  if (found) return normaliseSettings(found);
   const created = defaultSettings();
   await db.settings.put(created);
   return created;
@@ -31,7 +41,7 @@ async function readOrCreate(db: MasterpieceDB): Promise<Settings> {
 /** This device's settings. The first call creates them (including the device id); later calls return what is stored. */
 export async function getSettings(db: MasterpieceDB): Promise<Settings> {
   const found = await db.settings.get(DEVICE_KEY);
-  if (found) return found;
+  if (found) return normaliseSettings(found);
   // Checked again inside the transaction, so two callers that both found nothing still create one device id.
   return guardWrite(() => db.transaction('rw', db.settings, async () => readOrCreate(db)));
 }

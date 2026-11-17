@@ -158,7 +158,7 @@ describe('setRelockMinutes and saveLockout', () => {
 
   it('write nothing when there is no passcode', async () => {
     const db = freshDb();
-    await updateSettings(db, { theme: 'night' });
+    await updateSettings(db, { theme: 'dark' });
     await saveLockout(db, { failures: 5 });
     await setRelockMinutes(db, 10);
     expect((await getSettings(db)).pin).toBeUndefined();

@@ -91,8 +91,8 @@ describe('settings', () => {
   it('merges a patch into the stored settings and keeps the device id', async () => {
     const db = freshDb();
     const before = await getSettings(db);
-    const after = await updateSettings(db, { theme: 'night', backupReminderDays: 14, lastSync: { 'dev-2': '2026-10-25T08:00:00.000Z' } });
-    expect(after).toMatchObject({ deviceId: before.deviceId, theme: 'night', backupReminderDays: 14, key: 'device' });
+    const after = await updateSettings(db, { theme: 'dark', backupReminderDays: 14, lastSync: { 'dev-2': '2026-10-25T08:00:00.000Z' } });
+    expect(after).toMatchObject({ deviceId: before.deviceId, theme: 'dark', backupReminderDays: 14, key: 'device' });
     expect(await getSettings(db)).toEqual(after);
   });
 
@@ -395,7 +395,7 @@ describe('storage full', () => {
     vi.spyOn(db.voyages, 'put').mockRejectedValueOnce(quota());
     await expect(putRecords(db, [{ table: 'voyages', record: { id: 'v' } as unknown as SyncRecord }])).rejects.toBeInstanceOf(StorageFullError);
     vi.spyOn(db.settings, 'put').mockRejectedValueOnce(quota());
-    await expect(updateSettings(db, { theme: 'night' })).rejects.toBeInstanceOf(StorageFullError);
+    await expect(updateSettings(db, { theme: 'dark' })).rejects.toBeInstanceOf(StorageFullError);
     expect(await getSettings(db)).toEqual(settings);
   });
 });

@@ -11,25 +11,60 @@
 }
 
 @media print {
+  /* The tokens, and until Task 8 the names used before them, are black on white in print. */
   :root,
   :root[data-theme] {
     color-scheme: light;
-    --bg: #ffffff;
-    --surface: #ffffff;
+    --surface-0: #ffffff;
+    --surface-1: #ffffff;
+    --surface-2: #ffffff;
     --line: #000000;
     --text: #000000;
-    --muted: #000000;
+    --text-muted: #000000;
     --bar-bg: #ffffff;
     --bar-text: #000000;
     --bar-muted: #000000;
+    --bar-line: #000000;
+    --bar-focus: #000000;
+    --nav-bg: #ffffff;
+    --nav-text: #000000;
     --nav-active: #000000;
+    --nav-pill: transparent;
     --accent: #000000;
     --on-accent: #ffffff;
+    --ok: #000000;
+    --ok-bg: #ffffff;
+    --warn: #000000;
+    --warn-bg: #ffffff;
+    --danger: #000000;
+    --danger-bg: #ffffff;
+    --on-danger: #ffffff;
+    --focus: #000000;
+    --mark-bg: #ffffff;
+    --mark-text: #000000;
+    --chart-1: #000000;
+    --chart-2: #000000;
+    --chart-3: #000000;
+    --chart-4: #000000;
+    --chart-5: #000000;
+    --media-filter: none;
+    --picker-filter: none;
+    --shadow-2: none;
+    --backdrop: transparent;
+
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --muted: #000000;
     --amber: #ffffff;
-    --on-amber: #000000;
     --red: #ffffff;
     --on-red: #000000;
     --bar-border: #000000;
+  }
+
+  /* Photos and page images print as they are, whatever the theme. */
+  img,
+  canvas {
+    filter: none;
   }
 
   html,

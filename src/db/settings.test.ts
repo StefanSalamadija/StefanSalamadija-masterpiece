@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { PinSettings } from '../domain/types';
+import type { PinSettings, Settings } from '../domain/types';
 import { openDb } from './schema';
-import { getSettings, removePin, updatePin, updateSettings } from './settings';
+import { getSettings, normaliseSettings, removePin, updatePin, updateSettings } from './settings';
 
 const freshDb = () => openDb('t-' + crypto.randomUUID());
 const pin = (over: Partial<PinSettings> = {}): PinSettings => ({
@@ -21,7 +21,7 @@ describe('updatePin', () => {
 
   it('applies the change to the stored passcode settings and keeps every other setting', async () => {
     const db = freshDb();
-    const start = await updateSettings(db, { pin: pin(), theme: 'night', lockPrompted: true, backupReminderDays: 3 });
+    const start = await updateSettings(db, { pin: pin(), theme: 'dark', lockPrompted: true, backupReminderDays: 3 });
     const after = await updatePin(db, (p) => ({ ...p, relockMinutes: 15 }));
     expect(after).toEqual({ ...start, pin: pin({ relockMinutes: 15 }) });
     expect(await getSettings(db)).toEqual(after);
@@ -62,7 +62,7 @@ describe('updatePin', () => {
 describe('removePin', () => {
   it('removes the key and leaves every other setting', async () => {
     const db = freshDb();
-    const start = await updateSettings(db, { pin: pin(), theme: 'night', lockPrompted: true });
+    const start = await updateSettings(db, { pin: pin(), theme: 'dark', lockPrompted: true });
     const after = await removePin(db);
     const { pin: _gone, ...expected } = start;
     expect(after).toEqual(expected);
@@ -73,5 +73,33 @@ describe('removePin', () => {
     const db = freshDb();
     const before = await getSettings(db);
     expect(await removePin(db)).toEqual(before);
+  });
+});
+
+describe('the stored theme', () => {
+  /** Puts settings with the old `night` theme straight into IndexedDB, as a device from before piece 7 has them. */
+  async function storeLegacyNight(db: ReturnType<typeof freshDb>): Promise<void> {
+    const current = await getSettings(db);
+    await db.settings.put({ ...current, theme: 'night' as unknown as Settings['theme'] });
+  }
+
+  it('reads the old night theme back as dark', async () => {
+    const db = freshDb();
+    await storeLegacyNight(db);
+    expect((await getSettings(db)).theme).toBe('dark');
+  });
+
+  it('keeps it dark through an update of another setting', async () => {
+    const db = freshDb();
+    await storeLegacyNight(db);
+    expect((await updateSettings(db, { backupReminderDays: 3 })).theme).toBe('dark');
+    expect((await db.settings.get('device'))?.theme).toBe('dark');
+  });
+
+  it('normaliseSettings turns an unknown theme into day and leaves the rest alone', () => {
+    const raw = { key: 'device', deviceId: 'd', deviceName: 'Laptop', backupReminderDays: 7, lastSync: {}, theme: 'purple' } as unknown as Settings;
+    expect(normaliseSettings(raw)).toEqual({ ...raw, theme: 'day' });
+    const fine: Settings = { ...raw, theme: 'red' };
+    expect(normaliseSettings(fine)).toEqual(fine);
   });
 });

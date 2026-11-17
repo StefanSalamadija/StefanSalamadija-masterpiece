@@ -3,11 +3,12 @@ import type { ComponentChildren } from 'preact';
 import { useContext, useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
 import { listForShip } from '../db/records';
 import { getDb, type MasterpieceDB } from '../db/schema';
+import { normaliseSettings } from '../db/settings';
 import { liveActiveShipId, listShips } from '../db/ships';
 import { requestPersistentStorage } from '../db/storage';
 import { deviceOffsetMinutes, shipOffsetAt, toShipLocal } from '../domain/shipTime';
 import type { ClockChange, Settings, ShipProfile } from '../domain/types';
-import { applyTheme } from '../ui/theme';
+import { applyTheme, mirrorTheme } from '../ui/theme';
 import { useLive } from '../ui/useLive';
 import { reportError } from './errors';
 import { msUntilNextTick } from './tick';
@@ -56,7 +57,8 @@ interface Loaded {
 
 /** Everything the state is made of, read in one go, so the ship, its clock and the settings always agree. */
 async function loadAppData(db: MasterpieceDB): Promise<Loaded> {
-  const settings = await db.settings.get('device');
+  const stored = await db.settings.get('device');
+  const settings = stored && normaliseSettings(stored);
   const ships = await listShips(db);
   const activeShip = ships.find((ship) => ship.id === liveActiveShipId(settings?.activeShipId, ships));
   const clockChanges = activeShip ? await listForShip<ClockChange>(db, 'clockChanges', activeShip.id) : [];
@@ -103,9 +105,12 @@ export function AppStateProvider({ children }: { children: ComponentChildren }) 
   }, []);
 
   const theme = data?.settings?.theme;
-  // A layout effect runs before the browser paints, so a theme switch never shows a frame with the old palette.
+  // A layout effect runs before the browser paints, so a theme switch never shows a frame with the old palette. The mirror
+  // in localStorage is what index.html paints the next start with. (Task 2 puts the effective theme here.)
   useLayoutEffect(() => {
-    if (theme) applyTheme(theme);
+    if (!theme) return;
+    applyTheme(theme);
+    mirrorTheme(theme, null);
   }, [theme]);
 
   const state = useMemo<AppState | undefined>(() => {

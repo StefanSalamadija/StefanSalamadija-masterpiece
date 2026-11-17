@@ -1,78 +1,273 @@
 /*
- * Themes ("Bridge Console"). Every theme defines the same variables on :root[data-theme]; the rest of this file only
- * ever uses the variables. The day theme is also the default before the theme has been read from the settings.
+ * Design tokens (spec §6). The scale tokens (type, weight, spacing, radius, target) are on :root and are the same in every
+ * theme, except that High contrast raises the regular and medium weights. Each theme then defines the same palette tokens
+ * on :root[data-theme]; the rest of this file only ever uses the tokens. The day theme is also the default before the
+ * theme has been read from the settings. src/ui/tokens.test.ts holds the values to the spec.
  */
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Type: size and line height. Display and figure are set in Mono. */
+  --fs-display: 36px;
+  --lh-display: 40px;
+  --fs-figure: 28px;
+  --lh-figure: 32px;
+  --fs-title: 22px;
+  --lh-title: 28px;
+  --fs-heading: 18px;
+  --lh-heading: 24px;
+  --fs-body: 16px;
+  --lh-body: 24px;
+  --fs-label: 14px;
+  --lh-label: 20px;
+  --fs-caption: 12px;
+  --lh-caption: 16px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-strong: 600;
+
+  /* Spacing, radius and the touch target. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+  --target: 48px;
+  --page-width: 960px;
+}
+
+/* Day. */
 :root,
 :root[data-theme='day'] {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #f3f6fa;
+  --surface-0: #ffffff;
+  --surface-1: #f3f6fa;
+  --surface-2: #e8eef5;
   --line: #d5dee8;
   --text: #0b1622;
-  --muted: #4a6380;
+  --text-muted: #4a6380;
   --bar-bg: #0b2545;
   --bar-text: #ffffff;
-  --bar-muted: #b8c7d9;
-  --nav-active: #7ab8ff;
+  --bar-muted: #c9d6e5;
+  --bar-line: #3b5878;
+  --bar-focus: #7ab8ff;
+  --nav-bg: #ffffff;
+  --nav-text: #4a6380;
+  --nav-active: #1d5fd1;
+  --nav-pill: #e3ecfb;
   --accent: #1d5fd1;
   --on-accent: #ffffff;
-  --amber: #f2b33d;
-  --on-amber: #241703;
-  --red: #c81e1e;
-  --on-red: #ffffff;
+  --ok: #1e7a46;
+  --ok-bg: #e3f4ea;
+  --warn: #8a5a00;
+  --warn-bg: #fff1d1;
+  --danger: #b3261e;
+  --danger-bg: #fde7e5;
+  --on-danger: #ffffff;
+  --focus: #1d5fd1;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #1d5fd1;
+  --chart-2: #0f8b8d;
+  --chart-3: #8a5a00;
+  --chart-4: #7b4fc9;
+  --chart-5: #5e6b7a;
+  --media-filter: none;
+  --picker-filter: none;
+  --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --backdrop: rgb(0 0 0 / 0.55);
 }
 
-:root[data-theme='night'] {
+/* Dark: the navy theme for the cabin (Night before piece 7), with its values kept. */
+:root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #0b1622;
-  --surface: #12243a;
+  --surface-0: #0b1622;
+  --surface-1: #12243a;
+  --surface-2: #18283a;
   --line: #1e3550;
   --text: #e6edf5;
-  --muted: #9fb3c8;
+  --text-muted: #9fb3c8;
   --bar-bg: #0e1b2b;
   --bar-text: #e6edf5;
   --bar-muted: #9fb3c8;
+  --bar-line: color-mix(in srgb, var(--bar-text) 18%, transparent);
+  --bar-focus: #5fd4ce;
+  --nav-bg: #0e1b2b;
+  --nav-text: #9fb3c8;
   --nav-active: #5fd4ce;
+  --nav-pill: color-mix(in srgb, #5fd4ce 18%, transparent);
   --accent: #5fd4ce;
   --on-accent: #04211f;
-  --amber: #f2b33d;
-  --on-amber: #241703;
-  --red: #ff6b5e;
-  --on-red: #1a0503;
+  --ok: #5ccb8a;
+  --ok-bg: #12301f;
+  --warn: #f2b33d;
+  --warn-bg: #3a2a08;
+  --danger: #ff6b5e;
+  --danger-bg: #3d1210;
+  --on-danger: #1a0503;
+  --focus: #7ab8ff;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #4fb8d6;
+  --chart-2: #5ccb8a;
+  --chart-3: #f2b33d;
+  --chart-4: #b79cff;
+  --chart-5: #9fb3c8;
+  --media-filter: none;
+  --picker-filter: none; /* the dark color-scheme already draws the picker icon light */
+  --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --backdrop: rgb(0 0 0 / 0.55);
 }
 
+/*
+ * Night red: for a dark bridge. Black and red only, nothing bright, white or blue (spec §5). Images and canvases are drawn
+ * through --media-filter (white paper turns black, black ink turns red) and the date-picker icon through --picker-filter.
+ */
+:root[data-theme='red'] {
+  color-scheme: dark;
+  --surface-0: #000000;
+  --surface-1: #120000;
+  --surface-2: #1e0303;
+  --line: #3a0a0a;
+  --text: #e04a3a;
+  --text-muted: #d04030;
+  --bar-bg: #000000;
+  --bar-text: #e04a3a;
+  --bar-muted: #d04030;
+  --bar-line: #3a0a0a;
+  --bar-focus: #ff5a45;
+  --nav-bg: #000000;
+  --nav-text: #d04030;
+  --nav-active: #ff5a45;
+  --nav-pill: #2a0505;
+  --accent: #c8372a;
+  --on-accent: #000000;
+  --ok: #d04030;
+  --ok-bg: transparent;
+  --warn: #e04a3a;
+  --warn-bg: #120000;
+  --danger: #ff5a45;
+  --danger-bg: #4a0606;
+  --on-danger: #000000;
+  --focus: #ff5a45;
+  --mark-bg: #4a0606;
+  --mark-text: #ff5a45;
+  --chart-1: #e04a3a;
+  --chart-2: #e04a3a;
+  --chart-3: #e04a3a;
+  --chart-4: #e04a3a;
+  --chart-5: #e04a3a;
+  --media-filter: grayscale(1) invert(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
+  --picker-filter: grayscale(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
+  --shadow-2: none;
+  --backdrop: rgb(0 0 0 / 0.7);
+}
+
+/* High contrast: for bright sun on deck. Today's black on white, with the semantic tokens in the same style. */
 :root[data-theme='contrast'] {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #ffffff;
+  --surface-0: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
   --line: #000000;
   --text: #000000;
-  --muted: #000000;
+  --text-muted: #000000;
   --bar-bg: #000000;
   --bar-text: #ffffff;
   --bar-muted: #e6e6e6;
+  --bar-line: #ffffff;
+  --bar-focus: #ffffff;
+  --nav-bg: #000000;
+  --nav-text: #e6e6e6;
   --nav-active: #ffffff;
+  --nav-pill: transparent; /* the active tab is underlined instead */
   --accent: #000000;
   --on-accent: #ffffff;
-  --amber: #f2b33d;
-  --on-amber: #000000;
-  --red: #c81e1e;
-  --on-red: #ffffff;
+  --ok: #000000;
+  --ok-bg: #ffffff;
+  --warn: #000000; /* due soon is told from overdue by outline against fill, and by its words */
+  --warn-bg: #ffffff;
+  --danger: #c81e1e;
+  --danger-bg: #ffffff;
+  --on-danger: #ffffff;
+  --focus: #000000;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #000000;
+  --chart-2: #000000;
+  --chart-3: #000000;
+  --chart-4: #000000;
+  --chart-5: #000000;
+  --media-filter: none;
+  --picker-filter: none;
+  --shadow-2: none;
+  --backdrop: rgb(0 0 0 / 0.55);
+}
+
+/* High contrast's heavier type: regular and medium text are set at 600, as before piece 7. */
+:root[data-theme='contrast'] {
+  --fw-regular: 600;
+  --fw-medium: 600;
+}
+
+/*
+ * The names used before the tokens, kept as aliases so that the rules below keep working while the screens move onto the
+ * tokens. Task 8 removes them.
+ */
+:root {
+  --bg: var(--surface-0);
+  --surface: var(--surface-1);
+  --muted: var(--text-muted);
+  --bar-border: var(--bar-line);
+  --amber: var(--warn);
+  --red: var(--danger);
+  --on-red: var(--on-danger);
+  --radius: var(--r-md);
 }
 
 /* ---- Base ---- */
 
 :root {
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --radius: 12px;
-  --target: 44px;
-  --page-width: 960px;
-  --bar-border: color-mix(in srgb, var(--bar-text) 18%, transparent);
+  background-color: var(--surface-0);
+  color: var(--text);
+  accent-color: var(--accent);
+  caret-color: var(--text);
+  scrollbar-color: var(--line) var(--surface-0);
+  -webkit-tap-highlight-color: transparent;
 }
 
-:root[data-theme='contrast'] {
-  --target: 48px;
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* The native date and time pickers' icon: drawn red in Night red. */
+::-webkit-calendar-picker-indicator {
+  filter: var(--picker-filter);
+}
+
+/* The browser's autofill paints its own pale fill: keep the field in the theme. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--surface-1) inset;
+  caret-color: var(--text);
+}
+
+/* Photos, page images and canvases: as they are, except in Night red, where they are turned black and red. */
+img,
+canvas {
+  filter: var(--media-filter);
 }
 
 *,
@@ -91,12 +286,9 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-regular);
   line-height: 1.45;
-}
-
-:root[data-theme='contrast'] body {
-  font-weight: 600;
 }
 
 /* Text that sets its own medium weight gets the high-contrast weight too. The mono clock stays 500: the only weight bundled. */
@@ -124,23 +316,14 @@ textarea {
 }
 
 :focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
+/* On the bars the ring takes the bars' own focus colour. High contrast's bottom bar is one of the bars. */
 .app-header :focus-visible,
-.app-nav :focus-visible,
-.update-banner :focus-visible {
-  outline-color: var(--nav-active);
-}
-
-:root[data-theme='contrast'] :focus-visible {
-  outline-color: #000000;
-}
-
-:root[data-theme='contrast'] .app-header :focus-visible,
 :root[data-theme='contrast'] .app-nav :focus-visible {
-  outline-color: #ffffff;
+  outline-color: var(--bar-focus);
 }
 
 .container {
@@ -276,8 +459,9 @@ textarea {
   position: sticky;
   bottom: 0;
   z-index: 10;
-  background: var(--bar-bg);
-  border-top: 1px solid var(--bar-border);
+  background: var(--nav-bg);
+  border-top: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
 }
 
 .nav-grid {
@@ -294,7 +478,7 @@ textarea {
   padding: 10px 0 14px;
   font-size: 11px;
   text-decoration: none;
-  color: var(--bar-muted);
+  color: var(--nav-text);
 }
 
 .nav-link[aria-current='page'] {
@@ -413,7 +597,7 @@ textarea {
   font-weight: 500;
 }
 
-:root[data-theme='night'] .btn-outline {
+:root[data-theme='dark'] .btn-outline {
   border-color: var(--line);
   background: var(--surface);
 }
@@ -499,7 +683,7 @@ textarea {
   color: var(--bar-text);
 }
 
-:root[data-theme='night'] .welcome-band {
+:root[data-theme='dark'] .welcome-band {
   background: var(--bg);
 }
 
@@ -1160,9 +1344,11 @@ textarea {
   white-space: nowrap;
 }
 
+/* Due soon is an outlined pill, overdue a filled one, so the two differ in shape as well as in colour and words. */
 .band-badge[data-band='amber'] {
-  background: var(--amber);
-  color: var(--on-amber);
+  background: var(--warn-bg);
+  color: var(--warn);
+  box-shadow: inset 0 0 0 1.5px var(--warn);
 }
 
 .band-badge[data-band='red'] {
@@ -1462,7 +1648,7 @@ textarea {
 }
 
 .dialog::backdrop {
-  background: rgb(0 0 0 / 0.55);
+  background: var(--backdrop);
 }
 
 .dialog-form {

@@ -48,3 +48,24 @@ describe('the one-colour logo for print', () => {
     expect(vnode.props.size).toBe(16);
   });
 });
+
+describe('the logo in Night red', () => {
+  const vnode = LogoMark({ size: 64, mode: 'red' }) as unknown as { type: (props: unknown) => unknown; props: Record<string, unknown> };
+  const rendered = typeof vnode.type === 'function' ? vnode.type(vnode.props) : vnode;
+  const tree = elements(rendered);
+  const root = tree[0];
+
+  it('is the one-colour line logo in the text colour, named for assistive technology as the colour logo is', () => {
+    expect(root.type).toBe('svg');
+    expect(root.props).toMatchObject({ width: 64, height: 64, role: 'img', 'aria-label': 'Masterpiece logo', fill: 'none', stroke: 'currentColor' });
+    expect(root.props['aria-hidden']).toBeUndefined();
+  });
+
+  it('has no gradient and no colour of its own', () => {
+    expect(JSON.stringify(tree)).not.toMatch(/url\(|Gradient|stop-color|#[0-9a-f]{3,6}/i);
+    for (const node of tree.slice(1)) {
+      expect(node.props.fill).toBeUndefined();
+      expect(node.props.stroke).toBeUndefined();
+    }
+  });
+});

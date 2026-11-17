@@ -16,14 +16,14 @@ window.addEventListener('unhandledrejection', (event) => reportError(event.reaso
 // Before the router exists, so that this is the first to hear of a screen change (see `rememberPlaceOnLeaving`).
 rememberPlaceOnLeaving(scrollMemory);
 
-// index.html has already put the mirrored theme on <html> for the first paint. This reads the real setting from IndexedDB
-// before the app is drawn and corrects the mirror (and the page) if they differ. Opening the data is also where an upgrade
+// index.html has already put the mirrored theme on <html> for the first paint; AppState applies the real setting from
+// IndexedDB (in a layout effect, before it first draws) and corrects the mirror. Opening the data here is where an upgrade
 // of the database happens: while it waits for other tabs the page says so, and if it fails the page gives guidance, in
 // place of an app with no data (and the error's own words). Nothing is written to the data for the message.
 async function boot(): Promise<void> {
   render(<Root />, document.getElementById('app')!);
   try {
-    applyTheme((await getSettings(getDb())).theme);
+    await getSettings(getDb());
     setStartup({ status: 'ready' });
   } catch (err) {
     applyTheme('day');

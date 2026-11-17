@@ -64,8 +64,10 @@ export default defineConfig({
         name: 'Masterpiece',
         short_name: 'Masterpiece',
         description: 'Ship office companion — works offline',
-        theme_color: '#0B2545',
-        background_color: '#0B2545',
+        // Black in every theme, so the installed app never flashes navy at night (spec §12.10). Once it has started, the
+        // in-app meta theme-color follows the theme.
+        theme_color: '#000000',
+        background_color: '#000000',
         display: 'standalone',
         start_url: '.',
         scope: '.',

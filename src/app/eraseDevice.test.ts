@@ -19,7 +19,7 @@ describe('eraseDeviceData', () => {
     const dbName = name();
     const db = openDb(dbName);
     await createShip(db, 'MV OCEAN STAR', 180);
-    await updateSettings(db, { theme: 'night', lockPrompted: true });
+    await updateSettings(db, { theme: 'dark', lockPrompted: true });
     const { deviceId } = await getSettings(db);
 
     await eraseDeviceData(db);

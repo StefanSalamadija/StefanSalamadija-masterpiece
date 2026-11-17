@@ -98,3 +98,60 @@ export function holdWrites(page: Page): Promise<void> {
 export function releaseWrites(page: Page): Promise<void> {
   return page.evaluate(() => (window as unknown as TestHooks).releaseWrites?.());
 }
+
+export type ThemeLabel = 'Day' | 'Dark' | 'Night red' | 'High contrast';
+
+/** Picks `theme` in the Theme select of Settings (the app opens Settings for it) and waits for it to be on <html>. */
+export async function setTheme(page: Page, theme: ThemeLabel): Promise<void> {
+  const values: Record<ThemeLabel, string> = { Day: 'day', Dark: 'dark', 'Night red': 'red', 'High contrast': 'contrast' };
+  await page.goto('./#/settings');
+  await page.getByLabel('Theme', { exact: true }).selectOption({ label: theme });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', values[theme]);
+}
+
+/**
+ * Fails when anything on the page is drawn in a colour that is neither near black nor red (spec §5: nothing bright, white
+ * or blue in Night red). It reads, for <html>, <body> and every element under them, each computed colour CSS can set, and
+ * skips only fully transparent ones. Every image and canvas must also be filtered (`--media-filter`).
+ */
+export async function expectRedOnly(page: Page): Promise<void> {
+  const problems = await page.evaluate(() => {
+    const PROPS = ['color', 'background-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+      'outline-color', 'fill', 'stroke', 'caret-color', 'accent-color', 'text-decoration-color'];
+    const isRedOrBlack = (r: number, g: number, b: number): boolean =>
+      (r <= 0x20 && g <= 0x20 && b <= 0x20) || (g <= 0.45 * r && b <= 0.45 * r);
+    /** [r, g, b, alpha] in 0–255 (alpha 0–1), or undefined for a value that is not a colour (none, auto, url). */
+    const parse = (value: string): number[] | undefined => {
+      let m = /^rgba?\(([\d.]+),? ([\d.]+),? ([\d.]+)(?:,? \/? ?([\d.]+))?\)$/.exec(value);
+      if (m) return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] === undefined ? 1 : Number(m[4])];
+      m = /^color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.]+))?\)$/.exec(value);
+      if (m) return [Number(m[1]) * 255, Number(m[2]) * 255, Number(m[3]) * 255, m[4] === undefined ? 1 : Number(m[4])];
+      return undefined;
+    };
+    const describe = (el: Element): string => {
+      const id = el.id ? `#${el.id}` : '';
+      const cls = typeof el.className === 'string' && el.className ? `.${el.className.trim().split(/\s+/).join('.')}` : '';
+      return `${el.tagName.toLowerCase()}${id}${cls}`;
+    };
+    const found: string[] = [];
+    const elements = [document.documentElement, ...document.documentElement.querySelectorAll('*')];
+    for (const el of elements) {
+      const style = getComputedStyle(el);
+      for (const prop of PROPS) {
+        const value = style.getPropertyValue(prop);
+        if (value === 'transparent' || value === 'none' || value === 'auto' || value === 'currentcolor') continue;
+        const rgba = parse(value);
+        if (!rgba) {
+          if (/^(rgb|color|hsl|lab|lch|oklab|oklch|#)/.test(value)) found.push(`${describe(el)} ${prop}: ${value} (unparsed)`);
+          continue;
+        }
+        const [r, g, b, a] = rgba;
+        if (a === 0) continue;
+        if (!isRedOrBlack(r, g, b)) found.push(`${describe(el)} ${prop}: ${value}`);
+      }
+      if ((el.tagName === 'IMG' || el.tagName === 'CANVAS') && style.filter === 'none') found.push(`${describe(el)} is not filtered`);
+    }
+    return [...new Set(found)];
+  });
+  expect(problems, 'colours that are not red or black in Night red').toEqual([]);
+}

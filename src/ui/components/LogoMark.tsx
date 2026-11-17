@@ -2,8 +2,11 @@ import { useRef } from 'preact/hooks';
 
 export interface LogoMarkProps {
   size: number;
-  /** `mono` is the one-colour line version for print: see `MonoLogo`. */
-  mode: 'day' | 'night' | 'mono';
+  /**
+   * `mono` is the one-colour line version for print: see `MonoLogo`. `red` is the same line logo for Night red, drawn in
+   * the text colour (so red on black, with no blue or white in it), and named for assistive technology like the colour one.
+   */
+  mode: 'day' | 'night' | 'red' | 'mono';
 }
 
 // Logo v2, "M on the sea at sunrise". All geometry is in a 100 x 100 box.
@@ -23,11 +26,14 @@ let instances = 0;
  * stays readable on the sheet as it is shown on screen in Night. The words beside it name it, so it is hidden from
  * assistive technology rather than read out twice. It uses no ids, so any number of them can be on one page.
  */
-export function MonoLogo({ size }: { size: number }) {
+export function MonoLogo({ size, named = false }: { size: number; named?: boolean }) {
   // The crest and the horizon end on the tile's outline (its centre line at that height), not at the box's edge: the
   // colour mark is clipped to its tile, but a line drawn to the edge would poke out of the rounded outline as a small ear.
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+    <svg
+      width={size} height={size} viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round"
+      {...(named ? { role: 'img', 'aria-label': 'Masterpiece logo' } : { 'aria-hidden': 'true' })}
+    >
       <rect x="2.5" y="2.5" width="95" height="95" rx="22" stroke-width="5" />
       <circle cx="50" cy="20" r="7.5" stroke-width="4" />
       <path d="M2.5 60 H97.5" stroke-width="3.5" />
@@ -37,9 +43,14 @@ export function MonoLogo({ size }: { size: number }) {
   );
 }
 
-/** The Masterpiece logo: in colour for the screen (day or night), or the one-colour line version for print (`mono`). */
+/**
+ * The Masterpiece logo: in colour for the screen (day or night), the one-colour line version for print (`mono`), or that
+ * line version in the text colour for Night red (`red`).
+ */
 export function LogoMark({ size, mode }: LogoMarkProps) {
-  return mode === 'mono' ? <MonoLogo size={size} /> : <ColourLogo size={size} mode={mode} />;
+  if (mode === 'mono') return <MonoLogo size={size} />;
+  if (mode === 'red') return <MonoLogo size={size} named />;
+  return <ColourLogo size={size} mode={mode} />;
 }
 
 /**
