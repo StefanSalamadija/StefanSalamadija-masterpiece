@@ -413,6 +413,12 @@ test('expiring: with no next port ETA it shows the next 90 days, whatever the vo
   await expect(page.getByText('Next port Rotterdam, ETA 2027-01-24')).toBeVisible();
   await expect(page.getByText('No next port ETA set')).toHaveCount(0);
   await expect(expiringList(page).getByRole('listitem')).toHaveText([/Basic safety training/, /Advanced fire fighting/]);
+  // Advanced fire fighting is 91 days out, so still valid: a plain row with no tint and no badge. Basic safety training is due soon.
+  const valid = expiringList(page).getByRole('listitem').filter({ hasText: 'Advanced fire fighting' });
+  await expect(valid.locator('.list-row')).not.toHaveAttribute('data-tone', /.*/);
+  await expect(valid.locator('[data-band]')).toHaveCount(0);
+  const soon = expiringList(page).getByRole('listitem').filter({ hasText: 'Basic safety training' });
+  await expect(soon.locator('.list-row')).toHaveAttribute('data-tone', 'warn');
   await expectNoHorizontalScroll(page);
 });
 

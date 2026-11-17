@@ -11,17 +11,23 @@ import type { ThemeLabel } from './helpers';
 declare const process: { env: Record<string, string | undefined> };
 const DIR = process.env.SCREENSHOT_DIR;
 
-/** The screens captured, as `<name>-<theme>.png`. Later tasks add theirs here. */
-export const SCREENS: { name: string; path: string }[] = [
+/** What a screen that reads its records shows once they are in: its rows or its empty text. */
+const DUE_READY = '.list-row, .due-none, .empty';
+
+/**
+ * The screens captured, as `<name>-<theme>.png`. Later tasks add theirs here. `ready`, when given, is what to wait for
+ * before the shot, for a screen whose content loads after its heading.
+ */
+export const SCREENS: { name: string; path: string; ready?: string }[] = [
   { name: 'home', path: '/' },
   { name: 'particulars', path: '/ship/particulars' },
   { name: 'crew', path: '/ship/crew' },
   { name: 'crew-new', path: '/ship/crew/new' },
   { name: 'certificates', path: '/ship/certificates' },
   { name: 'reliefs', path: '/ship/reliefs' },
-  { name: 'due', path: '/due' },
-  { name: 'due-port', path: '/due/port' },
-  { name: 'crew-documents', path: '/ship/crew-documents' },
+  { name: 'due', path: '/due', ready: DUE_READY },
+  { name: 'due-port', path: '/due/port', ready: DUE_READY },
+  { name: 'crew-documents', path: '/ship/crew-documents', ready: DUE_READY },
   { name: 'voyage', path: '/ship/voyage' },
   { name: 'time', path: '/ship/time' },
   { name: 'survey', path: '/ship/survey' },
@@ -85,6 +91,7 @@ for (const theme of THEMES) {
     for (const screen of SCREENS) {
       await page.goto(`./#${screen.path}`);
       await expect(page.getByRole('heading').first()).toBeVisible();
+      if (screen.ready) await expect(page.locator(screen.ready).first()).toBeVisible();
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.screenshot({ path: `${DIR}/${screen.name}-${theme.id}.png`, fullPage: true });
     }

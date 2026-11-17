@@ -37,6 +37,12 @@ describe('dueChipText', () => {
     expect(dueChipText('2027-01-03', '2026-12-30')).toBe('in 4 d');
     expect(dueChipText('2026-12-30', '2027-01-03')).toBe('4 d over');
   });
+
+  it('says nothing for a date that is not one, rather than NaN', () => {
+    expect(dueChipText('', TODAY)).toBe('');
+    expect(dueChipText('2026-02-30', TODAY)).toBe('');
+    expect(dueChipText('2026-12-01', 'x')).toBe('');
+  });
 });
 
 describe('shortDate', () => {

@@ -89,6 +89,17 @@ test('the old Expiring route opens Before next port, and Back skips it', async (
   await expect(group(page, 'Due soon')).toContainText(CERTIFICATE);
 });
 
+test("the days are counted from the ship's date, not the UTC date, across midnight", async ({ page }) => {
+  await madeUpShip(page);
+  // 22:30Z is 01:30 on 18 Nov on board (UTC+03:00), while it is still 17 Nov in UTC.
+  await page.clock.setSystemTime(new Date('2026-11-17T22:30:00Z'));
+  await page.goto('./#/due');
+  await page.reload();
+  await expect(page.getByTestId('ship-clock')).toContainText('01:30');
+  await expect(group(page, 'Overdue').locator('.status')).toHaveText('6 d over');
+  await expect(group(page, 'Due soon').locator('.status')).toHaveText('in 13 d');
+});
+
 test('Crew documents lists the crew papers and not the ship certificates', async ({ page }) => {
   await madeUpShip(page);
   await page.goto('./#/ship/crew-documents');

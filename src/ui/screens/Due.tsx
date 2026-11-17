@@ -7,13 +7,16 @@ import { collectAlerts } from '../../domain/alerts';
 import type { Alert } from '../../domain/alerts';
 import { maxMonthsOnboardOf } from '../../domain/contracts';
 import { expiringBefore } from '../../domain/crewDocs';
-import type { Certificate, CrewDocument, CrewMember, ShipProfile, Voyage } from '../../domain/types';
+import type { Band, Certificate, CrewDocument, CrewMember, ShipProfile, Voyage } from '../../domain/types';
 import { currentVoyage } from '../../domain/voyage';
 import { BandBadge } from '../components/BandBadge';
 import { DueRow } from '../components/DueRow';
 import { expiringDetail, expiringWindow } from '../crewDocsView';
 import { CREW_DOC_KINDS, dueRow, groupDue, NOTHING_DUE } from '../dueView';
 import { useLive } from '../useLive';
+
+/** The tint of a Before next port row: overdue and due soon only. A valid paper (one the ETA reaches) is a plain row. */
+const PAPER_TONE: Partial<Record<Band, 'warn' | 'danger'>> = { amber: 'warn', red: 'danger' };
 
 interface DueRecords {
   crew: CrewMember[];
@@ -81,7 +84,7 @@ function BeforeNextPort({ records, today }: { records: DueRecords; today: string
           {view.items.map((item, index) => (
             // The list is made again whole, never reordered by hand, so the position is part of what tells two alike rows apart.
             <li key={`${item.crewId}:${item.what}:${item.expiryDate}:${index}`}>
-              <a class="list-row" data-tone={item.band === 'red' ? 'danger' : 'warn'} href={`#/ship/crew/${encodeURIComponent(item.crewId)}`}>
+              <a class="list-row" data-tone={PAPER_TONE[item.band]} href={`#/ship/crew/${encodeURIComponent(item.crewId)}`}>
                 <span class="list-row-text">
                   <span class="list-row-overline">{item.rank}</span>
                   <span class="list-row-title">{item.name}</span>
@@ -116,7 +119,7 @@ function DueScreen({ ship, path }: { ship: ShipProfile; path: string }) {
       {crewOnly ? (
         <p class="due-views no-print"><a class="btn btn-outline" href="#/due/port">Before next port</a></p>
       ) : (
-        <nav class="due-views segmented no-print" aria-label="Due views">
+        <nav class="view-switch no-print" aria-label="Due views">
           <a href="#/due" aria-current={port ? undefined : 'page'}>All due</a>
           <a href="#/due/port" aria-current={port ? 'page' : undefined}>Before next port</a>
         </nav>

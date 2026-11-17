@@ -1,5 +1,5 @@
 import type { Alert, AlertKind } from '../domain/alerts';
-import { daysBetween, shortDate } from '../domain/dates';
+import { daysBetween, isValidIsoDate, shortDate } from '../domain/dates';
 
 export { daysBetween, shortDate };
 
@@ -9,8 +9,12 @@ export const NOTHING_DUE = '✓ Nothing due';
 /** The alerts of the crew's own papers: passports, seaman's books and documents. */
 export const CREW_DOC_KINDS: readonly AlertKind[] = ['crewDoc', 'crewCertificate'];
 
-/** `in 14 d`, `today` or `5 d over`: the days from `today` to `due`, in words, so that the chip never relies on its colour. */
+/**
+ * `in 14 d`, `today` or `5 d over`: the days from `today` to `due`, in words, so that the chip never relies on its colour.
+ * Nothing (`''`) when either is not a real date, rather than a made-up count.
+ */
 export function dueChipText(due: string, today: string): string {
+  if (!isValidIsoDate(due) || !isValidIsoDate(today)) return '';
   const days = daysBetween(today, due);
   return days > 0 ? `in ${days} d` : days === 0 ? 'today' : `${-days} d over`;
 }

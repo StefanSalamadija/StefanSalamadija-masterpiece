@@ -74,10 +74,13 @@
     color: #000000;
   }
 
+  /* A border rather than a shadow: a shadow is dropped when the browser prints without background graphics. */
   .status[data-tone] {
+    padding: 3px 11px;
+    border: 1px solid #000000;
     background: #ffffff;
     color: #000000;
-    box-shadow: inset 0 0 0 1px #000000;
+    box-shadow: none;
   }
 
   html,
