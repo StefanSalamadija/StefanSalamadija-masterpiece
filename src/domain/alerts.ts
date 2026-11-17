@@ -1,3 +1,4 @@
+import { rankLabel } from './catalogues';
 import { contractBand, contractEndDate, onboardLimitBand, onboardLimitDate, validMaxMonths } from './contracts';
 import { fullName, onboardAt } from './crew';
 import { docBand, docLabel } from './crewDocs';
@@ -22,29 +23,32 @@ export interface Alert {
   detail: string;
   /** The screen that edits the record; for a contract or an onboard limit, the reliefs, where the crew to relieve are listed. */
   href: string;
+  /** The date `detail` names (`YYYY-MM-DD`), which the alerts are ordered by; the screens word it themselves. */
+  due: string;
+  /** What is due, in a word or two: `Passport`, `Seaman's book`, a document's label, `Ship certificate`, `Survey`, `Contract end` or `11-month limit`. */
+  what: string;
+  /** Whose it is, for the crew: the rank and the initial and surname (`R. EXAMPLE`, or the surname alone with no given names). */
+  person?: { rank: string; name: string };
+  /** For a contract: the relief's planned date, when one is set. */
+  reliefPlanned?: string;
 }
 
-/** An alert and the date it names, which only the order needs. */
-interface Dated {
-  alert: Alert;
-  date: string;
-}
-
-/** A date of a record that warns, with the sentence it makes. */
+/** A date of a record that warns, with what it is and the sentence it makes. */
 interface Flag {
   date: string;
   band: Warning;
+  what: string;
   detail: string;
 }
 
-/** The words that start the detail, for a date that is amber and for one that is red. */
-type Words = Record<Warning, string>;
+/** What a date is (`what`) and the words that start the detail, for a date that is amber and for one that is red. */
+type Words = Record<Warning | 'what', string>;
 
-const PASSPORT: Words = { amber: 'Passport expires', red: 'Passport expired' };
-const SEAMANS_BOOK: Words = { amber: "Seaman's book expires", red: "Seaman's book expired" };
-const CERTIFICATE_EXPIRY: Words = { amber: 'Expires', red: 'Expired' };
-const CERTIFICATE_SURVEY: Words = { amber: 'Survey due', red: 'Survey overdue' };
-const CONTRACT: Words = { amber: 'Contract ends', red: 'Contract ended' };
+const PASSPORT: Words = { what: 'Passport', amber: 'Passport expires', red: 'Passport expired' };
+const SEAMANS_BOOK: Words = { what: "Seaman's book", amber: "Seaman's book expires", red: "Seaman's book expired" };
+const CERTIFICATE_EXPIRY: Words = { what: 'Ship certificate', amber: 'Expires', red: 'Expired' };
+const CERTIFICATE_SURVEY: Words = { what: 'Survey', amber: 'Survey due', red: 'Survey overdue' };
+const CONTRACT: Words = { what: 'Contract end', amber: 'Contract ends', red: 'Contract ended' };
 const RELIEF_OVERDUE = ' — relief overdue';
 const RELIEFS = '#/ship/reliefs';
 
@@ -58,7 +62,7 @@ function compareText(a: string, b: string): number {
 /** The flag for one date, or nothing when the date is not there or does not warn. */
 function flag(date: string | undefined, band: Band, words: Words): Flag | undefined {
   if (!date || (band !== 'amber' && band !== 'red')) return undefined;
-  return { date, band, detail: `${words[band]} ${date}` };
+  return { date, band, what: words.what, detail: `${words[band]} ${date}` };
 }
 
 /**
@@ -78,20 +82,26 @@ function worstFlag(flags: (Flag | undefined)[]): Flag | undefined {
   return worst;
 }
 
-/** The alert for a record shown by `worst`, with the date it names; none when the record has nothing that warns. */
-function alertFrom(worst: Flag | undefined, rest: Pick<Alert, 'key' | 'kind' | 'title' | 'href'>): Dated[] {
-  return worst ? [{ date: worst.date, alert: { ...rest, band: worst.band, detail: worst.detail } }] : [];
+/** The alert for a record shown by `worst`; none when the record has nothing that warns. */
+function alertFrom(worst: Flag | undefined, rest: Pick<Alert, 'key' | 'kind' | 'title' | 'href' | 'person' | 'reliefPlanned'>): Alert[] {
+  return worst ? [{ ...rest, band: worst.band, detail: worst.detail, due: worst.date, what: worst.what }] : [];
+}
+
+/** A crew member as a due row names them: the rank, and the first initial and surname. */
+function personOf(m: CrewMember): NonNullable<Alert['person']> {
+  const given = (m.givenNames || '').trim();
+  return { rank: rankLabel(m), name: given ? `${given[0]}. ${m.surname}` : m.surname };
 }
 
 /** Passports and seaman's books of the crew onboard on `today`: one alert for each person who has either to look at. */
-function crewDocAlerts(crew: CrewMember[], today: string): Dated[] {
+function crewDocAlerts(crew: CrewMember[], today: string): Alert[] {
   return onboardAt(crew, today).flatMap((m) =>
     alertFrom(
       worstFlag([
         flag(m.passportExpiry, crewDocExpiryBand(m.passportExpiry, today), PASSPORT),
         flag(m.seamansBookExpiry, crewDocExpiryBand(m.seamansBookExpiry, today), SEAMANS_BOOK),
       ]),
-      { key: `crewDoc:${m.id}`, kind: 'crewDoc', title: fullName(m), href: `#/ship/crew/${encodeURIComponent(m.id)}` },
+      { key: `crewDoc:${m.id}`, kind: 'crewDoc', title: fullName(m), href: `#/ship/crew/${encodeURIComponent(m.id)}`, person: personOf(m) },
     ),
   );
 }
@@ -100,22 +110,24 @@ function crewDocAlerts(crew: CrewMember[], today: string): Dated[] {
  * Documents (CoC, medical, courses, visas) of the crew onboard on `today`: one alert for each document that expires
  * within 90 days or has expired, named by the person and the document (`Medical fitness certificate expires 2026-12-24`).
  */
-function crewCertificateAlerts(crew: CrewMember[], docs: CrewDocument[], today: string): Dated[] {
+function crewCertificateAlerts(crew: CrewMember[], docs: CrewDocument[], today: string): Alert[] {
   const onboard = new Map(onboardAt(crew, today).map((m) => [m.id, m]));
   return docs
     .filter((d) => !d.deleted)
     .flatMap((d) => {
       const member = onboard.get(d.crewId);
       if (!member) return [];
-      const words: Words = { amber: `${docLabel(d)} expires`, red: `${docLabel(d)} expired` };
+      const what = docLabel(d);
+      const words: Words = { what, amber: `${what} expires`, red: `${what} expired` };
       return alertFrom(flag(d.expiryDate, docBand(d, today), words), {
         key: `crewCertificate:${d.id}`, kind: 'crewCertificate', title: fullName(member), href: `#/ship/crew/${encodeURIComponent(member.id)}`,
+        person: personOf(member),
       });
     });
 }
 
 /** Expiries and next surveys of the certificates that are not deleted: one alert for each certificate that has either to look at. */
-function certificateAlerts(certificates: Certificate[], today: string): Dated[] {
+function certificateAlerts(certificates: Certificate[], today: string): Alert[] {
   return certificates
     .filter((c) => !c.deleted)
     .flatMap((c) =>
@@ -133,12 +145,13 @@ function certificateAlerts(certificates: Certificate[], today: string): Dated[] 
  * Contracts of the crew onboard on `today` that end within 30 days or have ended: one alert for each, which says the
  * relief is overdue once the end is past. A contract with no length has no end and makes none.
  */
-function contractAlerts(crew: CrewMember[], today: string): Dated[] {
+function contractAlerts(crew: CrewMember[], today: string): Alert[] {
   return onboardAt(crew, today).flatMap((m) => {
     const end = contractEndDate(m);
     const found = flag(end, contractBand(m, today), CONTRACT);
     const worst = found && (found.band === 'red' ? { ...found, detail: `${found.detail}${RELIEF_OVERDUE}` } : found);
-    return alertFrom(worst, { key: `contract:${m.id}`, kind: 'contract', title: fullName(m), href: RELIEFS });
+    const rest = { key: `contract:${m.id}`, kind: 'contract' as const, title: fullName(m), href: RELIEFS, person: personOf(m) };
+    return alertFrom(worst, m.reliefPlannedDate ? { ...rest, reliefPlanned: m.reliefPlannedDate } : rest);
   });
 }
 
@@ -147,14 +160,14 @@ function contractAlerts(crew: CrewMember[], today: string): Dated[] {
  * reaches it within 30 days or has reached it, whether or not their contract has a length. A limit that is not whole
  * months from 1 to 11 (a damaged ship record) is the default, in the words as in the dates.
  */
-function onboardLimitAlerts(crew: CrewMember[], today: string, maxMonths: number): Dated[] {
+function onboardLimitAlerts(crew: CrewMember[], today: string, maxMonths: number): Alert[] {
   const months = validMaxMonths(maxMonths);
-  const words: Words = { amber: `Reaches ${months}-month onboard limit`, red: `Over ${months}-month onboard limit since` };
+  const words: Words = { what: `${months}-month limit`, amber: `Reaches ${months}-month onboard limit`, red: `Over ${months}-month onboard limit since` };
   return onboardAt(crew, today).flatMap((m) => {
     const band = onboardLimitBand(m, today, months);
     // The date is only worked out for a band that warns: the sign-on of a damaged record may not be a date.
     const date = band === 'amber' || band === 'red' ? onboardLimitDate(m, months) : undefined;
-    return alertFrom(flag(date, band, words), { key: `onboardLimit:${m.id}`, kind: 'onboardLimit', title: fullName(m), href: RELIEFS });
+    return alertFrom(flag(date, band, words), { key: `onboardLimit:${m.id}`, kind: 'onboardLimit', title: fullName(m), href: RELIEFS, person: personOf(m) });
   });
 }
 
@@ -162,13 +175,13 @@ function onboardLimitAlerts(crew: CrewMember[], today: string, maxMonths: number
  * Red first, then the earlier date; alerts alike in both are told apart by title, then by link, then by detail, so the
  * order is always the same.
  */
-function compareDated(a: Dated, b: Dated): number {
+function compareAlerts(a: Alert, b: Alert): number {
   return (
-    WORSE_FIRST[a.alert.band] - WORSE_FIRST[b.alert.band] ||
-    compareText(a.date, b.date) ||
-    a.alert.title.localeCompare(b.alert.title) ||
-    compareText(a.alert.href, b.alert.href) ||
-    compareText(a.alert.detail, b.alert.detail)
+    WORSE_FIRST[a.band] - WORSE_FIRST[b.band] ||
+    compareText(a.due, b.due) ||
+    a.title.localeCompare(b.title) ||
+    compareText(a.href, b.href) ||
+    compareText(a.detail, b.detail)
   );
 }
 
@@ -189,7 +202,5 @@ export function collectAlerts(
     ...certificateAlerts(certificates, today),
     ...contractAlerts(crew, today),
     ...onboardLimitAlerts(crew, today, maxMonthsOnboard),
-  ]
-    .sort(compareDated)
-    .map(({ alert }) => alert);
+  ].sort(compareAlerts);
 }

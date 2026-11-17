@@ -1,3 +1,4 @@
+import { daysBetween } from '../domain/dates';
 import type { BudgetGoal, BudgetRecurring, BudgetSettings, Cents, Ym } from '../domain/types';
 import { POTS } from './catalog';
 import type { BudgetData } from './forecast';
@@ -24,8 +25,6 @@ import type { MonthPlan } from './targets';
 
 export interface BudgetAlert { key: string; text: string; href: string }
 
-const DAY_MS = 86_400_000;
-const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
 
 /** What the plan puts towards a goal each month: its category's target and the templates booked to it. */
 export function goalPlannedMonthly(goal: BudgetGoal, plan: MonthPlan, recurring: BudgetRecurring[], ym: Ym): Cents {

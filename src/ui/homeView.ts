@@ -1,5 +1,6 @@
 import { isBackupDue } from '../backup/reminder';
 import type { AlertKind } from '../domain/alerts';
+import { MONTH_NAMES } from '../domain/dates';
 import { formatOffset, nextScheduledChange } from '../domain/shipTime';
 import { todayRowIndex } from '../domain/dayGrid';
 import type { ClockChange, FormDraft, FormTemplate, Settings } from '../domain/types';
@@ -31,8 +32,6 @@ export function backupReminder(
   return isBackupDue(settings, hasShips, now) ? backupBannerText(settings.lastExportAt, now) : undefined;
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /**
  * `Clock change 26 Oct 01:00 → UTC+05:00` for the next change that has not yet taken effect, and nothing when there is
  * none. The time is the one the Ship's time history lists the change at: the time on the clocks of the offset in
@@ -44,7 +43,7 @@ export function clockChangeText(changes: ClockChange[], now: Date): string | und
   if (!next || !row) return undefined;
   const [date, time] = row.when.split(' '); // `2026-10-26 01:00`
   const [, month, day] = date.split('-');
-  return `Clock change ${day} ${MONTHS[Number(month) - 1]} ${time} → ${formatOffset(next.toOffsetMinutes)}`;
+  return `Clock change ${day} ${MONTH_NAMES[Number(month) - 1]} ${time} → ${formatOffset(next.toOffsetMinutes)}`;
 }
 
 const BADGE_KIND: Record<AlertKind, BadgeKind> = {

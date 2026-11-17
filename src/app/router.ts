@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
  * Every route of the app, as hash paths. Fixed words come before the `:id` pattern of their parent, because the
  * first match wins.
  */
-const ROUTES = [
+export const ROUTES = [
   '/',
+  '/due',
+  '/due/port',
   '/ship/particulars',
   '/ship/crew',
+  '/ship/crew-documents',
   '/ship/crew/new',
   '/ship/crew/import',
   '/ship/crew/print',
@@ -18,6 +21,7 @@ const ROUTES = [
   '/ship/certificates/new',
   '/ship/certificates/:id',
   '/ship/reliefs',
+  // The Expiring screen of before piece 7, now Due before the next port: see `redirectFor`.
   '/ship/expiring',
   '/ship/voyage',
   '/ship/time',
@@ -98,12 +102,20 @@ export function matchRoute(hash: string): Route {
   return HOME;
 }
 
+/** The route that `path` (a route pattern) has moved to, if it has: an old link or bookmark still opens its screen. */
+export function redirectFor(path: string): string | undefined {
+  return path === '/ship/expiring' ? '/due/port' : undefined;
+}
+
 /** Goes to `path` (for example `/ship/crew/new`); the browser's Back button returns to where the user was. */
 export function navigate(path: string): void {
   window.location.hash = path.startsWith('#') ? path : `#${path}`;
 }
 
-/** The current route. The component re-renders when the hash changes. */
+/**
+ * The current route. The component re-renders when the hash changes. A route that has moved (`redirectFor`) is the route
+ * it moved to at once, and the address is replaced with it, so the old one leaves the history and Back does not return to it.
+ */
 export function useRoute(): Route {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
@@ -112,5 +124,10 @@ export function useRoute(): Route {
     update(); // the hash may have changed between the first render and this effect
     return () => window.removeEventListener('hashchange', update);
   }, []);
-  return useMemo(() => matchRoute(hash), [hash]);
+  const route = useMemo(() => matchRoute(hash), [hash]);
+  const target = redirectFor(route.path);
+  useEffect(() => {
+    if (target) window.location.replace(`#${target}`);
+  }, [target]);
+  return useMemo(() => (target ? matchRoute(target) : route), [route, target]);
 }

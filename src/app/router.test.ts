@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchRoute } from './router';
+import { matchRoute, redirectFor, ROUTES } from './router';
 
 describe('matchRoute', () => {
   it('treats an empty hash as Home', () => {
@@ -55,6 +55,12 @@ describe('matchRoute', () => {
     expect(matchRoute('#/ship/expiring')).toEqual({ path: '/ship/expiring', params: {} });
   });
 
+  it('knows the Due routes and the crew documents', () => {
+    expect(matchRoute('#/due/port').path).toBe('/due/port');
+    expect(matchRoute('#/due')).toEqual({ path: '/due', params: {} });
+    expect(matchRoute('#/ship/crew-documents')).toEqual({ path: '/ship/crew-documents', params: {} });
+  });
+
   it('ignores a trailing slash and a query string', () => {
     expect(matchRoute('#/ship/crew/')).toEqual({ path: '/ship/crew', params: {} });
     expect(matchRoute('#/ship/crew?sort=rank')).toEqual({ path: '/ship/crew', params: {} });
@@ -69,6 +75,22 @@ describe('matchRoute', () => {
   it('falls back to Home for unknown routes and bad escapes', () => {
     for (const hash of ['#/nowhere', '#/ship', '#/ship/crew/abc/extra', '#/ship/crew/abc/documents', '#/ship/crew/abc/documents/d/extra', '#/ship/crew/abc/other/d', '#/ship/crew/%E0%A4%A', '#/settings/import/x']) {
       expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
+    }
+  });
+});
+
+describe('redirectFor', () => {
+  it('sends the old Expiring screen to Due, before the next port, and nothing else anywhere', () => {
+    expect(redirectFor('/ship/expiring')).toBe('/due/port');
+    for (const path of ROUTES) if (path !== '/ship/expiring') expect(redirectFor(path), path).toBeUndefined();
+    expect(ROUTES).toContain('/ship/expiring');
+  });
+
+  it('sends a redirect to a route that is not itself redirected', () => {
+    for (const path of ROUTES) {
+      const target = redirectFor(path);
+      if (target !== undefined) expect(redirectFor(target), path).toBeUndefined();
+      if (target !== undefined) expect(matchRoute(`#${target}`).path).toBe(target);
     }
   });
 });

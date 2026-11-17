@@ -67,6 +67,19 @@
     filter: none;
   }
 
+  /* A Due row prints as text, and its chip as its words in an outline, whatever its tone. */
+  .list-row {
+    border-color: #000000;
+    background: #ffffff;
+    color: #000000;
+  }
+
+  .status[data-tone] {
+    background: #ffffff;
+    color: #000000;
+    box-shadow: inset 0 0 0 1px #000000;
+  }
+
   html,
   body {
     background: #ffffff !important;

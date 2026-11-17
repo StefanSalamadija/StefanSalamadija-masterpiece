@@ -12,7 +12,6 @@ import { CrewDocumentEdit } from '../ui/screens/CrewDocumentEdit';
 import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
 import { CrewListPrint } from '../ui/screens/CrewListPrint';
-import { Expiring } from '../ui/screens/Expiring';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { FormSetup } from '../ui/screens/FormSetup';
 import { Forms } from '../ui/screens/Forms';
@@ -33,6 +32,9 @@ import type { RoutePath } from './router';
 import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
 import { useAppLock } from './useAppLock';
 
+/** The Due screen (all due, before the next port, and the crew documents): a chunk of its own, loaded on demand. */
+const Due = lazyScreen(() => import('../ui/screens/Due').then((m) => m.Due));
+
 /** Importing a backup: its screen, the backup service and the import review are a chunk of their own, loaded on demand. */
 const ImportBackup = lazyScreen(() => import('../ui/screens/ImportBackup').then((m) => m.ImportBackup));
 
@@ -47,8 +49,11 @@ const survey = (name: keyof SurveyScreens) => lazyScreen(() => import('../ui/scr
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
+  '/due': Due,
+  '/due/port': Due,
   '/ship/particulars': Particulars,
   '/ship/crew': Crew,
+  '/ship/crew-documents': Due,
   '/ship/crew/new': CrewEdit,
   '/ship/crew/import': CrewImport,
   '/ship/crew/print': CrewListPrint,
@@ -59,7 +64,6 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/certificates/new': CertificateEdit,
   '/ship/certificates/:id': CertificateEdit,
   '/ship/reliefs': Reliefs,
-  '/ship/expiring': Expiring,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
   '/ship/survey': survey('Surveys'),

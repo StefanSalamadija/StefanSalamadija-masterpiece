@@ -976,7 +976,6 @@ textarea {
 .crew-list,
 .cert-list,
 .relief-list,
-.expiring-list,
 .document-list,
 .voyage-list,
 .history-list {
@@ -1337,7 +1336,6 @@ textarea {
 
 .cert-row,
 .relief-row,
-.expiring-row,
 .document-row {
   padding: 0;
 }
@@ -1345,7 +1343,6 @@ textarea {
 /* The whole card is the link to the certificate, the crew member or the document. */
 .cert-link,
 .relief-link,
-.expiring-link,
 .document-link {
   display: flex;
   flex-direction: column;
@@ -1359,7 +1356,6 @@ textarea {
 
 .cert-details,
 .relief-details,
-.expiring-details,
 .document-details {
   display: flex;
   flex-wrap: wrap;
@@ -1370,17 +1366,15 @@ textarea {
 
 .cert-details > span,
 .relief-details > span,
-.expiring-details > span,
 .document-details > span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-/* ---- Crew documents and the Expiring screen ---- */
+/* ---- Crew documents ---- */
 
 /* The label on the left, the warning on the right, wrapping under it on a phone. */
-.document-head,
-.expiring-head {
+.document-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1415,10 +1409,6 @@ textarea {
   align-self: flex-start;
 }
 
-.expiring-window {
-  margin: 0 0 16px;
-  overflow-wrap: anywhere;
-}
 
 /* ---- Reliefs ---- */
 
@@ -1463,6 +1453,169 @@ textarea {
 .band-badge[data-band='red'] {
   background: var(--red);
   color: var(--on-red);
+}
+
+/* ---- List rows and status pills (the Due screen; Home, the hub and the lists reuse them) ---- */
+
+.row-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The whole row is the link. Overdue and due soon rows are tinted as drawn; the chip carries the status in words and shape. */
+.list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: calc(var(--target) + var(--sp-2));
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.list-row[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.list-row[data-tone='danger'] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* Night red: a due soon row is a plain surface with a faint line; only the overdue ones are tinted. */
+:root[data-theme='red'] .list-row[data-tone='warn'] {
+  border-color: var(--line);
+  background: var(--surface-1);
+}
+
+:root[data-theme='contrast'] .list-row {
+  border-width: 2px;
+}
+
+.list-row-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.list-row-overline,
+.list-row-meta {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.list-row-overline {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+}
+
+.list-row-title {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.list-row-meta {
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+/* A status in words: overdue is a filled pill, due soon an outlined one, valid a ✓ and a word. */
+.status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
+}
+
+.status[data-tone='danger'] {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.status[data-tone='warn'] {
+  color: var(--warn);
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+}
+
+.status[data-tone='ok'] {
+  padding-inline: 0;
+  color: var(--ok);
+}
+
+/* ---- Due ---- */
+
+/* All due and Before next port: a segmented pair of links, the one shown filled. */
+.segmented {
+  display: flex;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-1);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.segmented a {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  text-align: center;
+  text-decoration: none;
+}
+
+.segmented a[aria-current='page'] {
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: var(--fw-strong);
+}
+
+.due-views {
+  margin: 0 0 var(--sp-5);
+}
+
+.due-group {
+  margin: 0 0 var(--sp-5);
+}
+
+.due-group h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+}
+
+.due-none {
+  margin: 0;
+  color: var(--ok);
+  font-weight: var(--fw-medium);
+}
+
+.expiring-window {
+  margin: 0 0 var(--sp-4);
+  overflow-wrap: anywhere;
 }
 
 /* ---- Home ---- */

@@ -44,7 +44,8 @@ const SHIP_LINKS = [
   { label: 'Particulars', href: '#/ship/particulars' },
   { label: 'Crew', href: '#/ship/crew' },
   { label: 'Reliefs', href: '#/ship/reliefs' },
-  { label: 'Expiring', href: '#/ship/expiring' },
+  // Due before the next port, once the Expiring screen. The chip row goes in Task 4 of piece 7.
+  { label: 'Expiring', href: '#/due/port' },
   { label: 'Certificates', href: '#/ship/certificates' },
   { label: 'Voyage', href: '#/ship/voyage' },
   { label: "Ship's time", href: '#/ship/time' },

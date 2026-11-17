@@ -27,7 +27,8 @@ export function isValidIsoDate(s: string): boolean {
   return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(y, m);
 }
 
-const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+/** The months as the screens name them, `Jan` to `Dec`. Printed and exported dates write them in capitals. */
+export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 
 /**
  * A date as it is printed and exported: `05-JAN-1985`, with the month in capitals. An empty date stays empty. Text that is
@@ -37,7 +38,28 @@ const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SE
 export function formatDisplayDate(iso: string): string {
   if (!isValidIsoDate(iso)) return iso;
   const [y, m, d] = parts(iso);
-  return `${String(d).padStart(2, '0')}-${MONTH_NAMES[m - 1]}-${String(y).padStart(4, '0')}`;
+  return `${String(d).padStart(2, '0')}-${MONTH_NAMES[m - 1].toUpperCase()}-${String(y).padStart(4, '0')}`;
+}
+
+/**
+ * A date as a short line on a screen says it: `12 Nov`, with the year only when it is not the year of `today`
+ * (`3 Jan 2027`). Text that is not a real date is given back as it is.
+ */
+export function shortDate(iso: string, today: string): string {
+  if (!isValidIsoDate(iso)) return iso;
+  const [y, m, d] = parts(iso);
+  return `${d} ${MONTH_NAMES[m - 1]}${iso.slice(0, 4) === today.slice(0, 4) ? '' : ` ${y}`}`;
+}
+
+/** The whole days from `from` to `to` (both real `YYYY-MM-DD` dates); negative when `to` is earlier. */
+export function daysBetween(from: string, to: string): number {
+  const dayNumber = (date: string): number => {
+    const [y, m, d] = date.split('-').map(Number);
+    const t = new Date(0);
+    t.setUTCFullYear(y, m - 1, d);
+    return t.getTime() / 86_400_000;
+  };
+  return dayNumber(to) - dayNumber(from);
 }
 
 const LOCAL_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
