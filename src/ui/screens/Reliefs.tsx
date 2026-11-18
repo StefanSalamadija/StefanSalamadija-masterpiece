@@ -4,8 +4,9 @@ import { listForShip } from '../../db/records';
 import { rankLabel } from '../../domain/catalogues';
 import { maxMonthsOnboardOf } from '../../domain/contracts';
 import { fullName } from '../../domain/crew';
+import { worstBand } from '../../domain/expiry';
 import type { CrewMember } from '../../domain/types';
-import { BandBadge } from '../components/BandBadge';
+import { BandBadge, ROW_TONE } from '../components/BandBadge';
 import { reliefDetails, reliefRows } from '../reliefsView';
 import { useLive } from '../useLive';
 
@@ -20,22 +21,21 @@ function ReliefList({ shipId, maxMonths }: { shipId: string; maxMonths: number }
       <h2>Reliefs</h2>
       {rows?.length === 0 && <p class="empty">Nobody is onboard on {shipToday}.</p>}
       {rows && rows.length > 0 && (
-        <ul class="relief-list" role="list" aria-label="Reliefs">
+        <ul class="row-list" role="list" aria-label="Reliefs">
           {rows.map((row) => (
-            <li key={row.member.id} class="card relief-row">
-              <a class="relief-link" href={`#/ship/crew/${encodeURIComponent(row.member.id)}`}>
-                <span class="relief-head">
-                  <span class="crew-row-who">
-                    <span class="crew-rank">{rankLabel(row.member)}</span>
-                    <span class="crew-name">{fullName(row.member)}</span>
-                  </span>
-                  <span class="relief-badges">
-                    <BandBadge band={row.contractBand} kind="contract" />
-                    <BandBadge band={row.limitBand} kind="limit" />
-                  </span>
+            <li key={row.member.id}>
+              <a
+                class="list-row relief-row" data-tone={ROW_TONE[worstBand(row.contractBand, row.limitBand)]}
+                href={`#/ship/crew/${encodeURIComponent(row.member.id)}`}
+              >
+                <span class="list-row-text">
+                  <span class="list-row-overline">{rankLabel(row.member)}</span>
+                  <span class="list-row-title">{fullName(row.member)}</span>
+                  <span class="list-row-meta">{reliefDetails(row).map((detail) => <span key={detail}>{detail}</span>)}</span>
                 </span>
-                <span class="relief-details">
-                  {reliefDetails(row).map((detail) => <span key={detail}>{detail}</span>)}
+                <span class="relief-badges">
+                  <BandBadge band={row.contractBand} kind="contract" />
+                  <BandBadge band={row.limitBand} kind="limit" />
                 </span>
               </a>
             </li>

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openShipSection, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openShipSection, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's clock reads 12:00. It keeps running.
 
@@ -503,4 +503,20 @@ test('voyage: Start new voyage warns about changes that have not been saved', as
   await page.getByRole('button', { name: 'Start new voyage' }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog).not.toContainText(warning);
+});
+
+test("voyage and ship's time in Night red: red and black, with 44 px controls and 16 px inputs", async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/time');
+  await page.getByRole('button', { name: 'Advance 1 h' }).click();
+  await expect(historyItems(page)).toHaveCount(1);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+  await page.goto('./#/ship/voyage');
+  await expect(nextPort(page)).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openMore, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openMore, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -773,4 +773,16 @@ test('crew list: Back to the screen before it, then the Crew link, restores the 
   await tile('Crew').click();
   await expect(rows).toHaveCount(40);
   await expect.poll(scrollY).toBeCloseTo(1500, -1);
+});
+
+test('crew list in Night red: only red and black, every control 44 px or more, inputs at 16 px', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'EXAMPLE', givenNames: 'R.', passportExpiry: '2026-01-10' });
+  await addMember(page, { surname: 'SAMPLE', givenNames: 'J.', rank: 'Chief Officer' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew');
+  await expect(crewRow(page, 'EXAMPLE')).toContainText('Expired');
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

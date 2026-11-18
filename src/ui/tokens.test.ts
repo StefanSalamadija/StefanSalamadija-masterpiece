@@ -87,6 +87,7 @@ const OTHER: Record<string, Partial<Record<Theme, string>>> = {
   '--media-filter': { day: 'none', dark: 'none', contrast: 'none' },
   '--picker-filter': { day: 'none', dark: 'none', contrast: 'none' },
   '--shadow-2': { red: 'none', contrast: 'none' },
+  '--shadow-3': { red: 'none' },
 };
 
 describe('the theme token blocks in theme.css', () => {
@@ -118,6 +119,9 @@ describe('the theme token blocks in theme.css', () => {
     expect(blocks.dark.get('--nav-pill')).toMatch(/^color-mix\(in srgb, #5fd4ce 18%, transparent\)$/i);
     expect(blocks.day.get('--shadow-2')).toBe('0 -2px 12px rgb(0 0 0 / 0.12)');
     expect(blocks.dark.get('--shadow-2')).toBe(blocks.day.get('--shadow-2'));
+    // Under a dialog or a toast: one shadow in the day themes, none in Night red (Task 6 review m3).
+    expect(blocks.day.get('--shadow-3')).toBe('0 8px 32px rgb(0 0 0 / 0.3)');
+    expect([blocks.dark.get('--shadow-3'), blocks.contrast.get('--shadow-3')]).toEqual([blocks.day.get('--shadow-3'), blocks.day.get('--shadow-3')]);
   });
 
   it('give the bars the colours the status bar uses', () => {
@@ -170,5 +174,144 @@ describe('isRedOrBlack', () => {
   it('accepts black and reds, and refuses white, blue, green and amber', () => {
     for (const hex of ['#000000', '#120000', '#1E0303', '#3A0A0A', '#E04A3A', '#FF5A45', '#C8372A', '#202020']) expect(isRedOrBlack(hex), hex).toBe(true);
     for (const hex of ['#FFFFFF', '#1D5FD1', '#5CCB8A', '#F2B33D', '#7AB8FF', '#212121']) expect(isRedOrBlack(hex), hex).toBe(false);
+  });
+});
+
+/* ---- Outside the token blocks: every size, colour, radius and weight is a token ---- */
+
+interface Declaration { selector: string; at: string[]; prop: string; value: string; line: number }
+
+/** Every declaration in the file, with its selector, the at-rules around it and its line, comments taken out. */
+function declarations(css: string): Declaration[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ' '));
+  const out: Declaration[] = [];
+  const stack: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') {
+      stack.push(text.slice(start, i).trim().replace(/\s+/g, ' ').replace(/"/g, "'"));
+      start = i + 1;
+    } else if (ch === ';' || ch === '}') {
+      const chunk = text.slice(start, i);
+      const colon = chunk.indexOf(':');
+      if (colon > 0 && stack.length && chunk.trim()) {
+        const lead = chunk.length - chunk.trimStart().length;
+        out.push({
+          selector: stack[stack.length - 1],
+          at: stack.slice(0, -1),
+          prop: chunk.slice(0, colon).trim(),
+          value: chunk.slice(colon + 1).trim(),
+          line: text.slice(0, start + lead).split('\n').length,
+        });
+      }
+      if (ch === '}') stack.pop();
+      start = i + 1;
+    }
+  }
+  return out;
+}
+
+/** A rule of the token blocks: `:root` or `:root[data-theme]` only. Its custom properties are where the raw values live. */
+const isTokenBlock = (d: Declaration) => d.prop.startsWith('--')
+  && d.selector.split(',').every((s) => /^:root(\[data-theme='\w+'\])?$/.test(s.trim()));
+
+/**
+ * True when a value is made only of the given tokens and words: `var(--sp-3)`, `0`, `calc(-1 * var(--sp-2))`,
+ * `max(var(--fs-body), 1em)`, and, where `env` is set, the phone's safe-area insets.
+ */
+function onlyTokens(value: string, prefixes: string[], words: string[], env = false): boolean {
+  let rest = value;
+  if (env) rest = rest.replace(/env\(safe-area-inset-\w+\)/g, ' ');
+  rest = rest.replace(/var\((--[\w-]+)\)/g, (whole, name: string) => (prefixes.some((p) => name.startsWith(p)) ? ' ' : whole));
+  const math = /\b(calc|max|min|clamp)\(/.test(rest);
+  rest = rest.replace(/\b(calc|max|min|clamp)\(/g, ' ').replace(/[(),+*/]|\s-\s/g, ' ');
+  return rest.split(/\s+/).filter(Boolean).every((part) => words.includes(part) || (math && /^-?\d*\.?\d+$/.test(part)));
+}
+
+/* Every named colour of CSS Color 4, besides transparent and currentColor. */
+const NAMED_COLOURS = new Set(`aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray
+darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue
+darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite
+forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki
+lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey
+lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen
+magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen
+mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered
+orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red
+rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
+springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen`.split(/\s+/));
+
+/** The colours a value names directly: hex, a colour function, or a colour by name. Tokens and strings are not looked into. */
+function rawColours(value: string): string[] {
+  const bare = value.replace(/var\(--[\w-]+/g, ' ').replace(/'[^']*'|"[^"]*"/g, ' ');
+  return [
+    ...bare.match(/#[0-9a-f]{3,8}\b/gi) ?? [],
+    ...bare.match(/\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi) ?? [],
+    ...(bare.toLowerCase().match(/[a-z]+/g) ?? []).filter((word) => NAMED_COLOURS.has(word)),
+  ];
+}
+
+/**
+ * The exceptions, each with its reason. Print is print's own token context (F21), and the dialog backdrop is exempt from the
+ * colour rule (F21; it is the `--backdrop` token today). The logo keeps its geometry, and the clock keeps the one weight of
+ * the bundled mono font.
+ */
+const exempt = (d: Declaration, rule: 'colour' | 'radius' | 'weight') =>
+  (rule === 'colour' && (d.at.some((a) => /^@media print\b/.test(a)) || /::backdrop$/.test(d.selector)))
+  || (rule === 'radius' && d.selector === '.welcome-band svg' && d.value === '22%')
+  || (rule === 'weight' && d.selector === '.clock' && d.value === '500');
+
+describe('theme.css outside its token blocks', () => {
+  const outside = declarations(themeCss).filter((d) => !isTokenBlock(d));
+  const offenders = (test: (d: Declaration) => boolean) => outside.filter(test).map((d) => `${d.line}: ${d.selector} { ${d.prop}: ${d.value} }`);
+
+  it('is read whole', () => {
+    expect(outside.length).toBeGreaterThan(500);
+    expect(outside.some((d) => d.selector === 'dialog.dialog::backdrop')).toBe(true);
+  });
+
+  it('sets every font size with a --fs token, inherit or 1em', () => {
+    expect(offenders((d) => d.prop === 'font-size' && !onlyTokens(d.value, ['--fs-'], ['inherit', '1em']))).toEqual([]);
+  });
+
+  it('sets the font shorthand from tokens only', () => {
+    expect(offenders((d) => d.prop === 'font' && d.value !== 'inherit'
+      && !onlyTokens(d.value.replace('/', ' '), ['--fw-', '--fs-', '--lh-', '--font-'], []))).toEqual([]);
+  });
+
+  it('rounds every corner with an --r token, 0 or 50%', () => {
+    expect(offenders((d) => /^border(-[a-z]+)*-radius$/.test(d.prop) && !exempt(d, 'radius')
+      && !onlyTokens(d.value, ['--r-'], ['0', '50%']))).toEqual([]);
+  });
+
+  it('names no colour but transparent and currentColor', () => {
+    expect(offenders((d) => !exempt(d, 'colour') && rawColours(d.value).length > 0)).toEqual([]);
+  });
+
+  it('sets every font weight with an --fw token', () => {
+    expect(offenders((d) => d.prop === 'font-weight' && !exempt(d, 'weight') && !onlyTokens(d.value, ['--fw-'], []))).toEqual([]);
+  });
+
+  it('spaces padding, margins and gaps with --sp tokens, 0, auto and the safe-area insets', () => {
+    expect(offenders((d) => /^(padding|margin)(-[a-z]+)*$|^(row-|column-)?gap$/.test(d.prop)
+      && !onlyTokens(d.value, ['--sp-'], ['0', 'auto'], true))).toEqual([]);
+  });
+});
+
+describe('the checks on theme.css', () => {
+  it('find the raw values they ban', () => {
+    expect(onlyTokens('calc(var(--sp-4) + env(safe-area-inset-left))', ['--sp-'], ['0'], true)).toBe(true);
+    expect(onlyTokens('calc(-1 * var(--sp-2)) 0 var(--sp-2)', ['--sp-'], ['0'])).toBe(true);
+    expect(onlyTokens('max(var(--fs-body), 1em)', ['--fs-'], ['1em'])).toBe(true);
+    expect(onlyTokens('12px var(--sp-2)', ['--sp-'], ['0'])).toBe(false);
+    expect(onlyTokens('var(--radius)', ['--r-'], ['0'])).toBe(false);
+    expect(onlyTokens('calc(var(--sp-4) + 2px)', ['--sp-'], ['0'])).toBe(false);
+    expect(rawColours('0 0 0 1px var(--red)')).toEqual([]);
+    expect(rawColours('rgb(0 0 0 / 0.3)')).toEqual(['rgb(']);
+    expect(rawColours('1px solid White')).toEqual(['white']);
+    expect(rawColours('#fff')).toEqual(['#fff']);
+    expect(rawColours("transparent currentColor 'red'")).toEqual([]);
   });
 });

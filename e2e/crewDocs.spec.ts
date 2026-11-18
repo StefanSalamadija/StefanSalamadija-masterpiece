@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Download, Locator, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, openShipSection, setupShip, skipProtectStep } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, openShipSection, setTheme, setupShip, skipProtectStep } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25. Sealing or opening a
 // backup derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow are given more time than
@@ -671,4 +671,19 @@ test('crew edit: unsaved changes are not lost to Add document or a document row;
   await expect(saveFirst).toHaveCount(0);
   await documentList(page).getByRole('link').click();
   await expect(page.getByRole('heading', { name: 'Edit document' })).toBeVisible();
+});
+
+test('crew documents in Night red: the member\'s documents are red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, 'EXAMPLE', 'R.');
+  await openMember(page, 'R. EXAMPLE');
+  await addDocument(page, { document: 'Medical fitness certificate', number: 'M-1', expiry: '2020-01-01' });
+  await addDocument(page, { document: 'Other', name: 'Made-up course', expiry: '2031-01-01' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew');
+  await openMember(page, 'R. EXAMPLE');
+  await expect(documentList(page).getByRole('listitem')).toHaveCount(2);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

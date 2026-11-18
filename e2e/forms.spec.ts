@@ -12,7 +12,7 @@ import { oddLayoutsDocx } from '../src/forms/testing/wordFixtures';
 import { detectWord } from '../src/forms/word/detect';
 import { readWordValues } from '../src/forms/word/read';
 import { writeFormFixtures } from './fixtures/makeForms';
-import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectTargets, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -1168,4 +1168,26 @@ test('two files with the same code in one selection: the second asks to replace'
   await expect(page.getByText('2 forms imported', { exact: true })).toBeVisible();
   await expect(library(page).getByRole('listitem')).toHaveCount(1);
   await expect(library(page).getByRole('link', { name: 'TST-01 · Toolbox Talk · Rev 01 / 01.06.2026' })).toBeVisible();
+});
+
+test('the forms library in Night red: red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await openForms(page);
+  await importFile(page, 'toolbox.docx');
+  await expect(page.getByRole('heading', { name: 'Set up TST-01' })).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+  await page.getByRole('button', { name: 'Save form' }).click();
+  await expect(library(page).getByRole('listitem')).toHaveCount(1);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+  await library(page).getByRole('link').first().click();
+  await expect(page).toHaveURL(/#\/forms\/[^/]+\/fill$/);
+  await expect(page.getByRole('heading').first()).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

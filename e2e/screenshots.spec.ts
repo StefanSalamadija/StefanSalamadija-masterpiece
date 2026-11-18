@@ -16,9 +16,10 @@ const DUE_READY = '.list-row, .due-none, .empty';
 
 /**
  * The screens captured, as `<name>-<theme>.png`. Later tasks add theirs here. `ready`, when given, is what to wait for
- * before the shot, for a screen whose content loads after its heading.
+ * before the shot, for a screen whose content loads after its heading. `open`, when given, goes on from `path` to a screen
+ * whose address holds a record's id.
  */
-export const SCREENS: { name: string; path: string; ready?: string }[] = [
+export const SCREENS: { name: string; path: string; ready?: string; open?: (page: Page) => Promise<void> }[] = [
   // Home's card and Due list, and the hub's status lines, come in once the ship's records are read.
   { name: 'home', path: '/', ready: '.voyage-card' },
   { name: 'ship', path: '/ship', ready: '.hub-status:not(:empty)' },
@@ -26,6 +27,19 @@ export const SCREENS: { name: string; path: string; ready?: string }[] = [
   { name: 'particulars', path: '/ship/particulars' },
   { name: 'crew', path: '/ship/crew' },
   { name: 'crew-new', path: '/ship/crew/new' },
+  { name: 'crew-edit', path: '/ship/crew', open: (page) => page.getByRole('button', { name: 'Edit' }).first().click(), ready: '.crew-documents' },
+  {
+    name: 'crew-document-new', path: '/ship/crew',
+    open: async (page) => {
+      await page.getByRole('button', { name: 'Edit' }).first().click();
+      await page.getByRole('button', { name: 'Add document' }).click();
+    },
+    ready: '.crew-document-form',
+  },
+  { name: 'crew-import', path: '/ship/crew/import' },
+  { name: 'crew-print', path: '/ship/crew/print', ready: '.sheet-table' },
+  { name: 'certificate-new', path: '/ship/certificates/new' },
+  { name: 'certificate-edit', path: '/ship/certificates', open: (page) => page.locator('.list-row').first().click(), ready: '.certificate-form' },
   { name: 'certificates', path: '/ship/certificates' },
   { name: 'reliefs', path: '/ship/reliefs' },
   { name: 'due', path: '/due', ready: DUE_READY },
@@ -94,6 +108,7 @@ for (const theme of THEMES) {
     for (const screen of SCREENS) {
       await page.goto(`./#${screen.path}`);
       await expect(page.getByRole('heading').first()).toBeVisible();
+      if (screen.open) await screen.open(page);
       if (screen.ready) await expect(page.locator(screen.ready).first()).toBeVisible();
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.screenshot({ path: `${DIR}/${screen.name}-${theme.id}.png`, fullPage: true });

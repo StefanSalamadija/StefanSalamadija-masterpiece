@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -413,4 +413,16 @@ test('a damaged maximum months onboard in the ship record is not used: 11 months
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   expect((await stored(page, 'ships'))[0]).toMatchObject({ maxMonthsOnboard: 9 });
+});
+
+test('reliefs in Night red: the list is red and black, with 44 px rows', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'EXAMPLE', givenNames: 'R.', signOn: '2025-09-01', contractMonths: '4' });
+  await addMember(page, { surname: 'SAMPLE', givenNames: 'J.' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/reliefs');
+  await expect(reliefRow(page, 'EXAMPLE')).toContainText('Relief overdue');
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

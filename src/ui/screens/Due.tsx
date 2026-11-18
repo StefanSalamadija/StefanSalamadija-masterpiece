@@ -3,17 +3,14 @@ import { useAppState } from '../../app/AppState';
 import { useRoute } from '../../app/router';
 import type { Alert } from '../../domain/alerts';
 import { expiringBefore } from '../../domain/crewDocs';
-import type { Band, ShipProfile } from '../../domain/types';
+import type { ShipProfile } from '../../domain/types';
 import { currentVoyage } from '../../domain/voyage';
-import { BandBadge } from '../components/BandBadge';
+import { BandBadge, ROW_TONE } from '../components/BandBadge';
 import { DueRow } from '../components/DueRow';
 import { expiringDetail, expiringWindow } from '../crewDocsView';
 import { CREW_DOC_KINDS, dueRow, groupDue, NOTHING_DUE } from '../dueView';
 import { useShipAlerts, useShipRecords } from '../useShipRecords';
 import type { ShipRecords } from '../useShipRecords';
-
-/** The tint of a Before next port row: overdue and due soon only. A valid paper (one the ETA reaches) is a plain row. */
-const PAPER_TONE: Partial<Record<Band, 'warn' | 'danger'>> = { amber: 'warn', red: 'danger' };
 
 /** A group of the Due list (`Overdue`, `Due soon`), named by its heading; nothing when it is empty. */
 function DueGroup({ id, name, alerts, today }: { id: string; name: string; alerts: Alert[]; today: string }) {
@@ -61,7 +58,7 @@ function BeforeNextPort({ records, today }: { records: ShipRecords; today: strin
           {view.items.map((item, index) => (
             // The list is made again whole, never reordered by hand, so the position is part of what tells two alike rows apart.
             <li key={`${item.crewId}:${item.what}:${item.expiryDate}:${index}`}>
-              <a class="list-row" data-tone={PAPER_TONE[item.band]} href={`#/ship/crew/${encodeURIComponent(item.crewId)}`}>
+              <a class="list-row" data-tone={ROW_TONE[item.band]} href={`#/ship/crew/${encodeURIComponent(item.crewId)}`}>
                 <span class="list-row-text">
                   <span class="list-row-overline">{item.rank}</span>
                   <span class="list-row-title">{item.name}</span>

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import type { Download, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, openMore, setupShip, skipProtectStep } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, openMore, setTheme, setupShip, skipProtectStep } from './helpers';
 
 // Every device starts at 2026-10-25T09:00Z with the ship at UTC+03:00, so the ship's today is 2026-10-25.
 // Opening or sealing a file derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow one
@@ -845,4 +845,13 @@ test('import works offline after a reload: its screen and the backup service com
   await fs.writeFile(notBackup, 'shopping list');
   await page.getByLabel('Backup file').setInputFiles(notBackup);
   await expect(page.getByRole('alert')).toHaveText("This isn't a Masterpiece backup file.");
+});
+
+test('backup and restore in Night red: Settings is red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

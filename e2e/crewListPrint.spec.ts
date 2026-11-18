@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Download, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -549,4 +549,14 @@ test('the printed table fits the width of an A4 page in landscape, with 11 colum
   await page.emulateMedia({ media: 'print' });
   expect(await fits()).toBe(true);
   expect(await sheetOf(page).locator('td.col-date').first().evaluate((cell) => getComputedStyle(cell).whiteSpace)).toBe('nowrap');
+});
+
+test('crew list sheet in Night red: the screen is red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await setUpCrew(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew/print');
+  await expect(page.locator('.sheet-table')).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

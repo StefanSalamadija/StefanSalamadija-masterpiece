@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openMore, openShipSection, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openMore, openShipSection, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -485,4 +485,16 @@ test.describe('with the ship profiles', () => {
     await shipRow(page, 'MV OCEAN STAR').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 1 certificate, 0 voyages, 0 crew documents and 1 clock change from this device.');
   });
+});
+
+test('certificates in Night red: the register is red and black, with 44 px rows and controls', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addCertificate(page, { certificate: 'Class Certificate (Hull)', number: 'CL-9', expiryDate: '2020-01-01' });
+  await addCertificate(page, { certificate: 'Certificate of Registry', number: 'REG-1', expiryDate: '2031-01-01' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/certificates');
+  await expect(certificateList(page).getByRole('listitem')).toHaveCount(2);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

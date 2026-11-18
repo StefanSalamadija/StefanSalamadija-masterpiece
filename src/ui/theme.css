@@ -84,6 +84,7 @@
   --media-filter: none;
   --picker-filter: none;
   --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3); /* under a dialog or a toast */
 }
 
 /* Dark: the navy theme for the cabin (Night before piece 7), with its values kept. */
@@ -124,6 +125,7 @@
   --media-filter: none;
   --picker-filter: none; /* the dark color-scheme already draws the picker icon light */
   --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3); /* under a dialog or a toast */
 }
 
 /*
@@ -167,6 +169,7 @@
   --media-filter: grayscale(1) invert(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
   --picker-filter: grayscale(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
   --shadow-2: none;
+  --shadow-3: none;
 }
 
 /* High contrast: for bright sun on deck. Today's black on white, with the semantic tokens in the same style. */
@@ -207,6 +210,7 @@
   --media-filter: none;
   --picker-filter: none;
   --shadow-2: none;
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3);
 }
 
 /* High contrast's heavier type: regular and medium text are set at 600, as before piece 7. */
@@ -270,6 +274,14 @@ textarea:disabled {
   opacity: 1;
 }
 
+/* The button of a file input: the browser's own is grey, which Night red must not show. */
+::file-selector-button {
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 /* The native date and time pickers' icon: drawn red in Night red. */
 ::-webkit-calendar-picker-indicator {
   filter: var(--picker-filter);
@@ -308,7 +320,7 @@ textarea:disabled {
   height: 1.25em;
   margin: 0;
   border: 2px solid var(--text);
-  border-radius: 4px;
+  border-radius: calc(var(--r-sm) / 2);
   background: var(--surface-0);
   color: var(--text);
   vertical-align: middle;
@@ -328,10 +340,9 @@ textarea:disabled {
   content: '';
   width: 0.35em;
   height: 0.65em;
-  margin-top: -0.15em;
   border-right: 3px solid var(--text);
   border-bottom: 3px solid var(--text);
-  transform: rotate(45deg);
+  transform: translateY(-0.075em) rotate(45deg); /* a tick sits a little high in its box */
 }
 
 :root[data-theme='red'] input[type='radio']:checked::before {
@@ -383,7 +394,7 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--surface-0);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--fs-body);
@@ -461,7 +472,7 @@ textarea {
   padding-top: env(safe-area-inset-top);
   background: var(--bar-bg);
   color: var(--bar-text);
-  border-bottom: 1px solid var(--bar-border);
+  border-bottom: 1px solid var(--bar-line);
 }
 
 .app-header .bar-inner {
@@ -475,7 +486,7 @@ textarea {
 .ship-pill {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   min-width: 0;
   height: 44px;
   padding: 0 var(--sp-3);
@@ -568,7 +579,7 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--sp-1);
   height: 63px; /* and the line above: 64 */
   font-size: var(--fs-caption);
   line-height: var(--lh-caption);
@@ -799,7 +810,8 @@ textarea {
   gap: var(--sp-2);
 }
 
-.field label {
+.field label,
+.field-label {
   font-size: var(--fs-label);
   font-weight: var(--fw-medium);
 }
@@ -874,7 +886,8 @@ textarea {
 }
 
 .chip[aria-current='page'],
-.toggle .btn[aria-pressed='true'] {
+.toggle .btn[aria-pressed='true'],
+.segmented .btn[aria-pressed='true'] {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
@@ -893,7 +906,7 @@ textarea {
 /* The logo's navy waves are the colour of the bars, so a faint ring keeps the tile's edge visible on them. */
 .welcome-band svg {
   border-radius: 22%;
-  box-shadow: 0 0 0 1px var(--bar-border);
+  box-shadow: 0 0 0 1px var(--bar-line);
 }
 
 .welcome-band {
@@ -902,20 +915,21 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 18px;
-  padding: 32px 24px 36px;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-5);
   background: var(--bar-bg);
   color: var(--bar-text);
 }
 
 :root[data-theme='dark'] .welcome-band {
-  background: var(--bg);
+  background: var(--surface-0);
 }
 
 .welcome-band h1 {
   margin: 0;
-  font-size: 32px;
-  font-weight: 600;
+  font-size: var(--fs-display);
+  line-height: var(--lh-display);
+  font-weight: var(--fw-strong);
   letter-spacing: -0.01em;
 }
 
@@ -924,25 +938,18 @@ textarea {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 28px 24px 24px;
+  padding: var(--sp-5);
 }
 
 .tagline {
-  margin: 0 0 8px;
-  font-size: 17px;
-  line-height: 1.45;
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
   text-align: center;
 }
 
 .helper {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
   text-align: center;
-  color: var(--muted);
 }
 
 .welcome-spacer {
@@ -953,21 +960,11 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--sp-2);
   margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.first-ship-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.first-ship-form h2 {
-  margin: 0;
-  font-size: 20px;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--text-muted);
 }
 
 /* ---- Banners and the error toast ---- */
@@ -1033,7 +1030,7 @@ textarea {
   color: var(--on-danger);
   font-size: var(--fs-label);
   line-height: var(--lh-label);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+  box-shadow: var(--shadow-3);
 }
 
 :root[data-theme='dark'] .toast,
@@ -1095,7 +1092,9 @@ textarea {
   margin: 0;
 }
 
-.card {
+.card,
+.fill-row,
+.import-adjust {
   padding: var(--sp-3) var(--sp-4);
   border: var(--bw) solid var(--line);
   border-radius: var(--r-md);
@@ -1125,25 +1124,19 @@ textarea {
 
 .ship-list,
 .crew-list,
-.cert-list,
-.relief-list,
-.document-list,
 .voyage-list,
 .history-list,
-.alert-list,
-.snapshot-list {
+.snapshot-list,
+.import-list,
+.form-list,
+.setup-list,
+.setup-unsupported {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.ship-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
 }
 
 .ship-row-head {
@@ -1153,28 +1146,17 @@ textarea {
   gap: var(--sp-2);
 }
 
-.ship-row-name {
-  min-width: 0;
-  font-size: var(--fs-heading);
-  font-weight: var(--fw-strong);
-  overflow-wrap: anywhere;
-}
-
 .ship-row-actions,
-.row-actions {
+.row-actions,
+.head-actions,
+.toggle,
+.relief-badges,
+.segmented,
+.fill-row-actions,
+.fill-helpers {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
-}
-
-.particulars-form,
-.crew-form,
-.certificate-form,
-.crew-document-form,
-.voyage-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-5);
 }
 
 /* The heading of a part of a form or a screen: small capitals in the muted colour. */
@@ -1194,14 +1176,16 @@ textarea {
   margin-bottom: var(--sp-3);
 }
 
-.form-grid {
+.form-grid,
+.mapping-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
 }
 
 @media (min-width: 640px) {
-  .form-grid {
+  .form-grid,
+  .mapping-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1219,11 +1203,19 @@ textarea {
   color: var(--text-muted);
 }
 
-.helper-text {
+/* Quiet words under a field or a name: help, a contract, a snapshot's date. */
+.helper-text,
+.helper,
+.crew-row-meta,
+.crew-signed-off,
+.snapshot-date,
+.snapshot-counts {
   margin: 0;
   font-size: var(--fs-label);
   line-height: var(--lh-label);
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 /* A checkbox or a radio with its words: the whole row, 48 px high, is what is tapped; the box itself is 24 px. */
@@ -1242,41 +1234,253 @@ textarea {
   margin: 0;
 }
 
-/* An empty list: an icon, one sentence and the one thing to do. */
-.empty-state {
+/* ---- The parts the screens below share ---- */
+
+/* A screen's parts in a column, at the steps of the spacing scale: 8 px, 12 between a field and the next, 16, and 24 between sections. */
+.crew-row,
+.import-row,
+.lock-notes,
+.forms-import {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ship-row,
+.welcome-body,
+.crew-documents,
+.crew-list-sheet,
+.import-open,
+.import-section,
+.time-section,
+.settings-section,
+.lock-form,
+.lock-actions,
+.setup-section,
+.setup-group,
+.fill-section,
+.fill-group,
+.fill-row {
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-6) var(--sp-4);
+  min-width: 0;
+}
+
+.first-ship-form,
+.crew-list-options,
+.import-form,
+.lock-card,
+.db-notice-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.particulars-form,
+.crew-form,
+.certificate-form,
+.crew-document-form,
+.voyage-form,
+.setup-form,
+.fill-form,
+.fill-questions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+/* A heading at the top of a form or a card that is not the screen's own. */
+.first-ship-form h2,
+.crew-list-options h2,
+.setup-form > h2,
+.fill-form > h2,
+.lock-card h1,
+.db-notice-card h1,
+.sheet-title,
+.time-now {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+/* A name at the head of a card. */
+.ship-row-name,
+.crew-name,
+.import-row-name,
+.import-summary {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+  font-weight: var(--fw-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* A line in the strong weight: the file read, the ship locked, a form's period. */
+.import-file,
+.import-from,
+.lock-ship,
+.lock-message,
+.db-notice-message,
+.snapshot-reason,
+.forms-summary p,
+.setup-identity,
+.fill-period {
+  margin: 0;
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.lock-ship,
+.fill-period {
   color: var(--text-muted);
+}
+
+.setup-identity,
+.fill-period {
+  margin-top: calc(-1 * var(--sp-4));
+}
+
+.lock-message,
+.db-notice-message {
   text-align: center;
 }
 
-.empty-state svg {
-  width: var(--target);
-  height: var(--target);
-  color: var(--accent);
+/* A rank or a row number above the name, in capitals. */
+.crew-rank,
+.import-row-number {
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-.empty-state p {
+/* The name and its rank on the left, the status on the right, wrapping under it on a phone. */
+.crew-row-head,
+.import-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.crew-row-who,
+.import-row-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Words with the buttons that act on them, wrapping under them where there is no room. */
+.form-row,
+.history-row,
+.snapshot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+/* A field with the button that acts on it, or a row of equal buttons: side by side where there is room, stacked on a phone. */
+.crew-controls,
+.time-actions,
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.home p,
+.dialog-body p,
+.import-row p,
+.settings-section p,
+.setup-notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A list with a bullet, and a table's legend. */
+.forms-summary ul,
+.import-deletions,
+.setup-unsupported {
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.conflict legend,
+.fill-row legend {
+  padding: 0 var(--sp-2);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+/* A status line that only says something now and then: "Imported 3 crew.", and a form's notice. */
+.live:not(:empty),
+.setup-notice {
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-left: calc(2 * var(--bw) + 2px) solid var(--accent); /* 4 px, 6 in High contrast */
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  font-weight: var(--fw-strong);
+}
+
+/* Text for a screen reader only: in the page and in the accessibility tree, but not seen. An empty status line (it is
+   announced when its text comes) and the file input behind its label are hidden the same way. */
+.visually-hidden,
+.live:empty,
+.import-form > .field-error:empty,
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.crew-sheet-actions,
+.forms-import,
+.screen > .live:not(:empty) {
+  margin-bottom: var(--sp-4);
+}
+
+.voyage-form,
+.time-now,
+.time-section,
+.settings-section,
+.crew-list-options {
+  margin-bottom: var(--sp-5);
+}
+
+/* An empty list says so in one sentence, in the quiet colour. */
+.empty {
+  margin: 0 0 var(--sp-4);
+  color: var(--text-muted);
+}
+
+.crew-documents .empty,
+.setup-section .empty,
+.fill-group .empty {
   margin: 0;
 }
 
 /* ---- Crew list ---- */
 
-.head-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .crew-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-  margin-bottom: 16px;
+  column-gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
 
 .crew-controls .field {
@@ -1284,71 +1488,11 @@ textarea {
   max-width: 260px;
 }
 
-.toggle {
-  display: flex;
-  gap: 8px;
+.crew-signed-off {
+  white-space: nowrap;
 }
 
-.crew-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.crew-row-head,
-.cert-row-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.crew-row-who {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.crew-rank {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.crew-name,
-.cert-name {
-  font-size: 18px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.crew-row-meta {
-  margin: 0;
-  font-size: 13px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
-/* ---- Printed crew list ---- */
-
-.crew-sheet-actions {
-  margin-bottom: 16px;
-}
-
-.crew-list-options {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.crew-list-options h2 {
-  margin: 0;
-  font-size: 22px;
-}
+/* ---- Printed crew list (the screen's frame; print.css sets the page) ---- */
 
 .column-picker {
   min-width: 0;
@@ -1357,39 +1501,24 @@ textarea {
   border: 0;
 }
 
-.column-picker legend {
-  padding: 0;
-  margin-bottom: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .column-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
-  gap: 0 16px;
+  gap: 0 var(--sp-4);
 }
 
 .column-picker .field-error {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 /* The sheet is drawn as the paper it becomes; print.css takes the frame away and sets the page. */
 .crew-list-sheet {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  padding: var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .sheet-title {
-  margin: 0;
-  font-size: 22px;
   letter-spacing: 0.12em;
   text-align: center;
 }
@@ -1397,13 +1526,13 @@ textarea {
 .sheet-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 24px;
+  gap: 0 var(--sp-5);
   margin: 0;
   overflow-wrap: anywhere;
 }
 
 .sheet-key {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 /* A wide table scrolls inside its own box, never the page. */
@@ -1415,26 +1544,21 @@ textarea {
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-label);
 }
 
 .sheet-table th,
 .sheet-table td {
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
 }
 
-:root[data-theme='contrast'] .sheet-table th,
-:root[data-theme='contrast'] .sheet-table td {
-  border-color: var(--text);
-}
-
 .sheet-table th {
-  background: var(--surface);
-  font-weight: 600;
+  background: var(--surface-1);
+  font-weight: var(--fw-strong);
 }
 
 /* A date or a number is never broken, wherever the sheet is drawn: `05-JAN-1985` would split at its hyphens. Names and places may wrap. */
@@ -1446,12 +1570,12 @@ textarea {
 /* Room for the 11 default columns on a screen of a laptop or a tablet: the text wraps, and the table fits its box. A phone scrolls it. */
 @media (min-width: 900px) {
   .sheet-table {
-    font-size: 13px;
+    font-size: var(--fs-caption);
   }
 
   .sheet-table th,
   .sheet-table td {
-    padding: 5px 6px;
+    padding: var(--sp-1);
     white-space: normal;
   }
 }
@@ -1461,8 +1585,8 @@ textarea {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
-  margin-top: 16px;
+  gap: var(--sp-5);
+  margin-top: var(--sp-4);
 }
 
 .sheet-master {
@@ -1475,142 +1599,70 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.sheet-signature,
+.sheet-stamp,
+.sheet-footer {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
 /* The space above the line is where the Master signs. */
 .sheet-signature {
-  margin: 44px 0 0;
-  padding-top: 4px;
+  margin: var(--sp-7) 0 0;
+  padding-top: var(--sp-1);
   border-top: 1px solid var(--text);
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .sheet-stamp {
   flex: 0 1 220px;
   min-height: 110px;
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--text);
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .sheet-footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: var(--muted);
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
 }
 
 .sheet-footer svg {
   flex: none;
 }
 
-/* ---- Certificates ---- */
+/* ---- Certificates, crew documents and reliefs: `.list-row`s, their details parted by a dot ---- */
 
-.cert-row,
-.relief-row,
-.document-row {
-  padding: 0;
+/* A detail is kept whole (a date would split at its hyphens); the line wraps between details. */
+.list-row-meta > span {
+  display: inline-block;
 }
 
-/* The whole card is the link to the certificate, the crew member or the document. */
-.cert-link,
-.relief-link,
-.document-link {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: var(--target);
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  color: inherit;
-  text-decoration: none;
-}
-
-.cert-details,
-.relief-details,
-.document-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 16px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.cert-details > span,
-.relief-details > span,
-.document-details > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* ---- Crew documents ---- */
-
-/* The label on the left, the warning on the right, wrapping under it on a phone. */
-.document-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.document-label {
-  min-width: 0;
-  font-size: 16px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+.list-row-meta > span + span::before {
+  content: ' · ';
+  white-space: pre;
 }
 
 .crew-documents {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 32px;
+  margin-top: var(--sp-6);
 }
 
-.crew-documents h3,
-.crew-documents .empty {
+.crew-documents h3 {
   margin: 0;
 }
 
 .crew-documents-note {
-  margin-top: 32px;
+  margin-top: var(--sp-6);
 }
 
 .crew-documents .btn {
   align-self: flex-start;
 }
 
-
-/* ---- Reliefs ---- */
-
-/* The name on the left, the warnings (a contract near its end, the onboard limit) on the right, wrapping under it on a phone. */
-.relief-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+/* A relief's warnings (a contract near its end, the onboard limit) go under the name when there is no room beside it. */
+.relief-row {
   flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.relief-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.crew-signed-off {
-  font-size: 13px;
-  white-space: nowrap;
-  color: var(--muted);
-}
-
-.empty {
-  margin: 0 0 16px;
-  color: var(--muted);
 }
 
 /* ---- List rows and status pills (the Due screen; Home, the hub and the lists reuse them) ---- */
@@ -1632,7 +1684,7 @@ textarea {
   gap: var(--sp-3);
   min-height: calc(var(--target) + var(--sp-2));
   padding: var(--sp-2) var(--sp-4);
-  border: 1px solid var(--line);
+  border: var(--bw) solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-1);
   color: var(--text);
@@ -1653,10 +1705,6 @@ textarea {
 :root[data-theme='red'] .list-row[data-tone='warn'] {
   border-color: var(--line);
   background: var(--surface-1);
-}
-
-:root[data-theme='contrast'] .list-row {
-  border-width: 2px;
 }
 
 .list-row-text {
@@ -1864,161 +1912,17 @@ textarea {
   color: var(--on-accent);
 }
 
-
-.alert-row {
-  padding: 0;
-}
-
-/* The whole card is the link to the record. */
-.alert-link {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: var(--target);
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  color: inherit;
-  text-decoration: none;
-}
-
-.alert-title {
-  min-width: 0;
-  font-size: 18px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.alert-detail {
-  font-size: 13px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
 /* ---- Crew import ---- */
 
 /*
  * A status message: "Imported 3 crew.", "Reading file…". The element stays on the page and only its text changes, so that a
- * screen reader announces it; while it is empty it takes no room.
+ * screen reader announces it; while it is empty it takes no room (see `.visually-hidden`).
  */
 .live {
   margin: 0;
 }
 
-.live:empty {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.live:not(:empty) {
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--accent);
-  border-radius: 8px;
-  background: var(--surface);
-  font-weight: 600;
-}
-
-:root[data-theme='contrast'] .live:not(:empty) {
-  border-width: 2px;
-  border-left-width: 6px;
-}
-
-.screen > .live:not(:empty) {
-  margin-bottom: 16px;
-}
-
-.import-file {
-  margin: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.import-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.import-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.import-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.import-section .helper-text {
-  margin: 0;
-}
-
-.mapping-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-@media (min-width: 640px) {
-  .mapping-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .mapping-grid .field label {
-  overflow-wrap: anywhere;
-}
-
-.import-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.import-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.import-row-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.import-row-who {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.import-row-number {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.import-row-name {
-  font-size: 18px;
-  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -2026,13 +1930,9 @@ textarea {
   text-decoration: line-through;
 }
 
-.import-row p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .import-change {
-  font-size: 14px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
 }
 
 /* The status is always in words; the colour only backs it up. */
@@ -2052,18 +1952,28 @@ textarea {
 
 .import-status[data-status='same'] {
   border-color: var(--line);
-  color: var(--muted);
-}
-
-:root[data-theme='contrast'] .import-status[data-status='same'] {
-  border-color: var(--text);
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .import-status[data-status='error'] {
-  border-color: var(--red);
-  background: var(--red);
-  color: var(--on-red);
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+/* What was found, and the settings folded under "Adjust columns" (a `.card`). */
+.import-adjust {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.import-adjust > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  font-weight: var(--fw-strong);
+  cursor: pointer;
 }
 
 /* ---- Dialogs, and the sheet that rises from the foot of the screen (the ship switcher) ---- */
@@ -2077,19 +1987,13 @@ dialog.dialog {
   border-radius: var(--r-lg);
   background: var(--surface-1);
   color: var(--text);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  box-shadow: var(--shadow-3);
 }
 
 /* High contrast keeps its heavy 3 px frame. */
 :root[data-theme='contrast'] dialog.dialog {
   --dialog-bw: 3px;
   border-color: var(--text);
-}
-
-/* Night red: no shadow, under a dialog or a toast. */
-:root[data-theme='red'] dialog.dialog,
-:root[data-theme='red'] .toast {
-  box-shadow: none;
 }
 
 dialog.dialog::backdrop {
@@ -2156,52 +2060,17 @@ dialog.sheet {
 
 /* ---- Voyage and ship's time ---- */
 
-.voyage-form {
-  margin-bottom: 24px;
-}
-
 .time-now {
-  margin: 0 0 20px;
-  font-size: 22px;
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-
-.time-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.time-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
 }
 
 .time-actions .btn {
   flex: 1 1 140px;
 }
 
-/* A select with the button that acts on it, side by side where there is room and stacked on a phone. */
-.inline-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-}
-
 .inline-form .field {
   flex: 1 1 200px;
   min-width: 0;
-}
-
-.history-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
 }
 
 .history-text {
@@ -2214,85 +2083,22 @@ dialog.sheet {
 /* ---- Settings and backup ---- */
 
 .settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 28px;
   /* A section opened from More (`?at=`) is scrolled to just below the header. */
   scroll-margin-top: calc(56px + env(safe-area-inset-top) + var(--sp-2));
-}
-
-.settings-section p {
-  margin: 0;
-}
-
-.snapshot-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
 }
 
 .snapshot-text {
   display: flex;
   flex: 1 1 200px;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
-}
-
-.snapshot-reason {
-  font-weight: 600;
-}
-
-.snapshot-date,
-.snapshot-counts {
-  font-size: 14px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
 
 /* ---- Import backup ---- */
 
-.import-from {
-  margin: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.import-open {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/*
- * The one place that says what went wrong. It stays on the page and only its text changes, so that it is announced;
- * while it is empty it takes no room (hidden the way `.live` is, which keeps it in the accessibility tree).
- */
+/* The one place that says what went wrong; while it is empty it takes no room (see `.visually-hidden`). */
 .import-form > .field-error {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.import-form > .field-error:empty {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.import-summary {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  font-weight: var(--fw-strong);
 }
 
 .conflict {
@@ -2300,24 +2106,18 @@ dialog.sheet {
   margin: 0;
 }
 
-.conflict legend {
-  padding: 0 6px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
 .conflict-table {
   width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 14px;
+  font-size: var(--fs-label);
 }
 
 .conflict-table th,
 .conflict-table td {
-  padding: 6px 6px 6px 0;
-  border-bottom: 1px solid var(--line);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  border-bottom: var(--bw) solid var(--line);
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -2328,19 +2128,13 @@ dialog.sheet {
 }
 
 .conflict-table thead th {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-strong);
+  color: var(--text-muted);
 }
 
 .conflict-table tbody th {
-  font-weight: 500;
-}
-
-.import-deletions {
-  margin: 0;
-  padding-left: 20px;
-  overflow-wrap: anywhere;
+  font-weight: var(--fw-medium);
 }
 
 /* ---- App lock: the lock screen and the protect step ---- */
@@ -2352,16 +2146,13 @@ dialog.sheet {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 16px;
+  padding: var(--sp-5) var(--sp-4);
 }
 
 .lock-card,
 .db-notice-card {
   width: 100%;
   max-width: 400px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   text-align: center;
 }
 
@@ -2369,36 +2160,11 @@ dialog.sheet {
   align-self: center;
 }
 
-.lock-card h1,
-.db-notice-card h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.lock-ship {
-  margin: 0;
-  font-weight: 600;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
 .lock-intro {
   margin: 0;
 }
 
-/* What a forgotten passcode means and what the lock is not: said before the passcode is set, in the quiet helper style. */
-.lock-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lock-form,
-.lock-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.lock-form {
   text-align: left;
 }
 
@@ -2407,26 +2173,19 @@ dialog.sheet {
 }
 
 .lock-form .form-actions {
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 /* The passcode is four digits, shown as dots: big and centred, so that each digit is easy to hit and see. */
 .field .passcode-input {
   font-family: var(--font-mono);
-  font-size: 24px;
+  font-size: var(--fs-title);
   letter-spacing: 0.4em;
   text-align: center;
 }
 
-.lock-message,
-.db-notice-message {
-  margin: 0;
-  font-weight: 600;
-  text-align: center;
-}
-
 .lock-message[role='alert'] {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .db-notice-card .btn {
@@ -2437,37 +2196,19 @@ dialog.sheet {
 .btn-link {
   background: transparent;
   color: var(--accent);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   text-decoration: underline;
-}
-
-/* Text for a screen reader only: in the page and in the accessibility tree, but not seen. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
 }
 
 /* ---- Forms ---- */
 
 /* The file input sits behind its label, which looks like a button; the input keeps the focus and shows it on the label. */
 .file-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
   opacity: 0;
 }
 
 .file-input:focus-visible + label {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -2477,213 +2218,93 @@ dialog.sheet {
   cursor: default;
 }
 
-.forms-import {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
 .forms-summary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
   overflow-wrap: anywhere;
 }
 
-.forms-summary p {
-  margin: 0;
-  font-weight: 600;
-}
-
-.forms-summary ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.form-list,
-.setup-list,
-.setup-unsupported {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .form-list {
-  margin-top: 16px;
+  margin-top: var(--sp-4);
 }
 
-.form-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-}
-
-.form-link,
-.form-missing {
+.form-link {
   display: flex;
   align-items: center;
   flex: 1 1 12rem;
   min-width: 0;
   min-height: var(--target);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.form-link {
   color: inherit;
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
 }
 
 .form-missing {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .forms-drafts {
-  margin-top: 28px;
+  margin-top: var(--sp-5);
 }
 
+.column-picker legend,
 .forms-drafts h3,
 .setup-section h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.setup-form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.setup-form > h2 {
-  margin: 0;
-  font-size: 22px;
-  overflow-wrap: anywhere;
-}
-
-.setup-identity {
-  margin: -16px 0 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+  padding: 0;
+  margin-bottom: var(--sp-1);
 }
 
 .setup-notice {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--amber);
-  border-radius: 8px;
-  background: var(--surface);
-  font-weight: 600;
+  gap: var(--sp-1);
+  border-left-color: var(--amber);
   overflow-wrap: anywhere;
-}
-
-.setup-notice p {
-  margin: 0;
-}
-
-.setup-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.setup-section .empty {
-  margin: 0;
 }
 
 .setup-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 12px;
+  padding-left: var(--sp-3);
   border-left: 3px solid var(--line);
 }
 
-.setup-group h4 {
-  margin: 4px 0 0;
-  font-size: 15px;
+.setup-group h4,
+.fill-group h4 {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   overflow-wrap: anywhere;
 }
 
-.setup-row {
-  min-width: 0;
-}
-
+.setup-row,
 .setup-row-name {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .setup-confirm {
-  margin-top: 6px;
+  margin-top: var(--sp-2);
 }
 
 .setup-unsupported {
-  gap: 6px;
-  padding-left: 20px;
+  gap: var(--sp-1);
   list-style: disc;
 }
 
 /* ---- Fill a form ---- */
 
-.fill-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.fill-form > h2 {
-  margin: 0;
-  font-size: 22px;
-  overflow-wrap: anywhere;
-}
-
-.fill-period {
-  margin: -12px 0 0;
-  font-weight: 600;
-  color: var(--muted);
-}
-
 .fill-questions {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 
-.fill-section,
-.fill-group {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-
 .fill-section h3 {
-  margin: 8px 0 0;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-  font-size: 17px;
-  overflow-wrap: anywhere;
-}
-
-.fill-group h4 {
-  margin: 4px 0 0;
-  font-size: 15px;
+  margin: var(--sp-2) 0 0;
+  padding-bottom: var(--sp-2);
+  border-bottom: var(--bw) solid var(--line);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
   overflow-wrap: anywhere;
 }
 
@@ -2691,74 +2312,31 @@ dialog.sheet {
   outline: none;
 }
 
-.fill-group .empty {
-  margin: 0;
-}
-
-/* A fieldset is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
+/* A fieldset (a `.card`) is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
 .fill-row {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
   margin: 0;
-  padding: 12px 14px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.fill-row legend {
-  padding: 0 6px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.fill-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .fill-field,
-.fill-field label,
-.field-label {
+.fill-field label {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.field-label {
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .field-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: var(--sp-1) var(--sp-2);
 }
 
 .auto-mark {
-  padding: 1px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
+  padding: 0 var(--sp-2);
+  border: var(--bw) solid var(--accent);
+  border-radius: var(--r-pill);
   color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.segmented {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.segmented .btn[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-strong);
 }
 
 /* ---- Helpers on the fill screen ---- */
@@ -2766,7 +2344,7 @@ dialog.sheet {
 /* An input with a button beside it (Now): the input takes the room that is left. */
 .input-row {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: stretch;
 }
 
@@ -2775,36 +2353,18 @@ dialog.sheet {
   min-width: 0;
 }
 
-.fill-helpers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .photo-thumb {
   display: block;
   max-width: 100%;
   max-height: 160px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
   object-fit: contain;
   align-self: flex-start;
 }
 
-.crew-pick {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .crew-pick .check {
-  display: flex;
   align-items: flex-start;
-  gap: 10px;
-  min-height: 44px;
 }
 
 /* The hidden file input of Add photo stays inside its row of buttons, so that it never widens the page. */
@@ -2816,7 +2376,3 @@ dialog.sheet {
   top: 0;
   left: 0;
 }
-
-/* Crew import: what was found, and the settings folded under "Adjust columns". */
-.import-adjust { display: flex; flex-direction: column; gap: 16px; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.import-adjust > summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }

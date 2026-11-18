@@ -15,6 +15,9 @@ export type BadgeKind = keyof typeof TEXT;
 /** The status pill of each band (`.status[data-tone]`): due soon is outlined, overdue filled, valid a ✓ and a word. */
 const TONE = { amber: 'warn', red: 'danger', ok: 'ok' } as const;
 
+/** The tint of a list row (`.list-row[data-tone]`) by its band: overdue and due soon only. A valid record is a plain row. */
+export const ROW_TONE: Partial<Record<Band, 'warn' | 'danger'>> = { amber: 'warn', red: 'danger' };
+
 /** What is valid says so in green (spec §6, ruling U1); a contract or the months onboard that are fine show nothing, as before. */
 const SHOWS_VALID: ReadonlySet<BadgeKind> = new Set(['crew', 'certificate']);
 
