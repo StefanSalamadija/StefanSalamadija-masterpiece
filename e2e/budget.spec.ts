@@ -1060,6 +1060,33 @@ test('budget in Day: the Debts line is not drawn in the danger colour, and keeps
   expect(look.dashed).toBe(true);
 });
 
+test('budget in Day: Debts keeps one colour and one dash in both Trends charts', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetDebts', [{ id: 'debt-house', name: 'House loan', startBalance: 15000000, yearlyRatePct: 4, instalment: 80000, startYm: '2026-01' }]);
+  await openTrends(page);
+  const look = (name: string) => page.getByRole('figure', { name }).evaluate((figure) => {
+    const legend = [...figure.querySelectorAll('.chart-legend li')].find((li) => li.textContent?.trim() === 'Debts')!;
+    const line = getComputedStyle(legend.querySelector('.chart-line')!);
+    return { stroke: line.stroke, dash: line.strokeDasharray };
+  });
+  expect(await look('Balances over time')).toEqual(await look('Spending by pot'));
+});
+
+test('budget: a large negative y-axis label such as −€150k is drawn whole, inside the chart', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetDebts', [{ id: 'debt-house', name: 'House loan', startBalance: 25000000, yearlyRatePct: 4, instalment: 80000, startYm: '2026-01' }]);
+  const outside = () => page.locator('figure svg.chart-svg').evaluateAll((svgs) => svgs.flatMap((svg) => {
+    const width = (svg as SVGSVGElement).viewBox.baseVal.width;
+    return [...svg.querySelectorAll('text')].map((t) => ({ text: t.textContent, box: (t as SVGTextElement).getBBox() }))
+      .filter(({ box }) => box.x < 0 || box.x + box.width > width).map(({ text, box }) => `${text} ${box.x.toFixed(1)}..${(box.x + box.width).toFixed(1)}`);
+  }));
+  await page.goto('./#/budget/net-worth');
+  await expect(page.getByRole('figure', { name: 'Net worth by month' }).locator('text', { hasText: /^−€1\d\dk$/ }).first()).toBeVisible();
+  expect(await outside()).toEqual([]);
+  await openTrends(page);
+  expect(await outside()).toEqual([]);
+});
+
 test('budget: every chart and screen fits 360 px', async ({ page }) => {
   await openScenarioPlan(page);
   await seed(page, 'budgetScenarios', [{ id: 'sc-long', name: 'A scenario with a long name about a car and a longer contract', changes: [

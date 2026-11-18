@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { FAKE_INITIAL, makeSurveyWorkbook } from './fixtures/makeSurveyWorkbook';
 import { makePdf } from './fixtures/makePdf';
+import { toolboxTalkDocx } from '../src/forms/testing/wordFixtures';
 import { freshApp, setTheme, setupShip } from './helpers';
 import type { ThemeLabel } from './helpers';
 
@@ -235,5 +236,61 @@ for (const theme of THEMES) {
     await page.getByTestId('unit-m').fill('12,5');
     await expect(page.getByTestId('unit-ft')).toHaveValue('41.01');
     await shot('tools-length');
+  });
+}
+
+/** Writes the theme into this device's settings, for a screen shown before the Settings screen can be reached. */
+async function themeOnDevice(page: Page, id: string): Promise<void> {
+  await page.evaluate((theme) => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const store = open.result.transaction('settings', 'readwrite').objectStore('settings');
+      const get = store.get('device');
+      get.onsuccess = () => {
+        store.put({ ...(get.result ?? { id: 'device' }), theme });
+        store.transaction.oncomplete = () => { open.result.close(); resolve(); };
+      };
+      get.onerror = () => reject(get.error);
+    };
+  }), id);
+}
+
+/** The screens met before the app itself, and a form being filled: first run, the lock screen and form fill. */
+for (const theme of THEMES) {
+  test(`entry screens and form fill in ${theme.label}`, async ({ page }) => {
+    test.setTimeout(120_000);
+    const shot = async (name: string) => {
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await page.screenshot({ path: `${DIR}/${name}-${theme.id}.png`, fullPage: true });
+    };
+    await freshApp(page, { time: '2026-11-17T09:00:00Z' });
+    await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+    await themeOnDevice(page, theme.id);
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme.id);
+    await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+    await shot('first-run');
+
+    await setupShip(page, 'MV OCEAN STAR', 'UTC+03:00', { skipLock: false });
+    await page.getByLabel('New passcode').fill('2580');
+    await page.getByLabel('Repeat passcode').fill('2580');
+    await page.getByRole('button', { name: 'Turn on app lock' }).click();
+    await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Masterpiece is locked' })).toBeVisible();
+    await shot('lock');
+    await page.getByLabel('Passcode').fill('2580');
+    await expect(page.getByRole('banner')).toContainText('MV OCEAN STAR');
+
+    await page.goto('./#/forms');
+    await page.getByLabel('Import form').setInputFiles({
+      name: 'toolbox.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from(toolboxTalkDocx()),
+    });
+    await page.getByRole('button', { name: 'Save form' }).click();
+    await expect(page.getByRole('status')).toHaveText('Form saved.');
+    await page.getByRole('list', { name: 'Forms' }).getByRole('link', { name: /^TST-01 · / }).click();
+    await expect(page.getByRole('heading', { name: 'TST-01 Toolbox Talk', exact: true })).toBeVisible();
+    await shot('form-fill');
   });
 }

@@ -5,7 +5,7 @@ import { balancesByMonth } from '../../../budget/ledger';
 import { summariseMonth } from '../../../budget/month';
 import { addMonths, monthLabel, ymOf } from '../../../budget/months';
 import { effectiveMonth } from '../../../budget/targets';
-import type { Ym } from '../../../domain/types';
+import type { PotId, Ym } from '../../../domain/types';
 import { BarChart } from './charts/BarChart';
 import { LineChart } from './charts/LineChart';
 import { shortMonth } from './charts/scale';
@@ -15,6 +15,9 @@ import type { PlanData } from './planKit';
 
 /** The months the trends cover: the last 12 up to the current one. */
 const TREND_MONTHS = 12;
+
+/** A balance line takes its pot's place in "Spending by pot", so that Debts (and the funds) keep one colour and dash in both. */
+const potIndex = (id: PotId) => POTS.findIndex((p) => p.id === id);
 
 function trendsOf(data: PlanData, ym: Ym) {
   const months = Array.from({ length: TREND_MONTHS }, (_, i) => addMonths(ym, i - TREND_MONTHS + 1));
@@ -57,9 +60,9 @@ function TrendsBody({ data }: { data: PlanData }) {
         { label: 'Received', values: t.summaries.map((s) => s.actualIncome) },
       ]} />
       <LineChart name="Balances over time" months={t.months} series={[
-        { label: 'Investments', values: t.months.map((m) => t.balances.get(m)?.investments ?? 0) },
-        { label: 'Emergency fund', values: t.months.map((m) => t.balances.get(m)?.emergency ?? 0) },
-        { label: 'Debts', values: t.months.map((m) => debtsOf(t.balances.get(m) ?? {})) },
+        { label: 'Investments', index: potIndex('savings'), values: t.months.map((m) => t.balances.get(m)?.investments ?? 0) },
+        { label: 'Emergency fund', index: potIndex('emergency'), values: t.months.map((m) => t.balances.get(m)?.emergency ?? 0) },
+        { label: 'Debts', index: potIndex('debts'), values: t.months.map((m) => debtsOf(t.balances.get(m) ?? {})) },
       ]} />
     </>
   );

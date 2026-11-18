@@ -20,22 +20,86 @@ The exact address is shown in the repository's **Settings**, then **Pages**, aft
 2. Click the install icon at the right-hand end of the address bar, then **Install**.
 3. Open Masterpiece from your desktop, Start menu or Applications folder.
 
+## Finding your way
+
+The bar at the bottom of every screen has five tabs: **Home**, **Ship**, **Forms**, **Budget** and **More**. The tab you are in is lit.
+
+At the top of every screen are the ship's name, the ship's time and the theme button.
+Tap the ship's name to switch to another ship or to **Manage ship profiles**.
+
+### Home
+
+Home answers "what needs me today?" without a tap.
+
+- **The voyage card**, first: the voyage number (for example `Voyage V-112`) and whether you are at sea or in port, the route, **ETA in** as a countdown with the local time of arrival, the number **On board**, and the next clock change (for example `Next clock change: −1 h`). With no voyage it says **No voyage** and offers **Start voyage**.
+- **Due**: the three most urgent items, then **See all N** for the whole list. When nothing is due it says **✓ Nothing due**.
+- Forms you have started, and the budget alerts, when there are any.
+- **Six tiles** at the foot: **Crew**, **Fill form**, **Draft survey**, **+ Expense**, **Converter** and **Library**.
+
+The backup reminder still shows as a banner on Home when a backup is due.
+
+### The Ship tab
+
+**Ship** opens a page of eight tiles, each with a live status line:
+
+| Tile | Status line |
+|---|---|
+| **Crew** | how many are on board |
+| **Crew documents** | how many have expired, or are due |
+| **Certificates** | how many are due, and in how many days |
+| **Contracts & reliefs** | how many are due in 30 days |
+| **Voyage** | the voyage number and ETA |
+| **Ship's time** | the zone and the next clock change |
+| **Draft survey** | the last survey and its date |
+| **Particulars** | **✓ Complete**, or how many fields are left to fill |
+
+Every Ship screen has **‹ Ship** at the top to go back to the tiles.
+
+### More
+
+**More** holds the screens without a tab of their own: **Tools**, **Library**, **Profiles**, **Settings**, **Backup and restore** and **App lock**. The last two open Settings at that part.
+
+## Due
+
+Home → **See all N** opens **Due**, which lists everything that needs attention for the ship: the crew's papers and certificates, the ship's certificates, contracts and time on board.
+
+- **All due** puts **Overdue** first, then **Due soon**. Each item says how long is left or how long it is over, in words: `in 14 d`, `today` or `5 d over`. Overdue is a filled label and due soon an outlined one, so they can be told apart without colour.
+- **Before next port** lists the crew papers that run out before the ETA of the current voyage (or in the next 90 days when there is no ETA), the earliest first. Tap one to open that crew member. This was the Expiring screen.
+- Ship → **Crew documents** is the same list with the crew's papers only.
+
+Papers and certificates that are in date show **✓ Valid**.
+
+## Themes and Night red
+
+There are four themes: **Day**, **Dark**, **Night red** and **High contrast**. Choose one in More → **Settings**, under **Display**.
+
+**Night red** is for the bridge at night: the whole screen is black and dim red, including charts, PDF pages and photos, so it does not spoil your night vision. **Dark** is the navy theme for the cabin, and **High contrast** is black on white, for bright sun on deck.
+
+- **Night red automatically:** tick it and set **From** and **To** in ship's time (18:00 to 06:00 at first). Between those times the app is Night red; outside them, it shows the theme you chose. It follows the ship's clock, clock changes included.
+- **The theme button** at the top of every screen goes to the next theme: Day → Dark → Night red → High contrast. With automatic night on, a small **A** shows on the button, and your choice holds only until the next From or To; then the automatic theme takes over again.
+- Printing is always black on white, whatever the theme.
+
+Known limits:
+
+- **Native pop-ups.** The Android date picker, and the list a dropdown opens, are drawn by the phone itself, which the app cannot colour. In Night red they may show in the phone's own dark grey and white, not red.
+- **The first moment after opening.** If the ship's clock has changed two or more times while the app was closed, the theme can be wrong for a moment, until the app has started.
+
 ## Moving data between devices
 
-1. On the device that has your data, go to **Settings**, then **Export full backup**, and choose a password.
+1. On the device that has your data, go to More → **Backup and restore**, then **Export full backup**, and choose a password.
 2. Send the file to the other device: email, a messaging app, a USB stick or a cloud drive.
-3. On the other device, open Masterpiece, choose **Import a backup** (on the welcome screen) or **Settings**, then **Import backup**. Pick the file and type its password.
+3. On the other device, open Masterpiece, choose **Import a backup** (on the welcome screen) or More → **Backup and restore**, then **Import backup**. Pick the file and type its password.
 4. Read the review, which says what will be added, changed or removed, and tap **Apply import**.
 
 If both devices changed the same thing, you choose which version to keep. Importing the same file twice changes nothing the second time.
-Masterpiece saves a snapshot of your data before every import, so you can go back from **Settings**, then **Restore snapshot**.
+Masterpiece saves a snapshot of your data before every import, so you can go back from More → **Settings**, then **Restore snapshot**.
 
 ## SMS forms
 
 Masterpiece fills in your company's own SMS forms (permits, checklists, logs, drills) from Word and Excel files.
 
-1. **Import once.** On the laptop or the phone, open **Forms**, tap **Import form** and pick the company's `.docx`, `.dotx` or `.xlsx` file. You can pick several files at once; they are imported one after another and a summary lists any that could not be read. Forms imported several at a time are saved with the suggested setup; edit it later with **Set up** in the library. A single form opens its setup for review. Review the setup (which fields are filled for you, which you fill, which stay empty) and save it.
-2. **Fill on the phone.** Open the form from **Forms** and answer the questions. A draft is kept as you go, and forms you have started are listed on **Home**.
+1. **Import once.** On the laptop or the phone, open the **Forms** tab, tap **Import form** and pick the company's `.docx`, `.dotx` or `.xlsx` file. You can pick several files at once; they are imported one after another and a summary lists any that could not be read. Forms imported several at a time are saved with the suggested setup; edit it later with **Set up** in the library. A single form opens its setup for review. Review the setup (which fields are filled for you, which you fill, which stay empty) and save it.
+2. **Fill on the phone.** Open the form from the **Forms** tab (or Home → **Fill form**) and answer the questions. A draft is kept as you go, and forms you have started are listed on **Home**.
 3. **Make the file, print from the laptop.** Tap **Make file** to get the filled form as a `.docx` or `.xlsx`, then open it in Word or Excel on the laptop and print it from there. The made file is the company's own form with your answers in it.
 4. **Signatures by hand.** Signature fields are left empty. Print the form and sign it on paper.
 5. **Old formats.** A `.doc` or `.xls` cannot be imported. Open it in Word or Excel and save it as `.docx` or `.xlsx` first. Files with macros (`.docm`, `.xlsm`) are refused.
@@ -44,24 +108,24 @@ The forms library, your drafts and their photos stay on your devices. Nothing is
 
 ## Tools
 
-Home → **Tools**: unit converters (length and drafts in ft + in, mass and volume, density and stowage factor, speed, temperature, pressure, power), volume ↔ mass, and speed · distance · time with the ETA in ship's time. Type a value in any row and every other unit updates. Everything works offline.
+More → **Tools** (or Home → **Converter**): unit converters (length and drafts in ft + in, mass and volume, density and stowage factor, speed, temperature, pressure, power), volume ↔ mass, and speed · distance · time with the ETA in ship's time. Type a value in any row and every other unit updates. Everything works offline.
 
 ## Library
 
-Home → **Library**: your own manuals, procedures and circulars (PDF, Word .docx, Excel .xlsx, JPEG/PNG), stored on this device and searchable offline.
+More → **Library** (or Home → **Library**): your own manuals, procedures and circulars (PDF, Word .docx, Excel .xlsx, JPEG/PNG), stored on this device and searchable offline.
 
 - **Import documents** reads the text of every page once, so search finds words inside the files. Scanned PDFs and images have no text: they are found by title and tags and marked "No searchable text".
 - Search ignores case and accents; results show the page and a snippet, and open the document at that page with the words highlighted. PDFs open in the app's own viewer; Word, Excel and images too; anything else opens with **Open with…**.
 - Folders, tags, Recently opened; deleted documents stay 30 days in **Recently deleted**.
 - One file can be up to 100 MB.
-- Normal backups carry only titles, folders and tags. **Library files** (Library → Library files, or Settings) exports the documents themselves as encrypted files of up to 100 MB each; import them on another device in any order.
+- Normal backups carry only titles, folders and tags. **Library files** (Library → Library files, or More → Settings) exports the documents themselves as encrypted files of up to 100 MB each; import them on another device in any order.
 
 ## Budget
 
-Home → **Budget** (or **+ Expense**, or long-press the app icon → *Add expense*): your personal budget in euros, offline, behind the app lock. It is never in ship files or handovers.
+The **Budget** tab (or Home → **+ Expense**, or long-press the app icon → *Add expense*): your personal budget in euros, offline, behind the app lock. It is never in ship files or handovers.
 
 - **Quick add:** amount, category, Save — three taps. Income too (salary, sales, other). Repeat last, favourites, "Same as last time", typing `fuel 60`, and **Catch up** for several entries in a row. Undo for 5 seconds.
-- **Month:** your five pots (Needs, Savings & investments, Wants, Debts, Emergency fund) against their targets, categories, and recurring payments and fund set-asides to confirm.
+- **Month:** your five pots (Needs, Savings & investments, Wants, Debts, Emergency fund) against their targets (a category within its target shows **✓ On track**), categories, and recurring payments and fund set-asides to confirm.
 - **Plan:** targets (this month only or from this month on), categories, recurring payments, yearly bills (sinking funds), debts with planned extra payments, goals, assets, your rotation (or from your contract), assumptions, and starting balances.
 - **Forecast:** salary for the days onboard, spending and your bank balance month by month through your rotations, with warnings before a home month runs short.
 - **Net worth and freedom date:** what you own minus what you owe over time, savings rate, and the date your investments could cover your yearly spending (your own return, withdrawal and inflation rates). *Projection — not a forecast or financial advice.*
@@ -70,7 +134,7 @@ Home → **Budget** (or **+ Expense**, or long-press the app icon → *Add expen
 
 ## Draft survey
 
-Ship → **Draft survey**: draft surveys at the loading and discharging ports, offline, worked exactly as the company's draft-survey workbook works them (its own look-ups and approximations included), so the numbers match the workbook.
+Ship → **Draft survey** (or Home → **Draft survey**): draft surveys at the loading and discharging ports, offline, worked exactly as the company's draft-survey workbook works them (its own look-ups and approximations included), so the numbers match the workbook.
 
 1. **Import the ship's data once.** **Ship data** → **Import ship data from workbook**, pick the company workbook (`.xlsx`) and check what was found: the particulars, the hydrostatic table and the look-up ranges. **Save ship data.** The particulars can be edited there later: the app works every survey with them, and the export writes them into the workbook's INITIAL sheet (and FINAL's own dA and LBP), so Excel works with the same ones.
 2. **Survey.** **New initial survey** (or **New constant check**), then a **New final** or a **New interim** from it. Type the six draft readings, the density and the deductibles in tonnes; the result and every calculation line show as you type. Nothing is shown while an input is missing or outside the table's range.
@@ -87,7 +151,7 @@ Good to know:
 ## Backups and passwords
 
 A backup is one encrypted file holding everything on the device, for every ship. Keep a copy somewhere other than the device itself.
-Masterpiece reminds you when your last full backup is getting old (7 days by default; you can change this in **Settings**).
+Masterpiece reminds you when your last full backup is getting old (7 days by default; you can change this in More → **Settings**).
 
 The password must be at least 8 characters. **A forgotten password cannot be recovered**: nobody can open that backup, not even Masterpiece.
 Write the password down and keep it somewhere safe and separate from the file.
@@ -96,7 +160,7 @@ Write the password down and keep it somewhere safe and separate from the file.
 
 A handover file holds one ship only, with a password of its own, so your relief can pick up where you left off.
 
-1. In **Settings**, choose the ship, then **Export handover file**, and choose a password.
+1. In More → **Backup and restore**, choose the ship, then **Export handover file**, and choose a password.
 2. Send the file to your relief and give them the password separately, not in the same message.
 3. Your relief installs Masterpiece, chooses **Import a backup**, picks the file and types the password.
 

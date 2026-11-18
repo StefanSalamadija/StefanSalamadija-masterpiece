@@ -367,13 +367,16 @@ async function sourceFiles(dir: URL): Promise<URL[]> {
 }
 
 describe('the old variable names', () => {
-  it('are used by no file under src/', async () => {
+  it('are used by no file under src/, nor by the root index.html (its first-paint styles and script)', async () => {
+    const indexHtml = new URL('../../index.html', import.meta.url);
     const files = (await sourceFiles(new URL('../', import.meta.url))).filter((f) => /\.(css|ts|tsx|html)$/.test(f.pathname) && !f.pathname.endsWith('/ui/tokens.test.ts'));
     expect(files.length).toBeGreaterThan(100);
+    files.push(indexHtml);
     const found: string[] = [];
     for (const file of files) {
       const text = new TextDecoder().decode(await fs.readFile(file.pathname));
-      for (const [name] of text.matchAll(OLD_NAMES)) found.push(`${file.pathname.split('/src/')[1]}: ${name}`);
+      if (file === indexHtml) expect(text).toContain('<html');
+      for (const [name] of text.matchAll(OLD_NAMES)) found.push(`${file === indexHtml ? 'index.html' : file.pathname.split('/src/')[1]}: ${name}`);
     }
     expect(found).toEqual([]);
   });
