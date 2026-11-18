@@ -694,6 +694,18 @@ textarea {
   color: var(--text);
 }
 
+/* Night red, as drawn: a tile whose status is danger (something expired or overdue) is filled. Day keeps the pill alone. */
+:root[data-theme='red'] .hub-tile[data-tone='danger'] {
+  background: var(--danger-bg);
+  border-color: transparent;
+  color: var(--danger);
+}
+
+:root[data-theme='red'] .hub-tile[data-tone='danger'] .hub-name,
+:root[data-theme='red'] .hub-tile[data-tone='danger'] .hub-icon {
+  color: var(--danger);
+}
+
 /* ---- More: a large row for each screen with no tab ---- */
 
 .more-row {
@@ -764,6 +776,7 @@ textarea {
 }
 
 .btn-small {
+  min-width: 44px;
   padding: 0 var(--sp-3);
   font-size: var(--fs-label);
 }

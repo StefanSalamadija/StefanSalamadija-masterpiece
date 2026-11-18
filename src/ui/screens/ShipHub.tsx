@@ -35,7 +35,7 @@ function Tiles({ ship }: { ship: ShipProfile }) {
         const tone = status && status.tone !== 'plain' ? status.tone : undefined;
         return (
           <li key={tile.id}>
-            <a class="hub-tile" href={tile.href} aria-labelledby={`hub-${tile.id}`} aria-describedby={`hub-${tile.id}-status`}>
+            <a class="hub-tile" href={tile.href} data-tone={tone === 'danger' ? 'danger' : undefined} aria-labelledby={`hub-${tile.id}`} aria-describedby={`hub-${tile.id}-status`}>
               <span class="hub-icon"><Icon name={tile.icon} /></span>
               <span id={`hub-${tile.id}`} class="hub-name">{tile.name}</span>
               <span id={`hub-${tile.id}-status`} class={tone ? 'hub-status status' : 'hub-status'} data-tone={tone}>{status?.text}</span>

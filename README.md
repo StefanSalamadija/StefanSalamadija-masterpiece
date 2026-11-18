@@ -31,7 +31,7 @@ Tap the ship's name to switch to another ship or to **Manage ship profiles**.
 
 Home answers "what needs me today?" without a tap.
 
-- **The voyage card**, first: the voyage number (for example `Voyage V-112`) and whether you are at sea or in port, the route, **ETA in** as a countdown with the local time of arrival, the number **On board**, and the next clock change (for example `Next clock change: −1 h`). With no voyage it says **No voyage** and offers **Start voyage**.
+- **The voyage card**, first: the voyage number (for example `Voyage V-112`), the route, **ETA in** as a countdown with the local time of arrival, the number **On board**, and the next clock change (for example `Next clock change: −1 h`). With no voyage it says **No voyage** and offers **Start voyage**.
 - **Due**: the three most urgent items, then **See all N** for the whole list. When nothing is due it says **✓ Nothing due**.
 - Forms you have started, and the budget alerts, when there are any.
 - **Six tiles** at the foot: **Crew**, **Fill form**, **Draft survey**, **+ Expense**, **Converter** and **Library**.
@@ -65,7 +65,7 @@ Home → **See all N** opens **Due**, which lists everything that needs attentio
 
 - **All due** puts **Overdue** first, then **Due soon**. Each item says how long is left or how long it is over, in words: `in 14 d`, `today` or `5 d over`. Overdue is a filled label and due soon an outlined one, so they can be told apart without colour.
 - **Before next port** lists the crew papers that run out before the ETA of the current voyage (or in the next 90 days when there is no ETA), the earliest first. Tap one to open that crew member. This was the Expiring screen.
-- Ship → **Crew documents** is the same list with the crew's papers only.
+- Ship → **Crew documents** is **All due** showing only the crew's own papers and certificates, overdue first.
 
 Papers and certificates that are in date show **✓ Valid**.
 

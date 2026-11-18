@@ -504,3 +504,41 @@ test('Night red draws Home and the hub in red and black only', async ({ page }) 
   await expect(hubTile(page, 'Crew')).toHaveAccessibleDescription('2 on board');
   await expectRedOnly(page);
 });
+
+test('in Night red a hub tile whose status is danger is filled, as drawn; in Day it is not', async ({ page }) => {
+  await madeUpShip(page);
+  const look = (name: string) => hubTile(page, name).evaluate((tile) => {
+    const probe = (value: string) => {
+      const span = document.createElement('span');
+      span.style.color = value;
+      document.body.append(span);
+      const colour = getComputedStyle(span).color;
+      span.remove();
+      return colour;
+    };
+    const style = getComputedStyle(tile);
+    return {
+      background: style.backgroundColor, border: style.borderTopColor,
+      name: getComputedStyle(tile.querySelector('.hub-name')!).color,
+      icon: getComputedStyle(tile.querySelector('.hub-icon')!).color,
+      dangerBg: probe('var(--danger-bg)'), danger: probe('var(--danger)'),
+    };
+  });
+  await page.goto('./#/ship');
+  await expect(hubTile(page, 'Crew documents')).toHaveAccessibleDescription('1 expired');
+  await expect(hubTile(page, 'Crew documents')).toHaveAttribute('data-tone', 'danger');
+  await expect(hubTile(page, 'Certificates')).not.toHaveAttribute('data-tone', /./);
+  const dayDanger = await look('Crew documents');
+  expect(dayDanger.background).toBe((await look('Crew')).background);
+
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship');
+  await expect(hubTile(page, 'Crew documents')).toHaveAccessibleDescription('1 expired');
+  const red = await look('Crew documents');
+  expect(red.background).toBe(red.dangerBg);
+  expect(red.name).toBe(red.danger);
+  expect(red.icon).toBe(red.danger);
+  expect(red.border).toBe('rgba(0, 0, 0, 0)');
+  expect((await look('Certificates')).background).not.toBe(red.dangerBg);
+  await expectRedOnly(page);
+});
