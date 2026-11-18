@@ -127,11 +127,29 @@ test('the ship pill opens Switch ship: a ship is chosen there, and Manage ship p
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('button', { name: /MV OCEAN STAR/ })).toHaveAttribute('aria-pressed', 'true');
   await expect(sheet.getByRole('button', { name: /MV SEA BREEZE/ })).toHaveAttribute('aria-pressed', 'false');
+  await expect(pill(page)).toHaveAttribute('aria-expanded', 'true');
+  // The focus starts on the active ship, once the list is in.
+  await expect(sheet.getByRole('button', { name: /MV OCEAN STAR/ })).toBeFocused();
   await expectNoHorizontalScroll(page);
+  // A sheet from the bottom: the whole width, down to the bottom edge, only its top corners rounded, a line on top only.
+  const box = await sheet.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return {
+      left: r.left, width: r.width, bottomGap: window.innerHeight - r.bottom, viewport: window.innerWidth,
+      corners: [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomRightRadius, s.borderBottomLeftRadius],
+      borders: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth],
+    };
+  });
+  expect(box).toEqual({
+    left: 0, width: box.viewport, bottomGap: 0, viewport: box.viewport,
+    corners: ['20px', '20px', '0px', '0px'], borders: ['1px', '0px', '0px', '0px'],
+  });
   await sheet.getByRole('button', { name: /MV SEA BREEZE/ }).click();
   await expect(sheet).toHaveCount(0);
   await expect(page.getByRole('banner')).toContainText('MV SEA BREEZE');
   await expect(pill(page)).toBeFocused();
+  await expect(pill(page)).toHaveAttribute('aria-expanded', 'false');
 
   // Escape closes it, and the focus is back on the pill.
   await pill(page).click();
@@ -211,4 +229,22 @@ test('Night red draws the hub, More and the switcher in red and black only', asy
   await pill(page).click();
   await expect(page.getByRole('dialog', { name: 'Switch ship' })).toBeVisible();
   await expectRedOnly(page);
+});
+
+test('in High contrast the switcher is still a sheet from the bottom, with a heavy line on top only', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'High contrast');
+  await pill(page).click();
+  const sheet = page.getByRole('dialog', { name: 'Switch ship' });
+  await expect(sheet).toBeVisible();
+  const box = await sheet.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const s = getComputedStyle(el);
+    return {
+      full: r.left === 0 && r.width === window.innerWidth && r.bottom === window.innerHeight,
+      corners: [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomRightRadius, s.borderBottomLeftRadius],
+      borders: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth],
+    };
+  });
+  expect(box).toEqual({ full: true, corners: ['20px', '20px', '0px', '0px'], borders: ['3px', '0px', '0px', '0px'] });
 });

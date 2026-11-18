@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { updateSettings } from '../../db/settings';
@@ -20,6 +20,7 @@ const THEME_ICON: Record<Theme, IconName> = { day: 'sun', dark: 'moon', red: 'mo
 export function Header() {
   const { db, settings, activeShip, offsetMinutes, nowUtc, shipNow, theme } = useAppState();
   const [switching, setSwitching] = useState(false);
+  const pill = useRef<HTMLButtonElement>(null);
 
   async function cycleTheme(): Promise<void> {
     try {
@@ -33,7 +34,7 @@ export function Header() {
     <>
       <header class="app-header">
         <div class="bar-inner">
-          <button type="button" class="ship-pill" aria-haspopup="dialog" onClick={() => setSwitching(true)}>
+          <button ref={pill} type="button" class="ship-pill" aria-haspopup="dialog" aria-expanded={switching} onClick={() => setSwitching(true)}>
             <span class="ship-pill-name">{activeShip?.particulars.name}</span>
             <Icon name="chevron" size={16} />
           </button>
@@ -47,7 +48,7 @@ export function Header() {
           </button>
         </div>
       </header>
-      {switching && <ShipSwitcher onClose={() => setSwitching(false)} />}
+      {switching && <ShipSwitcher opener={pill} onClose={() => setSwitching(false)} />}
     </>
   );
 }

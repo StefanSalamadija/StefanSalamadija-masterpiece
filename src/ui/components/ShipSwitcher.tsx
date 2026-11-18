@@ -1,3 +1,4 @@
+import type { RefObject } from 'preact';
 import { useEffect, useId, useRef } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
@@ -10,26 +11,35 @@ import { useLive } from '../useLive';
 /**
  * The sheet the ship pill opens: one button per ship (the active one pressed, with a ✓), and a way to the profiles. A
  * modal `<dialog>`, open as long as it is rendered. Choosing a ship makes it the active one, as Make active in Profiles
- * does, and closes the sheet. Escape and a tap on the backdrop close it too, and the focus goes back to the pill.
+ * does, and closes the sheet. Escape and a tap on the backdrop close it too, and the focus goes back to the pill (`opener`,
+ * passed in, because iOS does not focus a button that is tapped). Once the ships are in, the active one has the focus.
  */
-export function ShipSwitcher({ onClose }: { onClose: () => void }) {
+export function ShipSwitcher({ onClose, opener }: { onClose: () => void; opener: RefObject<HTMLElement | null> }) {
   const { db, activeShip } = useAppState();
   const ships = useLive(() => listShips(db), [db]);
   const dialog = useRef<HTMLDialogElement>(null);
   const closedByUnmount = useRef(false);
+  const activeButton = useRef<HTMLButtonElement>(null);
+  const focusedShip = useRef(false);
   const titleId = useId();
 
   useEffect(() => {
     const element = dialog.current;
     if (!element) return;
-    const opener = document.activeElement;
     if (!element.open) element.showModal();
     return () => {
       closedByUnmount.current = true; // its `close` event comes later, and must not shut a sheet opened again since
       if (element.open) element.close();
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      opener.current?.focus();
     };
   }, []);
+
+  // The list loads after the sheet opens: then the focus moves from the first control there was to the active ship.
+  useEffect(() => {
+    if (focusedShip.current || !activeButton.current) return;
+    focusedShip.current = true;
+    activeButton.current.focus();
+  }, [ships]);
 
   async function choose(ship: ShipProfile): Promise<void> {
     try {
@@ -62,7 +72,7 @@ export function ShipSwitcher({ onClose }: { onClose: () => void }) {
             const active = ship.id === activeShip?.id;
             return (
               <li key={ship.id}>
-                <button type="button" class="list-row switcher-ship" aria-pressed={active ? 'true' : 'false'} onClick={() => void choose(ship)}>
+                <button ref={active ? activeButton : undefined} type="button" class="list-row switcher-ship" aria-pressed={active ? 'true' : 'false'} onClick={() => void choose(ship)}>
                   <span class="list-row-title">{ship.particulars.name}</span>
                   {active && <Icon name="check" />}
                 </button>
