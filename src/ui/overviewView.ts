@@ -2,7 +2,7 @@ import type { Alert, AlertKind } from '../domain/alerts';
 import { onboardAt } from '../domain/crew';
 import { daysBetween, isValidIsoDate, isValidLocalDateTime, MONTH_NAMES, shortDate } from '../domain/dates';
 import { VESSEL_KEYS } from '../domain/fieldDictionary';
-import { formatOffset, nextScheduledChange, shipLocalToInstant, toShipLocal } from '../domain/shipTime';
+import { formatOffset, liveChanges, shipLocalToInstant, toShipLocal } from '../domain/shipTime';
 import type { ClockChange, CrewMember, DraftSurvey, Particulars, ShipProfile, Voyage } from '../domain/types';
 import { currentVoyage } from '../domain/voyage';
 import type { HubTile } from './hubTiles';
@@ -63,6 +63,14 @@ function etaInstant(v: Voyage): Date | undefined {
   return shipLocalToInstant(v.etaLocal, v.etaOffsetMinutes);
 }
 
+/**
+ * The next scheduled change that moves the clocks. One to the offset the ship already keeps moves nothing (it would read
+ * "0 min"), so it is passed over, and the one after it is next.
+ */
+function nextMove(changes: ClockChange[], now: Date, offsetMinutes: number): ClockChange | undefined {
+  return liveChanges(changes).find((c) => Date.parse(c.effectiveAt) > now.getTime() && c.toOffsetMinutes !== offsetMinutes);
+}
+
 /** The voyage card of Home: the current voyage (if any), the crew onboard and the next clock change. */
 export function voyageCard(input: {
   voyage?: Voyage; crew: CrewMember[]; today: string; now: Date; clockChanges: ClockChange[]; offsetMinutes: number;
@@ -78,7 +86,7 @@ export function voyageCard(input: {
     const eta = etaInstant(voyage);
     view.eta = eta ? { countdown: etaCountdown(eta, now), local: etaLocalText(voyage.etaLocal) } : { missing: 'ETA not set' };
   }
-  const next = nextScheduledChange(clockChanges, now);
+  const next = nextMove(clockChanges, now, offsetMinutes);
   if (next) view.clockChange = `Next clock change: ${shiftText(next.toOffsetMinutes - offsetMinutes)}`;
   return view;
 }
@@ -123,7 +131,7 @@ function surveyStatus(surveys: DraftSurvey[], today: string, offsetMinutes: numb
 
 function timeStatus(clockChanges: ClockChange[], now: Date, today: string, offsetMinutes: number): string {
   const zone = formatOffset(offsetMinutes);
-  const next = nextScheduledChange(clockChanges, now);
+  const next = nextMove(clockChanges, now, offsetMinutes);
   // The time the clocks are moved, as the Ship's time history lists it.
   const row = next && historyRows(clockChanges, now).find((r) => r.id === next.id);
   if (!next || !row) return zone;

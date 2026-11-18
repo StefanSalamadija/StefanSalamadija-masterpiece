@@ -71,7 +71,7 @@ function GoalRow({ goal, data, onDelete }: { goal: BudgetGoal; data: PlanData; o
       <span class="budget-row-detail">By {monthLabel(goal.targetYm)}{category ? ` · ${category}` : ' · no category, so nothing is counted as saved'}</span>
       <span class="budget-row-detail">Saved {formatMoney(p.saved)} of {formatMoney(goal.amount)} ({p.progressPct}%)</span>
       {p.remaining > 0 ? <p class="budget-debt-free">Suggested {formatMoney(p.suggestedMonthly)} a month</p> : <p class="budget-debt-free">Reached.</p>}
-      {p.behind && <span class="badge band-badge" data-band="amber">Behind plan</span>}
+      {p.behind && <span class="status" data-tone="warn" data-band="amber">Behind plan</span>}
       <div class="row-actions">
         <button type="button" class="btn btn-outline btn-small" onClick={() => setEditing(true)}>Edit</button>
         <button type="button" class="btn btn-outline btn-small" onClick={onDelete}>Delete</button>

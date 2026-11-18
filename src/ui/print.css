@@ -11,7 +11,9 @@
 }
 
 @media print {
-  /* The tokens, and until Task 8 the names used before them, are black on white in print. */
+  /* The tokens, and until Task 8 the names used before them, are black on white in print. The old names follow
+     the tokens, as on screen (`--red` and `--on-red` are `--danger` and `--on-danger`: a danger fill prints as the accent's
+     does, and danger text in black); only the amber edges keep their own value. */
   :root,
   :root[data-theme] {
     color-scheme: light;
@@ -52,13 +54,7 @@
     --shadow-2: none;
     --backdrop: transparent;
 
-    --bg: #ffffff;
-    --surface: #ffffff;
-    --muted: #000000;
     --amber: #ffffff;
-    --red: #ffffff;
-    --on-red: #000000;
-    --bar-border: #000000;
   }
 
   /* Photos and page images print as they are, whatever the theme. */
@@ -74,13 +70,12 @@
     color: #000000;
   }
 
-  /* A border rather than a shadow: a shadow is dropped when the browser prints without background graphics. */
-  .status[data-tone] {
-    padding: 3px 11px;
-    border: 1px solid #000000;
+  /* Overdue and due soon print as their words in an outline (a border, which prints without background graphics too). */
+  .status[data-tone='danger'],
+  .status[data-tone='warn'] {
+    border-color: #000000;
     background: #ffffff;
     color: #000000;
-    box-shadow: none;
   }
 
   html,

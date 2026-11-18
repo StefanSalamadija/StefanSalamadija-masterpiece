@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { expectNoHorizontalScroll, expectRedOnly, freshApp, setTheme, setupShip } from './helpers';
+import type { Page } from '@playwright/test';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, setTheme, setupShip, showUpdateBanner } from './helpers';
 
 test('first ship and header clock', async ({ page }) => {
   await freshApp(page);
@@ -185,6 +186,103 @@ test('navigation links, the Ship hub tiles, and unknown routes falling back to H
   await page.goto('./#/nowhere');
   await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible();
   await expect(main.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+});
+
+/** Adds one crew member through the form, so that the edit form has its documents and buttons. */
+async function addCrewMember(page: Page): Promise<void> {
+  await page.goto('./#/ship/crew/new');
+  await page.getByLabel('Surname').fill('EXAMPLE');
+  await page.getByLabel('Given names').fill('R.');
+  await page.getByLabel('Rank').selectOption({ label: 'Master' });
+  await page.getByLabel('Date of birth').fill('1980-03-14');
+  await page.getByLabel('Passport expiry').fill('2030-01-01');
+  await page.getByLabel("Seaman's book expiry").fill('2030-01-01');
+  await page.getByLabel('Sign-on date').fill('2026-06-01');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page).toHaveURL(/#\/ship\/crew$/);
+}
+
+test('every control is at least 44 px and every input 16 px: Home, Settings, the crew form and quick add', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeAttached();
+  await expectTargets(page); await expectInputFonts(page);
+
+  await page.goto('./#/settings');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  // The 24 px checkbox is tapped through its label, which is the 48 px row.
+  const auto = page.getByRole('checkbox', { name: 'Night red automatically' }).locator('xpath=ancestor::label');
+  expect((await auto.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await expectTargets(page); await expectInputFonts(page);
+
+  await addCrewMember(page);
+  await page.getByRole('list', { name: 'Crew' }).getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByLabel('Surname')).toHaveValue('EXAMPLE');
+  await expectTargets(page); await expectInputFonts(page);
+
+  await page.goto('./#/budget/add');
+  const catchUp = page.getByRole('link', { name: 'Catch up' });
+  await expect(catchUp).toBeVisible();
+  expect((await catchUp.boundingBox())!.height).toBeGreaterThanOrEqual(48); // 63×20 before (spec §7)
+  await expectTargets(page); await expectInputFonts(page);
+});
+
+test('Night red: a confirm dialog, the error toast and the update banner are red and black only', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+
+  await page.goto('./#/profiles');
+  await page.getByRole('list', { name: 'Ships' }).getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expectRedOnly(page);
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await page.goto('./#/ship/certificates/new');
+  await page.getByLabel('Certificate', { exact: true }).selectOption({ label: 'IOPP' });
+  await failWrites(page);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.toast')).toContainText('Storage on this device is full.');
+  await expectRedOnly(page);
+  await page.getByRole('button', { name: 'Dismiss error' }).click();
+
+  await page.goto('./#/');
+  await showUpdateBanner(page);
+  await expectRedOnly(page);
+});
+
+/** The computed colours of an element, its border, radius and shadow. */
+const look = (selector: string) => (sel: string) => {
+  const s = getComputedStyle(document.querySelector(sel)!);
+  return { bg: s.backgroundColor, color: s.color, border: s.borderTopColor, radius: s.borderTopLeftRadius, shadow: s.boxShadow };
+};
+
+test('the toast is filled in Day and a tinted box with a red edge in Dark and Night red; dialogs are surface-1 with a large radius', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/ship/certificates/new');
+  await page.getByLabel('Certificate', { exact: true }).selectOption({ label: 'IOPP' });
+  await failWrites(page);
+  await page.getByRole('button', { name: 'Save' }).click();
+  const toast = page.locator('.toast');
+  await expect(toast).toBeVisible();
+  await allowWrites(page); // so that the theme button below can save; the toast stays until it is dismissed
+  // Day: --danger with --on-danger.
+  expect(await page.evaluate(look('.toast'), '.toast')).toMatchObject({ bg: 'rgb(179, 38, 30)', color: 'rgb(255, 255, 255)' });
+  await page.getByRole('button', { name: 'Theme: Day' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  // Dark: --danger-bg, --text, a --danger border.
+  expect(await page.evaluate(look('.toast'), '.toast')).toMatchObject({ bg: 'rgb(61, 18, 16)', color: 'rgb(230, 237, 245)', border: 'rgb(255, 107, 94)' });
+  await page.getByRole('button', { name: 'Theme: Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'red');
+  // Night red: the same, in its reds, and no shadow.
+  expect(await page.evaluate(look('.toast'), '.toast')).toEqual({ bg: 'rgb(74, 6, 6)', color: 'rgb(224, 74, 58)', border: 'rgb(255, 90, 69)', radius: '12px', shadow: 'none' });
+  await page.getByRole('button', { name: 'Dismiss error' }).click();
+
+  await page.goto('./#/profiles');
+  await page.getByRole('list', { name: 'Ships' }).getByRole('button', { name: 'Delete' }).click();
+  const dialog = page.locator('dialog.dialog[open]');
+  await expect(dialog).toBeVisible();
+  expect(await page.evaluate(look('dialog.dialog[open]'), 'dialog.dialog[open]')).toMatchObject({ bg: 'rgb(18, 0, 0)', radius: '20px' });
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('dialog.dialog[open]')!, '::backdrop').backgroundColor)).toBe('rgba(0, 0, 0, 0.6)');
 });
 
 test.describe('theme before the app starts', () => {

@@ -138,7 +138,7 @@ test('documents: warning, expiring before next port, carry-over on re-join', asy
   // set up a ship, add crew PETROVIĆ Ivan (Master, sign-on 2026-06-01, passport and SB expiry 2030-01-01)
   await addMember(page, 'PETROVIĆ', 'Ivan');
   const row = crewRow(page, 'Ivan PETROVIĆ');
-  await expect(row.locator('[data-band]')).toHaveCount(0);
+  await expect(row.locator('[data-band]')).toHaveText('✓ Valid');
 
   // on his edit screen: Add document → Document 'Medical fitness certificate', Number 'M-1', Expiry date 2026-12-24 → Save
   await openMember(page, 'Ivan PETROVIĆ');
@@ -417,10 +417,10 @@ test('expiring: with no next port ETA it shows the next 90 days, whatever the vo
   await expect(page.getByText('Next port Rotterdam, ETA 2027-01-24')).toBeVisible();
   await expect(page.getByText('No next port ETA set')).toHaveCount(0);
   await expect(expiringList(page).getByRole('listitem')).toHaveText([/Basic safety training/, /Advanced fire fighting/]);
-  // Advanced fire fighting is 91 days out, so still valid: a plain row with no tint and no badge. Basic safety training is due soon.
+  // Advanced fire fighting is 91 days out, so still valid: a plain row with no tint, and ✓ Valid. Basic safety training is due soon.
   const valid = expiringList(page).getByRole('listitem').filter({ hasText: 'Advanced fire fighting' });
   await expect(valid.locator('.list-row')).not.toHaveAttribute('data-tone', /.*/);
-  await expect(valid.locator('[data-band]')).toHaveCount(0);
+  await expect(valid.locator('[data-band]')).toHaveText('✓ Valid');
   const soon = expiringList(page).getByRole('listitem').filter({ hasText: 'Basic safety training' });
   await expect(soon.locator('.list-row')).toHaveAttribute('data-tone', 'warn');
   await expectNoHorizontalScroll(page);

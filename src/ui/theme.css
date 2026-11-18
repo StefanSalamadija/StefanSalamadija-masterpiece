@@ -40,7 +40,9 @@
   --r-lg: 20px;
   --r-pill: 999px;
   --target: 48px;
+  --bw: 1px; /* the width of a line around a card, a row, a chip or a button: 2 px in High contrast */
   --page-width: 960px;
+  --backdrop: rgb(0 0 0 / 0.6);
 }
 
 /* Day. */
@@ -82,7 +84,6 @@
   --media-filter: none;
   --picker-filter: none;
   --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
-  --backdrop: rgb(0 0 0 / 0.55);
 }
 
 /* Dark: the navy theme for the cabin (Night before piece 7), with its values kept. */
@@ -123,7 +124,6 @@
   --media-filter: none;
   --picker-filter: none; /* the dark color-scheme already draws the picker icon light */
   --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
-  --backdrop: rgb(0 0 0 / 0.55);
 }
 
 /*
@@ -167,7 +167,6 @@
   --media-filter: grayscale(1) invert(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
   --picker-filter: grayscale(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
   --shadow-2: none;
-  --backdrop: rgb(0 0 0 / 0.7);
 }
 
 /* High contrast: for bright sun on deck. Today's black on white, with the semantic tokens in the same style. */
@@ -208,13 +207,13 @@
   --media-filter: none;
   --picker-filter: none;
   --shadow-2: none;
-  --backdrop: rgb(0 0 0 / 0.55);
 }
 
 /* High contrast's heavier type: regular and medium text are set at 600, as before piece 7. */
 :root[data-theme='contrast'] {
   --fw-regular: 600;
   --fw-medium: 600;
+  --bw: 2px;
 }
 
 /*
@@ -226,10 +225,14 @@
   --surface: var(--surface-1);
   --muted: var(--text-muted);
   --bar-border: var(--bar-line);
-  --amber: var(--warn);
+  --amber: #f2b33d; /* the old amber of the warning edges and the budget's fourth series, until Task 8 */
   --red: var(--danger);
   --on-red: var(--on-danger);
   --radius: var(--r-md);
+}
+
+:root[data-theme='red'] {
+  --amber: var(--warn);
 }
 
 /* ---- Base ---- */
@@ -255,6 +258,13 @@ textarea {
   color: inherit;
 }
 
+/* A control that takes no input is greyed, inside a field or not (PdfView's Go to page). */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--text-muted);
+}
+
 ::placeholder {
   color: var(--text-muted);
   opacity: 1;
@@ -266,8 +276,8 @@ textarea {
 }
 
 /*
- * Night red: the browser highlights the date or time segment being edited in its own blue. The segments stay transparent,
- * and the focused one is marked in the theme's own mark colours instead.
+ * Night red: the browser highlights the date or time segment being edited in its own blue. The segments stay transparent;
+ * the field's red focus ring shows where the typing goes. (A `:focus` rule on a segment is never matched, so there is none.)
  */
 :root[data-theme='red'] ::-webkit-datetime-edit-year-field,
 :root[data-theme='red'] ::-webkit-datetime-edit-month-field,
@@ -280,19 +290,6 @@ textarea {
 :root[data-theme='red'] ::-webkit-datetime-edit-week-field {
   background: transparent;
   color: var(--text);
-}
-
-:root[data-theme='red'] ::-webkit-datetime-edit-year-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-month-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-day-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-hour-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-minute-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-second-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-millisecond-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-ampm-field:focus,
-:root[data-theme='red'] ::-webkit-datetime-edit-week-field:focus {
-  background: var(--mark-bg);
-  color: var(--mark-text);
 }
 
 /*
@@ -351,6 +348,11 @@ textarea {
   cursor: default;
 }
 
+/* Night red: the browser draws a text box's resize grip in grey, which no style reaches; the box keeps its height instead. */
+:root[data-theme='red'] textarea {
+  resize: none;
+}
+
 /* The browser's autofill paints its own pale fill: keep the field in the theme. */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
@@ -389,12 +391,6 @@ body {
   line-height: 1.45;
 }
 
-/* Text that sets its own medium weight gets the high-contrast weight too. The mono clock stays 500: the only weight bundled. */
-:root[data-theme='contrast'] .field label,
-:root[data-theme='contrast'] .field-error {
-  font-weight: 600;
-}
-
 h1,
 h2,
 h3 {
@@ -410,6 +406,13 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/* Never under 16 px in a field, wherever it is, or iOS zooms in on it (spec §5). */
+input,
+select,
+textarea {
+  font-size: max(var(--fs-body), 1em);
 }
 
 :focus-visible {
@@ -476,7 +479,7 @@ textarea {
   min-width: 0;
   height: 44px;
   padding: 0 var(--sp-3);
-  border: 1px solid var(--bar-line);
+  border: var(--bw) solid var(--bar-line);
   border-radius: var(--r-pill);
   background: transparent;
   color: var(--bar-text);
@@ -542,10 +545,6 @@ textarea {
 :root[data-theme='contrast'] .theme-btn {
   width: 48px;
   height: 48px;
-}
-
-:root[data-theme='contrast'] .ship-pill {
-  border-width: 2px;
 }
 
 /* 64 px above the home indicator: Home, Ship, Forms, Budget and More. */
@@ -652,7 +651,7 @@ textarea {
   height: 100%;
   min-height: 112px;
   padding: var(--sp-3);
-  border: 1px solid transparent;
+  border: var(--bw) solid transparent;
   border-radius: var(--r-md);
   background: var(--surface-1);
   color: var(--text);
@@ -686,8 +685,9 @@ textarea {
   align-self: flex-start;
 }
 
-/* Night red, as drawn: the tiles are outlined, and their icons are in the text's red. */
-:root[data-theme='red'] .hub-tile {
+/* Night red, as drawn: the tiles are outlined, and their icons are in the text's red. High contrast outlines them too. */
+:root[data-theme='red'] .hub-tile,
+:root[data-theme='contrast'] .hub-tile {
   border-color: var(--line);
 }
 
@@ -696,35 +696,18 @@ textarea {
   color: var(--text);
 }
 
-:root[data-theme='contrast'] .hub-tile {
-  border: 2px solid var(--line);
-}
-
 /* ---- More: a large row for each screen with no tab ---- */
 
 .more-row {
   justify-content: flex-start;
 }
 
-.more-chevron {
+.list-row-chevron {
   display: flex;
   color: var(--text-muted);
 }
 
-/* ---- The ship switcher: a sheet from the bottom of the screen (it overrides the centred `.dialog` box) ---- */
-
-.dialog.switcher {
-  width: 100%;
-  max-width: none;
-  max-height: 85dvh;
-  margin: auto 0 0;
-  border-width: 1px 0 0;
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-
-:root[data-theme='contrast'] .dialog.switcher {
-  border-width: 3px 0 0;
-}
+/* ---- The ship switcher, a `.sheet` (see Dialogs) ---- */
 
 .switcher-body {
   display: flex;
@@ -753,60 +736,19 @@ textarea {
   border-color: var(--text);
 }
 
-/* ---- A row of chips (the budget's and the library's) ---- */
-
-.chips {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.chips::-webkit-scrollbar {
-  display: none;
-}
-
-.chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--target);
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 500;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-:root[data-theme='contrast'] .chip {
-  border-width: 2px;
-  font-weight: 600;
-}
-
-.chip[aria-current='page'] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
 /* ---- Buttons and form fields ---- */
 
+/* Every button is 48 px high (56 for the large one) with the medium radius. Secondary is the outlined one. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: var(--target);
-  padding: 0 18px;
-  border: 1.5px solid transparent;
-  border-radius: var(--radius);
-  font-size: 16px;
-  font-weight: 600;
+  padding: 0 var(--sp-4);
+  border: var(--bw) solid transparent;
+  border-radius: var(--r-md);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-strong);
   text-decoration: none;
   cursor: pointer;
 }
@@ -820,14 +762,12 @@ textarea {
 
 .btn-large {
   min-height: 56px;
-  font-size: 17px;
+  font-size: var(--fs-heading);
 }
 
 .btn-small {
-  min-height: var(--target);
-  padding: 0 14px;
-  font-size: 14px;
-  border-radius: 8px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
 }
 
 .btn-primary {
@@ -836,80 +776,109 @@ textarea {
 }
 
 .btn-danger {
-  background: var(--red);
-  color: var(--on-red);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
 .btn-outline {
-  border-color: var(--muted);
+  border-color: var(--text-muted);
   background: transparent;
   color: var(--text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 :root[data-theme='dark'] .btn-outline {
   border-color: var(--line);
-  background: var(--surface);
+  background: var(--surface-1);
 }
 
-:root[data-theme='contrast'] .btn-outline {
-  border-width: 2px;
-  font-weight: 600;
-}
-
+/* The label sits 8 px above its input; the form puts 12 px between a field and the next label. */
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 
 .field label {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.field input,
-.field select,
-.field textarea {
-  width: 100%;
-  min-height: 48px;
-  padding: 10px 12px;
-  border: 1.5px solid var(--muted);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 16px;
-}
-
-.field textarea {
-  resize: vertical;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
 }
 
 /* A control that is scrolled into view (a failed Save focuses the first one with a problem) must clear the sticky bars and show its label. */
 .field input,
 .field select,
 .field textarea {
+  width: 100%;
+  min-height: var(--target);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1.5px solid var(--text-muted);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
   scroll-margin-block: 120px;
 }
 
+.field textarea {
+  resize: vertical;
+}
+
 .field input[aria-invalid='true'] {
-  border-color: var(--red);
+  border-color: var(--danger);
 }
 
 .field-error {
   margin: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--red);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--danger);
 }
 
 /* A warning is advice, not a blocker: the text stays in the normal colour with an amber edge, so it reads in every theme. */
 .field-warning {
   margin: 0;
-  padding-left: 10px;
+  padding-left: var(--sp-2);
   border-left: 4px solid var(--amber);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+/* ---- Filter chips: a row of them (budget, library), or one link drawn as a chip (Catch up) ---- */
+
+/* After the buttons, so that a pressed toggle button (crew list) is filled over Dark's outline. */
+
+.chips {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: 0 var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chip[aria-current='page'],
+.toggle .btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--fw-strong);
 }
 
 /* ---- Welcome screen ---- */
@@ -1001,47 +970,76 @@ textarea {
   font-size: 20px;
 }
 
-/* ---- Update banner and error toast ---- */
+/* ---- Banners and the error toast ---- */
 
+/* The update banner: a strip under the header, the width of the page. */
 .update-banner {
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+  border-bottom: var(--bw) solid var(--line);
 }
 
 .banner-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
 }
 
 .banner-text {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
-  line-height: 1.35;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
 }
 
+/* A banner in a screen (the backup reminder, the storage notice). The words carry it; the warn edge only marks it. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-left: calc(2 * var(--bw) + 4px) solid var(--warn); /* 6 px, 8 in High contrast */
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+
+.banner p {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Filled in the light themes; in Dark and Night red a dark red box with a red edge, which is not bright at night. */
 .toast {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 88px;
   z-index: 20;
-  width: calc(100% - 32px);
+  width: calc(100% - 2 * var(--sp-4));
   max-width: 520px;
   margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 8px 12px 16px;
-  border-radius: var(--radius);
-  background: var(--red);
-  color: var(--on-red);
-  font-size: 14px;
-  line-height: 1.35;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--danger);
+  border-radius: var(--r-md);
+  background: var(--danger);
+  color: var(--on-danger);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+}
+
+:root[data-theme='dark'] .toast,
+:root[data-theme='red'] .toast {
+  background: var(--danger-bg);
+  color: var(--text);
 }
 
 .toast-message {
@@ -1056,7 +1054,7 @@ textarea {
   align-items: center;
   min-height: var(--target);
   color: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 .toast-dismiss {
@@ -1068,7 +1066,7 @@ textarea {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -1077,9 +1075,11 @@ textarea {
 /* ---- Screens: headings, cards, forms ---- */
 
 .screen > h1,
-.screen > h2 {
-  margin: 0 0 16px;
-  font-size: 22px;
+.screen > h2,
+.screen-head h2 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
 }
 
 .screen-head {
@@ -1087,36 +1087,40 @@ textarea {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 
 .screen-head h2 {
   margin: 0;
-  font-size: 22px;
 }
 
 .card {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
 }
 
-:root[data-theme='contrast'] .card {
-  border-width: 2px;
+/* A word on a pill: Active, Scheduled, Hidden. A status (`.status`, below) and an import status have the same shape. */
+.badge,
+.status,
+.import-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
 }
 
 .badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border-radius: 999px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
 }
 
 .ship-list,
@@ -1125,10 +1129,12 @@ textarea {
 .relief-list,
 .document-list,
 .voyage-list,
-.history-list {
+.history-list,
+.alert-list,
+.snapshot-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1137,20 +1143,20 @@ textarea {
 .ship-row {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .ship-row-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .ship-row-name {
   min-width: 0;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-strong);
   overflow-wrap: anywhere;
 }
 
@@ -1158,7 +1164,7 @@ textarea {
 .row-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .particulars-form,
@@ -1168,22 +1174,30 @@ textarea {
 .voyage-form {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--sp-5);
+}
+
+/* The heading of a part of a form or a screen: small capitals in the muted colour. */
+.form-section h3,
+.time-section h3,
+.settings-section h3 {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .form-section h3 {
-  margin: 0 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
+  margin-bottom: var(--sp-3);
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--sp-3);
 }
 
 @media (min-width: 640px) {
@@ -1196,26 +1210,27 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 .save-status {
   margin: 0;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: var(--fw-strong);
+  color: var(--text-muted);
 }
 
 .helper-text {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  color: var(--text-muted);
 }
 
+/* A checkbox or a radio with its words: the whole row, 48 px high, is what is tapped; the box itself is 24 px. */
 .check {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
   min-height: var(--target);
   cursor: pointer;
 }
@@ -1225,7 +1240,27 @@ textarea {
   width: 24px;
   height: 24px;
   margin: 0;
-  accent-color: var(--accent);
+}
+
+/* An empty list: an icon, one sentence and the one thing to do. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.empty-state svg {
+  width: var(--target);
+  height: var(--target);
+  color: var(--accent);
+}
+
+.empty-state p {
+  margin: 0;
 }
 
 /* ---- Crew list ---- */
@@ -1252,13 +1287,6 @@ textarea {
 .toggle {
   display: flex;
   gap: 8px;
-}
-
-.toggle .btn[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
 }
 
 .crew-row {
@@ -1585,23 +1613,6 @@ textarea {
   color: var(--muted);
 }
 
-/* Amber and red are never the only sign: the badge says it in words. */
-.band-badge {
-  white-space: nowrap;
-}
-
-/* Due soon is an outlined pill, overdue a filled one, so the two differ in shape as well as in colour and words. */
-.band-badge[data-band='amber'] {
-  background: var(--warn-bg);
-  color: var(--warn);
-  box-shadow: inset 0 0 0 1.5px var(--warn);
-}
-
-.band-badge[data-band='red'] {
-  background: var(--red);
-  color: var(--on-red);
-}
-
 /* ---- List rows and status pills (the Due screen; Home, the hub and the lists reuse them) ---- */
 
 .row-list {
@@ -1679,27 +1690,20 @@ textarea {
   line-height: var(--lh-label);
 }
 
-/* A status in words: overdue is a filled pill, due soon an outlined one, valid a ✓ and a word. */
-.status {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  padding: var(--sp-1) var(--sp-3);
-  border-radius: var(--r-pill);
-  font-size: var(--fs-caption);
-  line-height: var(--lh-caption);
-  font-weight: var(--fw-strong);
-  white-space: nowrap;
-}
-
+/*
+ * A status in words (its shape is `.badge`'s, above), never told by colour alone: overdue is a filled pill, due soon an
+ * outlined one, valid a ✓ and a word.
+ */
 .status[data-tone='danger'] {
+  border-color: var(--danger);
   background: var(--danger);
   color: var(--on-danger);
 }
 
 .status[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
   color: var(--warn);
-  box-shadow: inset 0 0 0 1.5px var(--warn);
 }
 
 .status[data-tone='ok'] {
@@ -1779,10 +1783,15 @@ textarea {
   margin: 0;
 }
 
-/* The voyage card is drawn as a hub tile, with more room. */
+/* The voyage card is drawn as a hub tile, with more room. Its overline is in spaced capitals, as drawn. */
 .voyage-card {
   gap: var(--sp-3);
   padding: var(--sp-4);
+}
+
+.voyage-card .list-row-overline {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .voyage-route {
@@ -1855,40 +1864,6 @@ textarea {
   color: var(--on-accent);
 }
 
-
-/* A banner at the top (the backup reminder, the storage notice). The words carry it; the warn edge only marks it. */
-.home-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2) var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--line);
-  border-left: 6px solid var(--warn);
-  border-radius: var(--r-md);
-  background: var(--surface-1);
-}
-
-:root[data-theme='contrast'] .home-notice {
-  border-width: 2px;
-  border-left-width: 8px;
-}
-
-.home-notice p {
-  flex: 1 1 16rem;
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.alert-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
 
 .alert-row {
   padding: 0;
@@ -2062,15 +2037,7 @@ textarea {
 
 /* The status is always in words; the colour only backs it up. */
 .import-status {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border: 1.5px solid var(--muted);
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
+  border-color: var(--text-muted);
 }
 
 .import-status[data-status='new'] {
@@ -2099,45 +2066,61 @@ textarea {
   color: var(--on-red);
 }
 
-/* ---- Dialogs ---- */
+/* ---- Dialogs, and the sheet that rises from the foot of the screen (the ship switcher) ---- */
 
-.dialog {
-  width: calc(100% - 32px);
+dialog.dialog {
+  width: calc(100% - 2 * var(--sp-4));
   max-width: 440px;
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg);
+  border: var(--dialog-bw, var(--bw)) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
   color: var(--text);
   box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
 }
 
-:root[data-theme='contrast'] .dialog {
-  border: 3px solid var(--text);
+/* High contrast keeps its heavy 3 px frame. */
+:root[data-theme='contrast'] dialog.dialog {
+  --dialog-bw: 3px;
+  border-color: var(--text);
 }
 
-.dialog::backdrop {
+/* Night red: no shadow, under a dialog or a toast. */
+:root[data-theme='red'] dialog.dialog,
+:root[data-theme='red'] .toast {
+  box-shadow: none;
+}
+
+dialog.dialog::backdrop {
   background: var(--backdrop);
 }
 
-.dialog-form {
+dialog.sheet {
+  width: 100%;
+  max-width: none;
+  max-height: 85dvh;
+  margin: auto 0 0;
+  border-width: var(--dialog-bw, var(--bw)) 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+
+.dialog-form,
+.dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px 16px 16px;
+  gap: var(--sp-4);
+}
+
+.dialog-form {
+  padding: var(--sp-5) var(--sp-4) var(--sp-4);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
   overflow-wrap: anywhere;
-}
-
-.dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .dialog-body p {
@@ -2145,24 +2128,24 @@ textarea {
 }
 
 .dialog-body .dialog-waiting {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .dialog-error {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--red);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--danger);
 }
 
 .dialog-error p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--sp-1);
 }
 
 .dialog-error a {
@@ -2189,15 +2172,6 @@ textarea {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 24px;
-}
-
-.time-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 .time-actions {
@@ -2248,26 +2222,8 @@ textarea {
   scroll-margin-top: calc(56px + env(safe-area-inset-top) + var(--sp-2));
 }
 
-.settings-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .settings-section p {
   margin: 0;
-}
-
-.snapshot-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .snapshot-row {

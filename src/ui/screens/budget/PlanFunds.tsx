@@ -103,7 +103,7 @@ function FundRow({ fund, data, onDelete }: { fund: BudgetFund; data: PlanData; o
       <span class="budget-row-detail">
         Balance {formatMoney(status.balance)} · {setAsideNow ? 'Set aside this month' : status.setAside > 0 ? `${formatMoney(status.setAside)} to set aside this month` : 'Nothing to set aside this month'}
       </span>
-      {status.behind && <span class="badge band-badge" data-band="amber">Behind plan</span>}
+      {status.behind && <span class="status" data-tone="warn" data-band="amber">Behind plan</span>}
       <div class="row-actions">
         <button type="button" class="btn btn-outline btn-small" onClick={() => setEditing(true)}>Edit</button>
         <button type="button" class="btn btn-outline btn-small" onClick={onDelete}>Delete</button>

@@ -154,6 +154,12 @@ describe('voyageCard', () => {
     expect(voyageCard({ ...base, clockChanges: [change('2026-11-17T08:00:00.000Z', 240)] })).not.toHaveProperty('clockChange');
     expect(voyageCard({ ...base, clockChanges: [change('2026-11-18T00:00:00.000Z', 240, { deleted: true })] })).not.toHaveProperty('clockChange');
   });
+
+  it('never says 0 min: a change to the offset the ship already keeps moves no clock, so the next one that does is next', () => {
+    expect(voyageCard({ ...base, clockChanges: [change('2026-11-18T00:00:00.000Z', OFFSET)] })).not.toHaveProperty('clockChange');
+    const sameThenBack = [change('2026-11-18T00:00:00.000Z', OFFSET), change('2026-11-20T00:00:00.000Z', 120)];
+    expect(voyageCard({ ...base, clockChanges: sameThenBack }).clockChange).toBe('Next clock change: −1 h');
+  });
 });
 
 describe('particularsToFill', () => {
@@ -231,6 +237,10 @@ describe('hubStatuses', () => {
     // 23:30Z on the 17th is 02:30 on the 18th on board: not today.
     const afterMidnight = [change('2026-01-01T00:00:00.000Z', OFFSET), change('2026-11-17T23:30:00.000Z', 120)];
     expect(hubStatuses({ ...empty, clockChanges: afterMidnight }).time.text).toBe('UTC+03:00 · −1 h on 18 Nov');
+    // A change to the same offset moves no clock: never "0 min".
+    expect(hubStatuses({ ...empty, clockChanges: [change('2026-11-17T19:00:00.000Z', OFFSET)] }).time.text).toBe('UTC+03:00');
+    const sameThenLater = [change('2026-11-17T19:00:00.000Z', OFFSET), change('2026-11-25T23:00:00.000Z', 240)];
+    expect(hubStatuses({ ...empty, clockChanges: sameThenLater }).time.text).toBe('UTC+03:00 · +1 h on 26 Nov');
   });
 
   it('draft survey: the newest, by its date or else the day it was made', () => {

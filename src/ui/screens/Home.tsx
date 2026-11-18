@@ -191,14 +191,14 @@ export function Home() {
       <h2 class="visually-hidden">Home</h2>
       <p class="live" role="status">{flash}</p>
       {reminder && (
-        <div class="home-notice no-print">
+        <div class="banner no-print">
           <p>{reminder}</p>
           <a class="btn btn-primary" href="#/settings">Export full backup</a>
           <button type="button" class="btn btn-outline" onClick={() => { backupDismissed = true; setDismissed(true); }}>Not now</button>
         </div>
       )}
       {persistence === 'denied' && (
-        <div class="home-notice no-print">
+        <div class="banner no-print">
           <p>{PERSISTENCE_DENIED_NOTICE}</p>
         </div>
       )}

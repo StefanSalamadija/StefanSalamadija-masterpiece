@@ -210,3 +210,56 @@ export async function expectRedOnly(page: Page): Promise<void> {
   }, `data:image/png;base64,${shot.toString('base64')}`);
   expect(pixels, 'pixels that are not red or black in Night red').toEqual({ count: 0, examples: [] });
 }
+
+/**
+ * Fails when a visible control is too small to tap (spec §5 and §7: 44 px at the least). A control fails when its box is
+ * under 44 px both wide and high, or under 44 px high while wider than 120 px (a wide bar of a link that is too thin).
+ * Controls: `a`, `button`, `select`, `input` (not hidden) and `[role=button]`.
+ * - A checkbox or a radio is tapped through its label, and so is a file input kept out of sight behind a label drawn as a
+ *   button: their label (the enclosing one, or the one that names it with `for`) is measured instead (F15).
+ * Not measured:
+ * - a link inside running text (`p a` with no class of its own), which is a word in a sentence, not a control.
+ */
+export async function expectTargets(page: Page): Promise<void> {
+  const small = await page.evaluate(() => {
+    const found: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('a, button, select, input:not([type=hidden]), [role=button]')) {
+      if (el.tagName === 'A' && !el.className && el.closest('p')) continue; // a link in running text
+      const hidden = el.offsetWidth <= 1 || el.offsetHeight <= 1; // a file input kept behind the label that looks like a button
+      const byLabel = el instanceof HTMLInputElement && (['checkbox', 'radio'].includes(el.type) || (el.type === 'file' && hidden)) ? el.labels?.[0] : null;
+      const target = byLabel ?? el;
+      if (!target.checkVisibility({ visibilityProperty: true })) continue;
+      const { width, height } = target.getBoundingClientRect();
+      if (width === 0 && height === 0) continue;
+      if ((width < 44 && height < 44) || (width > 120 && height < 44)) {
+        const name = (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 40);
+        found.push(`${el.tagName.toLowerCase()}${el.className ? `.${String(el.className).trim().split(/\s+/).join('.')}` : ''} "${name}" ${Math.round(width)}×${Math.round(height)}`);
+      }
+    }
+    return found;
+  });
+  expect(small, 'controls smaller than 44 px').toEqual([]);
+}
+
+/** Fails when a visible input, select or text box is set under 16 px, which makes iOS zoom in on it (spec §5). */
+export async function expectInputFonts(page: Page): Promise<void> {
+  const small = await page.evaluate(() => {
+    const found: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('input:not([type=hidden]), select, textarea')) {
+      if (!el.checkVisibility({ visibilityProperty: true })) continue;
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      if (size < 16) found.push(`${el.tagName.toLowerCase()}[${el.getAttribute('type') ?? ''}] ${el.id || el.getAttribute('aria-label') || ''} ${size}px`);
+    }
+    return found;
+  });
+  expect(small, 'inputs set under 16 px').toEqual([]);
+}
+
+/**
+ * Brings up the update banner as a new version would: a second registration of the service worker under another URL is an
+ * external install, which the app reports as an update waiting. Waits for the banner's Update button.
+ */
+export async function showUpdateBanner(page: Page): Promise<void> {
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => navigator.serviceWorker.register('./sw.js?next')).then(() => undefined));
+  await expect(page.getByRole('button', { name: 'Update', exact: true })).toBeVisible();
+}

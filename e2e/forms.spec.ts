@@ -12,7 +12,7 @@ import { oddLayoutsDocx } from '../src/forms/testing/wordFixtures';
 import { detectWord } from '../src/forms/word/detect';
 import { readWordValues } from '../src/forms/word/read';
 import { writeFormFixtures } from './fixtures/makeForms';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectTargets, failWrites, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -769,6 +769,18 @@ test('Add from crew: the crew onboard as checkboxes fill the next free rows, and
   await expect.poll(async () => (await liveDrafts(page))[0]?.values.rows.g1?.length).toBe(3);
   const [draft] = await liveDrafts(page);
   expect(Object.keys(draft.values.rows.g1[1]).sort()).toEqual(['g1.c1', 'g1.c2']); // no Signature
+});
+
+test('form fill: every control is at least 44 px and every input 16 px; a checkbox is tapped through its 48 px row', async ({ page }) => {
+  await startShip(page);
+  await openFillOf(page, 'permit.docx', 'TST-02 Demo Permit');
+  const row = page.locator('.fill-field label.check').first();
+  const box = row.getByRole('checkbox');
+  await expect(box).toBeVisible();
+  expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await row.click({ position: { x: (await row.boundingBox())!.width - 4, y: 4 } }); // the far end of the row ticks it too
+  await expect(box).toBeChecked();
+  await expectTargets(page); await expectInputFonts(page);
 });
 
 test('the permit: All Yes for a section, asking before it replaces answers, a gas warning that stays out of the file, and Now', async ({ page }) => {

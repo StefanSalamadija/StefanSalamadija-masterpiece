@@ -23,7 +23,7 @@ export function More() {
               <a class="list-row more-row" href={row.href}>
                 <span class="more-icon"><Icon name={row.icon} /></span>
                 <span class="list-row-text list-row-title">{row.name}</span>
-                <span class="more-chevron"><Icon name="chevron" size={20} /></span>
+                <span class="list-row-chevron"><Icon name="chevron" size={20} /></span>
               </a>
             </li>
           ))}

@@ -151,14 +151,16 @@ test('crew: an expired passport shows Expired, measured at the as-at date', asyn
   await page.getByRole('button', { name: 'All' }).click(); // before the sign-on, so only All lists the contract
   await page.getByLabel('As at').fill('2026-01-01');
   await expect(row).toHaveCount(1);
-  await expect(row.locator('[data-band]')).toHaveCount(0);
+  await expect(row.locator('[data-band]')).toHaveText('✓ Valid');
 });
 
-test('crew: a member with valid documents has no badge', async ({ page }) => {
+test('crew: a member with valid documents shows ✓ Valid', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await addMember(page, { surname: 'PETROVIĆ' });
   await expect(crewRow(page, 'Ivan PETROVIĆ')).toContainText('Master');
-  await expect(crewRow(page, 'Ivan PETROVIĆ').locator('[data-band]')).toHaveCount(0);
+  const status = crewRow(page, 'Ivan PETROVIĆ').locator('[data-band]');
+  await expect(status).toHaveText('✓ Valid');
+  await expect(status).toHaveAttribute('data-tone', 'ok');
 });
 
 test('crew list: the Add and Import links, and an empty list', async ({ page }) => {

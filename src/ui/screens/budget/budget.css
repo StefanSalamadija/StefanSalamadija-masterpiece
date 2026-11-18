@@ -4,7 +4,7 @@
 
 /* Quick add: everything a thumb taps is at least the theme's target, the pad keys bigger. */
 .quick-add { display: flex; flex-direction: column; gap: 14px; margin: 0 0 16px; }
-.qa-links { margin: 0 0 12px; overflow-wrap: anywhere; }
+.qa-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-3); color: var(--text-muted); overflow-wrap: anywhere; }
 .qa-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .qa-chip { cursor: pointer; font-family: inherit; }
 .qa-chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }

@@ -52,7 +52,7 @@ export function ShipSwitcher({ onClose, opener }: { onClose: () => void; opener:
 
   return (
     <dialog
-      ref={dialog} class="dialog switcher" aria-labelledby={titleId}
+      ref={dialog} class="dialog sheet" aria-labelledby={titleId}
       onCancel={(event) => {
         event.preventDefault();
         onClose();

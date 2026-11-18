@@ -97,10 +97,13 @@ test('certificates list: overdue first, then due soon, then the rest by name; a 
   await expect(rows.nth(3)).toContainText('Certificate of Registry');
   await expect(rows.nth(4)).toContainText('Class Certificate (Hull)');
 
-  await expect(rows.locator('[data-band]')).toHaveCount(3);
+  await expect(rows.locator('[data-band]:not([data-band="ok"])')).toHaveCount(3);
   await expect(rows.nth(0).locator('[data-band="red"]')).toHaveText('Overdue');
   await expect(rows.nth(1).locator('[data-band="red"]')).toHaveText('Overdue');
   await expect(rows.nth(2).locator('[data-band="amber"]')).toHaveText('Due soon');
+  // Valid says so, in green (ruling U1); a certificate with no expiry has nothing to say.
+  await expect(rows.nth(3).locator('[data-band]')).toHaveCount(0);
+  await expect(rows.nth(4).locator('[data-band="ok"][data-tone="ok"]')).toHaveText('✓ Valid');
 
   // The number and the dates are shown year first, as kept.
   await expect(rows.nth(2)).toContainText('No. LL-1');
