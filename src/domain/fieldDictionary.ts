@@ -17,7 +17,11 @@ export interface FieldContext {
 
 export type FieldValue = string | number | CrewMember[] | undefined;
 
-const VESSEL_KEYS: readonly (keyof Particulars)[] = [
+/**
+ * The ship's particulars a form can be filled from (`vessel.<key>`), all 16. The label auto-fill of form setup matches 15
+ * of them by label; `pandi` is reached through the dictionary name. The Ship hub's Particulars tile counts these.
+ */
+export const VESSEL_KEYS: readonly (keyof Particulars)[] = [
   'name', 'imo', 'callSign', 'mmsi', 'flag', 'portOfRegistry', 'gt', 'nt', 'dwt', 'loa', 'beam', 'yearBuilt',
   'owners', 'managers', 'pandi', 'classSociety',
 ];

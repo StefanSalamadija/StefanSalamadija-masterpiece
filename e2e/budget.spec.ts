@@ -90,15 +90,15 @@ function seed(page: Page, table: string, records: Record<string, unknown>[]): Pr
   }), { table, records });
 }
 
-test('budget: Home has a Budget card and a "+ Expense" button, and the manifest a shortcut to quick add', async ({ page }) => {
+test('budget: the bottom bar has a Budget tab, Home a "+ Expense" tile, and the manifest a shortcut to quick add', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  const card = page.getByRole('main').getByRole('link', { name: /^Budget/ });
-  await expect(card).toBeVisible();
-  await card.click();
+  await expect(page.getByRole('navigation', { name: 'Quick actions' }).getByRole('link', { name: '+ Expense' })).toHaveAttribute('href', '#/budget/add');
+  const tab = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Budget', exact: true });
+  await expect(tab).toBeVisible();
+  await tab.click();
   await expect(page).toHaveURL(/#\/budget$/);
   await expect(page.getByRole('navigation', { name: 'Budget sections' }).getByRole('link'))
     .toHaveText(['Dashboard', 'Month', 'Forecast', 'Net worth', 'Scenarios', 'Plan']);
-  await expect(page.getByRole('link', { name: '+ Expense' })).toBeVisible();
   const manifest = await (await page.request.get('./manifest.webmanifest')).json();
   expect(manifest.shortcuts).toEqual([{ name: 'Add expense', url: './#/budget/add' }]);
 });

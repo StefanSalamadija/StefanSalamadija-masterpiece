@@ -4,12 +4,13 @@ import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
 
 const row = (page: Page, id: string) => page.getByTestId(`unit-${id}`);
 
-test('tools: opens offline from Home and lists the tools', async ({ page, context }) => {
+test("tools: opens offline from Home's Converter tile and lists the tools", async ({ page, context }) => {
   await freshApp(page); await setupShip(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
   await context.setOffline(true);
   await page.reload(); // now served by the service worker, so the Tools chunk must come from its cache
-  await page.getByRole('link', { name: /^Tools/ }).click();
+  await page.getByRole('navigation', { name: 'Quick actions' }).getByRole('link', { name: 'Converter' }).click();
+  await expect(page).toHaveURL(/#\/tools$/);
   await expect(page.getByRole('heading', { name: 'Tools' })).toBeVisible();
   const links = page.getByRole('list', { name: 'Tools' }).getByRole('link');
   await expect(links).toHaveCount(6);

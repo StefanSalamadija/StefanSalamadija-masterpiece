@@ -19,8 +19,9 @@ const DUE_READY = '.list-row, .due-none, .empty';
  * before the shot, for a screen whose content loads after its heading.
  */
 export const SCREENS: { name: string; path: string; ready?: string }[] = [
-  { name: 'home', path: '/' },
-  { name: 'ship', path: '/ship' },
+  // Home's card and Due list, and the hub's status lines, come in once the ship's records are read.
+  { name: 'home', path: '/', ready: '.voyage-card' },
+  { name: 'ship', path: '/ship', ready: '.hub-status:not(:empty)' },
   { name: 'more', path: '/more' },
   { name: 'particulars', path: '/ship/particulars' },
   { name: 'crew', path: '/ship/crew' },

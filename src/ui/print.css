@@ -93,6 +93,11 @@
     position: static;
   }
 
+  /* Home prints its card and its Due list; the room kept for the tiles (which do not print) is not kept on paper. */
+  .home {
+    min-height: 0;
+  }
+
   /* The ship pill prints as the ship's name alone. */
   .ship-pill {
     padding: 0;

@@ -1,42 +1,19 @@
 import { useMemo } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { useRoute } from '../../app/router';
-import type { MasterpieceDB } from '../../db/schema';
-import { listForShip } from '../../db/records';
-import { collectAlerts } from '../../domain/alerts';
 import type { Alert } from '../../domain/alerts';
-import { maxMonthsOnboardOf } from '../../domain/contracts';
 import { expiringBefore } from '../../domain/crewDocs';
-import type { Band, Certificate, CrewDocument, CrewMember, ShipProfile, Voyage } from '../../domain/types';
+import type { Band, ShipProfile } from '../../domain/types';
 import { currentVoyage } from '../../domain/voyage';
 import { BandBadge } from '../components/BandBadge';
 import { DueRow } from '../components/DueRow';
 import { expiringDetail, expiringWindow } from '../crewDocsView';
 import { CREW_DOC_KINDS, dueRow, groupDue, NOTHING_DUE } from '../dueView';
-import { useLive } from '../useLive';
+import { useShipAlerts, useShipRecords } from '../useShipRecords';
+import type { ShipRecords } from '../useShipRecords';
 
 /** The tint of a Before next port row: overdue and due soon only. A valid paper (one the ETA reaches) is a plain row. */
 const PAPER_TONE: Partial<Record<Band, 'warn' | 'danger'>> = { amber: 'warn', red: 'danger' };
-
-interface DueRecords {
-  crew: CrewMember[];
-  certificates: Certificate[];
-  crewDocuments: CrewDocument[];
-  voyages: Voyage[];
-}
-
-/** The records the Due screen reads, live. One read, in one place, so that it can move onto the shared ship records hook. */
-function useDueRecords(db: MasterpieceDB, shipId: string): DueRecords | undefined {
-  return useLive(async () => {
-    const [crew, certificates, crewDocuments, voyages] = await Promise.all([
-      listForShip<CrewMember>(db, 'crew', shipId),
-      listForShip<Certificate>(db, 'certificates', shipId),
-      listForShip<CrewDocument>(db, 'crewDocuments', shipId),
-      listForShip<Voyage>(db, 'voyages', shipId),
-    ]);
-    return { crew, certificates, crewDocuments, voyages };
-  }, [db, shipId]);
-}
 
 /** A group of the Due list (`Overdue`, `Due soon`), named by its heading; nothing when it is empty. */
 function DueGroup({ id, name, alerts, today }: { id: string; name: string; alerts: Alert[]; today: string }) {
@@ -68,7 +45,7 @@ function AllDue({ alerts, today }: { alerts: Alert[]; today: string }) {
  * when there is none: passports, seaman's books and documents, the earliest first. A row opens the crew member. This is
  * the Expiring screen of before piece 7, with its logic unchanged.
  */
-function BeforeNextPort({ records, today }: { records: DueRecords; today: string }) {
+function BeforeNextPort({ records, today }: { records: ShipRecords; today: string }) {
   // Worked out when the records or the ship's date change, not on every render.
   const view = useMemo(() => {
     const window = expiringWindow(currentVoyage(records.voyages), today);
@@ -101,17 +78,16 @@ function BeforeNextPort({ records, today }: { records: DueRecords; today: string
 }
 
 function DueScreen({ ship, path }: { ship: ShipProfile; path: string }) {
-  const { db, shipToday } = useAppState();
-  const records = useDueRecords(db, ship.id);
+  const { shipToday } = useAppState();
+  const records = useShipRecords(ship.id);
   const crewOnly = path === '/ship/crew-documents';
   const port = path === '/due/port';
-  const maxMonthsOnboard = maxMonthsOnboardOf(ship);
-  // Worked out when the records or the ship's date change, not on every render.
-  const alerts = useMemo(() => {
-    if (!records || port) return undefined;
-    const all = collectAlerts({ ...records, today: shipToday, maxMonthsOnboard });
-    return crewOnly ? all.filter((a) => CREW_DOC_KINDS.includes(a.kind)) : all;
-  }, [records, shipToday, maxMonthsOnboard, port, crewOnly]);
+  const all = useShipAlerts(records, ship);
+  // Worked out when the alerts change, not on every render.
+  const alerts = useMemo(
+    () => (all && !port && crewOnly ? all.filter((a) => CREW_DOC_KINDS.includes(a.kind)) : all),
+    [all, port, crewOnly],
+  );
 
   return (
     <section class="screen due">

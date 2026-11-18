@@ -12,7 +12,8 @@ const CRYPTO = { timeout: 20_000 };
 const crewRow = (page: Page, name: string) => page.getByRole('list', { name: 'Crew' }).getByRole('listitem').filter({ hasText: name });
 const documentList = (page: Page) => page.getByRole('list', { name: 'Documents' });
 const expiringList = (page: Page) => page.getByRole('list', { name: 'Expiring' });
-const alertsRegion = (page: Page) => page.getByRole('region', { name: 'Alerts' });
+/** Home's Due list: the three most urgent alerts. */
+const dueRegion = (page: Page) => page.getByRole('region', { name: 'Due', exact: true });
 const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
 const beforeNextPort = (page: Page) => page.getByRole('navigation', { name: 'Due views' }).getByRole('link', { name: 'Before next port' });
 
@@ -368,14 +369,17 @@ test('home: a crew certificate that runs out is an alert that opens the crew mem
   await addDocument(page, { document: 'Schengen visa', number: 'S-1', expiry: '2027-01-24' }); // 91 days out, no alert
 
   await page.goto('./#/');
-  const alerts = alertsRegion(page).getByRole('listitem');
+  const alerts = dueRegion(page).getByRole('listitem');
   await expect(alerts).toHaveCount(2);
   // Red first: the visa that has run out, then the medical that is about to.
-  await expect(alerts.first()).toContainText('Ivan PETROVIĆ');
-  await expect(alerts.first()).toContainText('US C1/D visa expired 2026-09-01');
-  await expect(alerts.first().getByText('Expired', { exact: true })).toBeVisible();
-  await expect(alerts.last()).toContainText('Medical fitness certificate expires 2026-12-24');
-  await expect(alerts.last().getByText('Expires soon', { exact: true })).toBeVisible();
+  await expect(alerts.first()).toContainText('US C1/D visa · Master I. PETROVIĆ');
+  await expect(alerts.first()).toContainText('Expired 1 Sep');
+  await expect(alerts.first().locator('.status')).toHaveText('54 d over');
+  await expect(alerts.first().locator('.status')).toHaveAttribute('data-tone', 'danger');
+  await expect(alerts.last()).toContainText('Medical fitness certificate · Master I. PETROVIĆ');
+  await expect(alerts.last()).toContainText('Expires 24 Dec');
+  await expect(alerts.last().locator('.status')).toHaveText('in 60 d');
+  await expect(alerts.last().locator('.status')).toHaveAttribute('data-tone', 'warn');
   await expectNoHorizontalScroll(page);
 
   // The alert opens the crew member, where the document is.

@@ -20,11 +20,11 @@ async function open(page: Page): Promise<void> {
 const importDocs = (page: Page, ...files: ReturnType<typeof pdf>[]) => page.getByLabel('Import documents').setInputFiles(files);
 const list = (page: Page) => page.getByRole('list', { name: 'Documents' });
 
-test('library: Home has a Library card', async ({ page }) => {
+test('library: Home has a Library tile', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  const card = page.getByRole('link', { name: /^Library/ });
-  await expect(card).toContainText('Your manuals and documents, searchable offline');
-  await card.click();
+  const tile = page.getByRole('navigation', { name: 'Quick actions' }).getByRole('link', { name: 'Library', exact: true });
+  await expect(tile).toHaveAttribute('href', '#/library');
+  await tile.click();
   await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
 });
 

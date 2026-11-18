@@ -10,6 +10,9 @@ const pill = (page: Page) => page.getByRole('banner').getByRole('button', { name
 
 const TILES = ['Crew', 'Crew documents', 'Certificates', 'Contracts & reliefs', 'Voyage', "Ship's time", 'Draft survey', 'Particulars'];
 
+/** The status line of each tile on a new ship (UTC+03:00) that has only its name. */
+const EMPTY_SHIP_STATUS = ['0 on board', '✓ None due', '✓ None due', '✓ None due', 'No voyage', 'UTC+03:00', 'No surveys', '15 to fill'];
+
 /** Each tile, the address it opens and the heading of that screen. */
 const SECTIONS: [string, RegExp, string][] = [
   ['Crew', /#\/ship\/crew$/, 'Crew'],
@@ -51,6 +54,10 @@ test('the Ship tab opens the hub of eight tiles, each opening its section with a
   await expect(page.getByRole('heading', { name: 'Ship', exact: true })).toBeVisible();
   await expect(hub(page).getByRole('link')).toHaveCount(8);
   for (const [i, name] of TILES.entries()) await expect(hub(page).getByRole('link').nth(i)).toHaveAccessibleName(name);
+  // Each tile's live status line is its description: here, of a new ship with nothing but its name.
+  for (const [i, status] of EMPTY_SHIP_STATUS.entries()) await expect(hub(page).getByRole('link').nth(i)).toHaveAccessibleDescription(status);
+  await expect(hub(page).locator('.hub-status[data-tone="ok"]')).toHaveCount(3);
+  await expect(hub(page).locator('.hub-status[data-tone="warn"]')).toHaveText(['15 to fill']);
   await expect(sectionBar(page)).toHaveCount(0);
 
   for (const [name, url, heading] of SECTIONS) {

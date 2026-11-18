@@ -175,7 +175,9 @@ test('navigation links, the Ship hub tiles, and unknown routes falling back to H
   await expect(page).toHaveURL(/#\/ship$/);
   const tiles = page.getByRole('navigation', { name: 'Ship sections', exact: true });
   const names = ['Crew', 'Crew documents', 'Certificates', 'Contracts & reliefs', 'Voyage', "Ship's time", 'Draft survey', 'Particulars'];
-  await expect(tiles.getByRole('link')).toHaveText(names);
+  // By accessible name: each tile also holds its status line, which is its description.
+  await expect(tiles.getByRole('link')).toHaveCount(names.length);
+  for (const [i, name] of names.entries()) await expect(tiles.getByRole('link').nth(i)).toHaveAccessibleName(name);
   for (const name of names) await expect(tiles.getByRole('link', { name, exact: true })).toBeVisible();
   await expect(main.getByRole('link', { name: 'Ship', exact: true })).toHaveAttribute('aria-current', 'page');
   await expectNoHorizontalScroll(page);
