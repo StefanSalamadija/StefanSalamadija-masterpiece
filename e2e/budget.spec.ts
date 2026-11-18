@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { makeBudgetXlsx } from './fixtures/makeBudgetXlsx';
-import { expectNoHorizontalScroll, expectTargets, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25 (October 2026).
 // Every wait is on what the page shows, never a fixed sleep.
@@ -1017,6 +1017,47 @@ test('budget trends: per pot and category across months, income planned vs recei
   await expect(category.getByRole('row').filter({ hasText: 'September 2026' })).toContainText('€400.00');
   await expectChartTable(page, 'Income planned and received');
   await expectChartTable(page, 'Balances over time');
+});
+
+/** Trends with a month of entries, so that its charts have lines and bars to draw. */
+async function openTrends(page: Page): Promise<void> {
+  await seed(page, 'budgetEntries', [
+    { id: 'e-1', kind: 'expense', date: '2026-09-03', amount: 40000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+    { id: 'e-3', kind: 'income', date: '2026-10-01', amount: 500000, incomeSource: 'salary', status: 'actual' },
+  ]);
+  await page.goto('./#/budget/trends');
+  await expect(page.getByRole('figure', { name: 'Balances over time' }).getByRole('img')).toBeVisible();
+}
+
+test('budget in Night red: the Trends charts and quick add are red and black', async ({ page }) => {
+  await openScenarioPlan(page);
+  await setTheme(page, 'Night red');
+  await openTrends(page);
+  await page.getByLabel('Category').selectOption({ label: 'Groceries, food & drink' });
+  await expect(page.getByRole('figure', { name: 'Groceries, food & drink by month' }).getByRole('img')).toBeVisible();
+  await expectRedOnly(page);
+  await page.goto('./#/budget/add');
+  await expect(pad(page)).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+});
+
+test('budget in Day: the Debts line is not drawn in the danger colour, and keeps its own dash', async ({ page }) => {
+  await openScenarioPlan(page);
+  await openTrends(page);
+  const look = await page.getByRole('figure', { name: 'Spending by pot' }).evaluate((figure) => {
+    const legend = [...figure.querySelectorAll('.chart-legend li')].find((li) => li.textContent?.trim() === 'Debts')!;
+    const line = getComputedStyle(legend.querySelector('.chart-line')!);
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--danger)';
+    document.body.append(probe);
+    const danger = getComputedStyle(probe).color;
+    probe.remove();
+    return { stroke: line.stroke, danger, dashed: line.strokeDasharray !== 'none' };
+  });
+  expect(look.stroke).not.toBe(look.danger);
+  expect(look.dashed).toBe(true);
 });
 
 test('budget: every chart and screen fits 360 px', async ({ page }) => {

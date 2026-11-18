@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 const row = (page: Page, id: string) => page.getByTestId(`unit-${id}`);
 
@@ -101,4 +101,19 @@ test('tools: Beaufort shows its knot band, from a speed or a force', async ({ pa
   await expect(page.getByText('Force 7: 28–33 kn')).toBeVisible();
   await row(page, 'bf').fill('6');
   await expect(page.getByText('Force 6: 22–27 kn')).toBeVisible();
+});
+
+test('tools in Night red: the list and a converter are red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/tools');
+  await expect(page.getByRole('list', { name: 'Tools' }).getByRole('link')).toHaveCount(6);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await page.goto('./#/tools/length');
+  await row(page, 'm').fill('12,5');
+  await expect(row(page, 'ft')).toHaveValue('41.01');
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

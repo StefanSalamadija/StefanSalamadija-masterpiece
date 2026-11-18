@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 import { strFromU8, unzipSync } from 'fflate';
 import * as XLSX from 'xlsx';
 import { FAKE_FINAL, FAKE_INITIAL, makeSurveyWorkbook, moveCell } from './fixtures/makeSurveyWorkbook';
-import { expectNoHorizontalScroll, freshApp, openShipSection, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, openShipSection, setTheme, setupShip } from './helpers';
 
 // The workbook, the ship and every survey figure here are made up (e2e/fixtures/makeSurveyWorkbook.ts). The expected
 // results are the engine's, pinned in src/survey/calc.test.ts: initial nett 4175.858 t, light ship 6850.4 t, final nett
@@ -157,6 +157,25 @@ test('survey: a draft outside the table gives the message and no result', async 
   await page.getByLabel('Aft port', { exact: true }).fill('4,2,1');
   await expect(page.getByText('Enter a number, e.g. 4,25.')).toBeVisible();
   await expect(result(page)).toContainText('Enter all six drafts and the density');
+});
+
+test('survey in Night red: a survey with its result is red and black, the figure in the display size of the mono font', async ({ page }) => {
+  await importShipData(page);
+  await setTheme(page, 'Night red');
+  await newInitial(page);
+  await enterReadings(page, FAKE_INITIAL);
+  await expect(result(page)).toContainText('−2674.542 t');
+  const figure = await result(page).locator('.survey-result-value').evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { size: style.fontSize, family: style.fontFamily.split(',')[0] };
+  });
+  expect(figure).toEqual({ size: '36px', family: '"IBM Plex Mono"' });
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+  await page.goto('./#/ship/survey');
+  await expect(surveys(page)).toHaveCount(1);
+  await expectRedOnly(page);
 });
 
 test('survey: works offline after a reload, at 360 px', async ({ page, context }) => {

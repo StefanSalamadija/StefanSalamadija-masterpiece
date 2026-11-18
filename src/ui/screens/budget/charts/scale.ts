@@ -1,3 +1,4 @@
+import { MONTH_NAMES } from '../../../../domain/dates';
 import type { Cents, Ym } from '../../../../domain/types';
 
 /* The arithmetic of the hand-made SVG charts: round axis ticks, linear scales, line paths and short labels. Pure. */
@@ -41,14 +42,17 @@ export function linePath(points: [number, number][]): string {
   return points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${r1(x)} ${r1(y)}`).join('');
 }
 
-/** At most `max` indexes of `n` items for axis labels, evenly from the first to the last. */
-export function tickIndexes(n: number, max: number): number[] {
+/**
+ * At most `max` indexes of `n` items for axis labels, evenly from the first to the last. A last label drawn from its end
+ * (`endAnchored`, the line charts) takes a whole step of room to its left, a centred one half a step.
+ */
+export function tickIndexes(n: number, max: number, endAnchored = false): number[] {
   if (n <= 0) return [];
   if (n <= max) return Array.from({ length: n }, (_, i) => i);
   const step = Math.ceil((n - 1) / (max - 1));
   const out: number[] = [];
   for (let i = 0; i < n - 1; i += step) out.push(i);
-  if (n - 1 - out[out.length - 1] < step / 2) out.pop();
+  if (n - 1 - out[out.length - 1] < (endAnchored ? step : step / 2)) out.pop();
   out.push(n - 1);
   return out;
 }
@@ -63,9 +67,7 @@ export function compactMoney(c: Cents): string {
   return `${c < 0 ? MINUS : ''}€${text}`;
 }
 
-const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /** `2026-10` → `Oct 26`. */
 export function shortMonth(ym: Ym): string {
-  return `${SHORT[Number(ym.slice(5, 7)) - 1]} ${ym.slice(2, 4)}`;
+  return `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(2, 4)}`;
 }

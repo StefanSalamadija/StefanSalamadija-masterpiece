@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
+import { expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip, skipProtectStep } from './helpers';
 import * as XLSX from 'xlsx';
 import { makeDocx } from './fixtures/makeDocx';
 import { makePdf } from './fixtures/makePdf';
@@ -307,6 +307,38 @@ test('library search: a meta-only match on an image is found by its tag, and the
   await expect(hit).toContainText('Matches the title');
   await search(page, 'nonexistentword');
   await expect(page.getByText('No documents match.')).toBeVisible();
+});
+
+test('library in Night red: the list, a pdf open with a search word marked, and an image are red and black', async ({ page }) => {
+  await open(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/library');
+  await importDocs(page, pdf('Ballast Manual.pdf', BALLAST), png());
+  await expect(list(page).getByRole('listitem')).toHaveCount(2);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  const results = await search(page, 'exchange');
+  await results.getByRole('listitem').filter({ hasText: 'Ballast Manual' }).getByRole('link', { name: /Page 1/ }).click();
+  const canvas = page.locator('.pdf-page[data-page="1"] canvas');
+  await expect(canvas).toBeVisible();
+  await expect(page.locator('.pdf-page[data-page="1"] .textLayer mark').first()).toHaveText('exchange');
+  expect(await canvas.evaluate((c) => getComputedStyle(c).filter)).not.toBe('none');
+  await expectRedOnly(page);
+  await page.goto('./#/library');
+  await list(page).getByRole('link', { name: /Pump room/ }).click();
+  await expect(page.locator('img.image-view')).toBeVisible();
+  await expectRedOnly(page);
+  await page.goto('./#/library/files');
+  await expect(page.getByLabel('Library file')).toBeAttached();
+  await expectRedOnly(page);
+});
+
+test('library: the links under the list are 48 px targets', async ({ page }) => {
+  await open(page);
+  for (const name of ['Recently deleted', 'Library files']) {
+    expect((await page.getByRole('link', { name, exact: true }).boundingBox())?.height, name).toBeGreaterThanOrEqual(48);
+  }
+  await expectTargets(page);
 });
 
 test('library search: the pdf viewer has no sideways scroll at 360 px', async ({ page }) => {

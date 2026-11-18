@@ -11,9 +11,7 @@
 }
 
 @media print {
-  /* The tokens, and until Task 8 the names used before them, are black on white in print. The old names follow
-     the tokens, as on screen (`--red` and `--on-red` are `--danger` and `--on-danger`: a danger fill prints as the accent's
-     does, and danger text in black); only the amber edges keep their own value. */
+  /* The tokens are black on white in print: a danger fill prints as the accent's does, and danger text in black. */
   :root,
   :root[data-theme] {
     color-scheme: light;
@@ -53,8 +51,6 @@
     --picker-filter: none;
     --shadow-2: none;
     --backdrop: transparent;
-
-    --amber: #ffffff;
   }
 
   /* Photos and page images print as they are, whatever the theme. */

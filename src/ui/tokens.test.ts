@@ -201,7 +201,7 @@ function declarations(css: string): Declaration[] {
           selector: stack[stack.length - 1],
           at: stack.slice(0, -1),
           prop: chunk.slice(0, colon).trim(),
-          value: chunk.slice(colon + 1).trim(),
+          value: chunk.slice(colon + 1).trim().replace(/\s*!important$/, ''), // a value is checked without its !important
           line: text.slice(0, start + lead).split('\n').length,
         });
       }
@@ -253,54 +253,138 @@ function rawColours(value: string): string[] {
   ];
 }
 
+/* The system colours of CSS Color 4, current and deprecated: the browser's own, which are bright in Night red (Task 7 m3). */
+const SYSTEM_COLOURS = new Set(`accentcolor accentcolortext activetext buttonborder buttonface buttontext canvas canvastext field fieldtext
+graytext highlight highlighttext linktext mark marktext selecteditem selecteditemtext visitedtext activeborder activecaption
+appworkspace background buttonhighlight buttonshadow captiontext inactiveborder inactivecaption inactivecaptiontext infobackground
+infotext menu menutext scrollbar threeddarkshadow threedface threedhighlight threedlightshadow threedshadow window windowframe
+windowtext`.split(/\s+/));
+
+/** Properties whose values name properties or keywords, not colours: `transition: background 0.2s` names no colour. */
+const NOT_COLOUR_PROPS = new Set(['transition', 'transition-property', 'will-change', 'appearance', '-webkit-appearance']);
+
+/** The colours a declaration names directly, system colours included. */
+function declaredColours(d: Declaration): string[] {
+  const words = (d.value.replace(/var\(--[\w-]+/g, ' ').replace(/'[^']*'|"[^"]*"/g, ' ').toLowerCase().match(/[a-z]+/g) ?? []);
+  return [...rawColours(d.value), ...(NOT_COLOUR_PROPS.has(d.prop) ? [] : words.filter((word) => SYSTEM_COLOURS.has(word)))];
+}
+
+/** The pdf.js text layer sizes its invisible text from the page's scale: its own calc(), kept as pdf.js writes it. */
+const PDFJS_TEXT = '.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent)';
+
+/** Inside `@media print` exactly (not `@media print, screen`): paper's black and white, and point sizes. */
+const inPrint = (d: Declaration) => d.at.includes('@media print');
+
 /**
- * The exceptions, each with its reason. Print is print's own token context (F21), and the dialog backdrop is exempt from the
- * colour rule (F21; it is the `--backdrop` token today). The logo keeps its geometry, and the clock keeps the one weight of
- * the bundled mono font.
+ * The exceptions, each with its reason.
+ * - Print is print's own context (F21): a print block may set black and white, and sizes in points.
+ * - The pdf.js text layer keeps its calc() font sizes, which follow the page's zoom.
+ * - The logo keeps its geometry, and the clock keeps the one weight of the bundled mono font.
  */
-const exempt = (d: Declaration, rule: 'colour' | 'radius' | 'weight') =>
-  (rule === 'colour' && (d.at.some((a) => /^@media print\b/.test(a)) || /::backdrop$/.test(d.selector)))
+const exempt = (d: Declaration, rule: 'colour' | 'size' | 'radius' | 'weight') =>
+  (rule === 'colour' && inPrint(d) && declaredColours(d).every((c) => /^#(000|000000|fff|ffffff)$/i.test(c)))
+  || (rule === 'size' && inPrint(d) && /^\d*\.?\d+pt$/.test(d.value))
+  || (rule === 'size' && d.selector === PDFJS_TEXT && d.value === 'calc(var(--text-scale-factor) * var(--font-height))')
   || (rule === 'radius' && d.selector === '.welcome-band svg' && d.value === '22%')
   || (rule === 'weight' && d.selector === '.clock' && d.value === '500');
 
-describe('theme.css outside its token blocks', () => {
-  const outside = declarations(themeCss).filter((d) => !isTokenBlock(d));
-  const offenders = (test: (d: Declaration) => boolean) => outside.filter(test).map((d) => `${d.line}: ${d.selector} { ${d.prop}: ${d.value} }`);
+/** The lazy piece stylesheets, each imported by its own chunk. */
+const PIECES = ['budget/budget.css', 'library/library.css', 'survey/survey.css', 'tools/tools.css'];
+const readCss = async (path: string) => new TextDecoder().decode(await fs.readFile(new URL(path, import.meta.url).pathname));
+const CSS_FILES: [name: string, css: string][] = [
+  ['theme.css', themeCss],
+  ...await Promise.all(PIECES.map(async (piece) => [piece.split('/')[1], await readCss(`./screens/${piece}`)] as [string, string])),
+];
 
-  it('is read whole', () => {
-    expect(outside.length).toBeGreaterThan(500);
-    expect(outside.some((d) => d.selector === 'dialog.dialog::backdrop')).toBe(true);
+for (const [file, css] of CSS_FILES) {
+  describe(`${file} outside its token blocks`, () => {
+    const outside = declarations(css).filter((d) => !isTokenBlock(d));
+    const offenders = (test: (d: Declaration) => boolean) => outside.filter(test).map((d) => `${d.line}: ${d.selector} { ${d.prop}: ${d.value} }`);
+
+    it('is read whole', () => {
+      if (file === 'theme.css') {
+        expect(outside.length).toBeGreaterThan(500);
+        expect(outside.some((d) => d.selector === 'dialog.dialog::backdrop')).toBe(true);
+      } else {
+        expect(outside.length).toBeGreaterThan(25);
+        expect(declarations(css).filter(isTokenBlock), 'a piece file defines no tokens').toEqual([]);
+      }
+    });
+
+    it('sets every font size with a --fs token, inherit or 1em', () => {
+      expect(offenders((d) => d.prop === 'font-size' && !exempt(d, 'size') && !onlyTokens(d.value, ['--fs-'], ['inherit', '1em']))).toEqual([]);
+    });
+
+    it('sets the font shorthand from tokens only', () => {
+      expect(offenders((d) => d.prop === 'font' && d.value !== 'inherit'
+        && !onlyTokens(d.value.replace('/', ' '), ['--fw-', '--fs-', '--lh-', '--font-'], []))).toEqual([]);
+    });
+
+    it('sets every font family with a --font token or inherit', () => {
+      expect(offenders((d) => d.prop === 'font-family' && !onlyTokens(d.value, ['--font-'], ['inherit']))).toEqual([]);
+    });
+
+    it('rounds every corner with an --r token, 0 or 50%', () => {
+      expect(offenders((d) => /^border(-[a-z]+)*-radius$/.test(d.prop) && !exempt(d, 'radius')
+        && !onlyTokens(d.value, ['--r-'], ['0', '50%']))).toEqual([]);
+    });
+
+    it('names no colour but transparent and currentColor', () => {
+      expect(offenders((d) => !exempt(d, 'colour') && declaredColours(d).length > 0)).toEqual([]);
+    });
+
+    it('sets every font weight with an --fw token', () => {
+      expect(offenders((d) => d.prop === 'font-weight' && !exempt(d, 'weight') && !onlyTokens(d.value, ['--fw-'], []))).toEqual([]);
+    });
+
+    it('spaces padding, margins and gaps with --sp tokens, 0, auto and the safe-area insets', () => {
+      expect(offenders((d) => /^(padding|margin)(-[a-z]+)*$|^(row-|column-)?gap$/.test(d.prop)
+        && !onlyTokens(d.value, ['--sp-'], ['0', 'auto'], true))).toEqual([]);
+    });
   });
+}
 
-  it('sets every font size with a --fs token, inherit or 1em', () => {
-    expect(offenders((d) => d.prop === 'font-size' && !onlyTokens(d.value, ['--fs-'], ['inherit', '1em']))).toEqual([]);
-  });
+describe('the budget charts', () => {
+  const budget = declarations(CSS_FILES.find(([file]) => file === 'budget.css')![1]).filter((d) => d.at.length === 0);
+  const series = (k: number, prop: string) => budget.find((d) => d.selector === `.series-${k}` && d.prop === prop)?.value;
 
-  it('sets the font shorthand from tokens only', () => {
-    expect(offenders((d) => d.prop === 'font' && d.value !== 'inherit'
-      && !onlyTokens(d.value.replace('/', ' '), ['--fw-', '--fs-', '--lh-', '--font-'], []))).toEqual([]);
-  });
-
-  it('rounds every corner with an --r token, 0 or 50%', () => {
-    expect(offenders((d) => /^border(-[a-z]+)*-radius$/.test(d.prop) && !exempt(d, 'radius')
-      && !onlyTokens(d.value, ['--r-'], ['0', '50%']))).toEqual([]);
-  });
-
-  it('names no colour but transparent and currentColor', () => {
-    expect(offenders((d) => !exempt(d, 'colour') && rawColours(d.value).length > 0)).toEqual([]);
-  });
-
-  it('sets every font weight with an --fw token', () => {
-    expect(offenders((d) => d.prop === 'font-weight' && !exempt(d, 'weight') && !onlyTokens(d.value, ['--fw-'], []))).toEqual([]);
-  });
-
-  it('spaces padding, margins and gaps with --sp tokens, 0, auto and the safe-area insets', () => {
-    expect(offenders((d) => /^(padding|margin)(-[a-z]+)*$|^(row-|column-)?gap$/.test(d.prop)
-      && !onlyTokens(d.value, ['--sp-'], ['0', 'auto'], true))).toEqual([]);
+  it('draw series 0 to 4 in --chart-1 to --chart-5, the first solid and the others each with a dash of its own', () => {
+    expect([0, 1, 2, 3, 4].map((k) => series(k, 'stroke'))).toEqual(['--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'].map((t) => `var(${t})`));
+    const dashes = [0, 1, 2, 3, 4].map((k) => series(k, 'stroke-dasharray'));
+    expect(dashes[0]).toBeUndefined();
+    expect(new Set(dashes.slice(1)).size).toBe(4);
+    expect(dashes.slice(1).every(Boolean)).toBe(true);
   });
 });
 
-describe('the checks on theme.css', () => {
+/* The names used before the tokens (Task 1's aliases), gone from every file. */
+const OLD_NAMES = /--(bg|surface|muted|amber|on-amber|red|on-red|radius|warning|border|bar-border)(?![\w-])/g;
+
+async function sourceFiles(dir: URL): Promise<URL[]> {
+  const entries = await fs.readdir(dir.pathname, { withFileTypes: true });
+  const nested = await Promise.all(entries.map((e) => (e.isDirectory() ? sourceFiles(new URL(`${e.name}/`, dir)) : Promise.resolve([new URL(e.name, dir)]))));
+  return nested.flat();
+}
+
+describe('the old variable names', () => {
+  it('are used by no file under src/', async () => {
+    const files = (await sourceFiles(new URL('../', import.meta.url))).filter((f) => /\.(css|ts|tsx|html)$/.test(f.pathname) && !f.pathname.endsWith('/ui/tokens.test.ts'));
+    expect(files.length).toBeGreaterThan(100);
+    const found: string[] = [];
+    for (const file of files) {
+      const text = new TextDecoder().decode(await fs.readFile(file.pathname));
+      for (const [name] of text.matchAll(OLD_NAMES)) found.push(`${file.pathname.split('/src/')[1]}: ${name}`);
+    }
+    expect(found).toEqual([]);
+  });
+
+  it('are told apart from the tokens', () => {
+    expect('var(--surface) var(--surface-1) --border: var(--bar-border) var(--red)'.match(OLD_NAMES)).toEqual(['--surface', '--border', '--bar-border', '--red']);
+    expect('var(--surface-0) var(--danger-bg) var(--bar-line) var(--r-md) var(--text-muted)'.match(OLD_NAMES)).toBeNull();
+  });
+});
+
+describe('the checks on the stylesheets', () => {
   it('find the raw values they ban', () => {
     expect(onlyTokens('calc(var(--sp-4) + env(safe-area-inset-left))', ['--sp-'], ['0'], true)).toBe(true);
     expect(onlyTokens('calc(-1 * var(--sp-2)) 0 var(--sp-2)', ['--sp-'], ['0'])).toBe(true);
@@ -313,5 +397,17 @@ describe('the checks on theme.css', () => {
     expect(rawColours('1px solid White')).toEqual(['white']);
     expect(rawColours('#fff')).toEqual(['#fff']);
     expect(rawColours("transparent currentColor 'red'")).toEqual([]);
+    const at = (prop: string, value: string, media: string[] = []): Declaration => ({ selector: '.x', at: media, prop, value, line: 1 });
+    expect(declaredColours(at('background', 'Canvas'))).toEqual(['canvas']);
+    expect(declaredColours(at('color', 'color-mix(in srgb, FieldText 50%, transparent)'))).toEqual(['fieldtext']);
+    expect(declaredColours(at('transition', 'background 0.2s'))).toEqual([]);
+    expect(exempt(at('stroke', '#000', ['@media print']), 'colour')).toBe(true);
+    expect(exempt(at('fill', '#ffffff', ['@media print']), 'colour')).toBe(true);
+    expect(exempt(at('stroke', '#999', ['@media print']), 'colour')).toBe(false);
+    expect(exempt(at('stroke', '#000', ['@media print, screen']), 'colour')).toBe(false);
+    expect(exempt(at('background', '#000', []), 'colour')).toBe(false);
+    expect(exempt(at('color', 'black', ['@media print']), 'colour')).toBe(false);
+    expect(exempt(at('font-size', '10pt', ['@media print']), 'size')).toBe(true);
+    expect(exempt(at('font-size', '10pt'), 'size')).toBe(false);
   });
 });

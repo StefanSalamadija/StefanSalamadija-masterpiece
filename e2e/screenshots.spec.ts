@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { FAKE_INITIAL, makeSurveyWorkbook } from './fixtures/makeSurveyWorkbook';
+import { makePdf } from './fixtures/makePdf';
 import { freshApp, setTheme, setupShip } from './helpers';
 import type { ThemeLabel } from './helpers';
 
@@ -113,5 +115,125 @@ for (const theme of THEMES) {
       await page.evaluate(() => document.fonts.ready.then(() => undefined));
       await page.screenshot({ path: `${DIR}/${screen.name}-${theme.id}.png`, fullPage: true });
     }
+  });
+}
+
+/** Writes made-up records straight into a table of the app's database. */
+function seed(page: Page, table: string, records: Record<string, unknown>[]): Promise<void> {
+  return page.evaluate(({ table, records }) => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('masterpiece');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction(table, 'readwrite');
+      const stamp = { createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-01T00:00:00.000Z', updatedBy: 'test', deleted: false, scope: 'personal' };
+      for (const r of records) tx.objectStore(table).put({ ...stamp, ...r });
+      tx.oncomplete = () => { open.result.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }), { table, records });
+}
+
+/** A made-up budget: a rotation, balances, a car loan and four months of spending in every pot, so that the charts draw. */
+async function madeUpBudget(page: Page): Promise<void> {
+  await page.goto('./#/budget');
+  await expect(page.getByRole('link', { name: /^Starting balances/ })).toBeVisible();
+  const settings = await page.evaluate(() => new Promise<Record<string, any>>((resolve) => {
+    const open = indexedDB.open('masterpiece');
+    open.onsuccess = () => {
+      const request = open.result.transaction('budgetSettings').objectStore('budgetSettings').getAll();
+      request.onsuccess = () => { open.result.close(); resolve(request.result[0]); };
+    };
+  }));
+  await seed(page, 'budgetSettings', [{
+    ...settings,
+    rotation: { salaryFrom: [{ ym: '2026-01', amount: 500000 }], periods: [{ signOn: '2026-07-01', signOff: '2027-02-28' }], patternOn: 8, patternOff: 4, paidNextMonth: false, paidAtHomePct: 0 },
+    assumptions: { ...settings.assumptions, yearlyReturnPct: 5, inflationPct: 2, withdrawalRatePct: 4, yearlySpendingCents: 2400000 },
+  }]);
+  await seed(page, 'budgetMonths', [{ id: 'm-2026-08', ym: '2026-08', potTargets: { needs: { fromOn: { kind: 'amount', value: 200000 } } }, categoryTargets: {} }]);
+  await seed(page, 'budgetCorrections', [
+    { id: 'c-bank', account: 'bank', ym: '2026-07', balance: 300000 },
+    { id: 'c-inv', account: 'investments', ym: '2026-07', balance: 2000000 },
+    { id: 'c-em', account: 'emergency', ym: '2026-07', balance: 600000 },
+  ]);
+  await seed(page, 'budgetDebts', [{ id: 'debt-car', name: 'Car loan', startBalance: 1200000, yearlyRatePct: 6, instalment: 60000, startYm: '2026-07' }]);
+  const entries: Record<string, unknown>[] = [];
+  ['2026-08', '2026-09', '2026-10', '2026-11'].forEach((ym, i) => {
+    const day = (d: number) => `${ym}-0${d}`;
+    entries.push(
+      { id: `e-g-${i}`, kind: 'expense', date: day(3), amount: 120000 + i * 15000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+      { id: `e-w-${i}`, kind: 'expense', date: day(4), amount: 40000 + (i % 2) * 30000, categoryId: 'budget-cat:wants:other-wants', status: 'actual' },
+      { id: `e-s-${i}`, kind: 'expense', date: day(5), amount: 100000, categoryId: 'budget-cat:savings:index-funds-etfs-e-g-s-p-500', status: 'actual' },
+      { id: `e-d-${i}`, kind: 'expense', date: day(6), amount: 60000, categoryId: 'budget-cat:debts:loan-instalment', debtId: 'debt-car', status: 'actual' },
+      { id: `e-i-${i}`, kind: 'income', date: day(1), amount: 500000 - (i === 2 ? 50000 : 0), incomeSource: 'salary', status: 'actual' },
+    );
+  });
+  await seed(page, 'budgetEntries', entries);
+}
+
+const BALLAST = [['Introduction and ballast exchange rates'], ['Pumps and valves'], ['The ballast exchange procedure for the tanks']];
+
+/**
+ * The piece screens (budget, library, survey, tools) with made-up content in them, as `<name>-<theme>.png`: the budget
+ * charts with data, quick add, a pdf open with a found word marked, a survey with its result and a converter in use.
+ */
+for (const theme of THEMES) {
+  test(`piece screens in ${theme.label}`, async ({ page }) => {
+    test.setTimeout(120_000);
+    await freshApp(page, { time: '2026-11-17T09:00:00Z' });
+    await setupShip(page);
+    await madeUpBudget(page);
+
+    await page.goto('./#/ship/survey/data');
+    await page.getByLabel('Import ship data from workbook').setInputFiles({
+      name: 'Made_up_draft_survey.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.from(makeSurveyWorkbook()),
+    });
+    await page.getByRole('button', { name: 'Save ship data' }).click();
+    await expect(page.getByText('Ship data saved.')).toBeVisible();
+
+    await page.goto('./#/library');
+    await page.getByLabel('Import documents').setInputFiles([{ name: 'Ballast Manual.pdf', mimeType: 'application/pdf', buffer: Buffer.from(makePdf(BALLAST)) }]);
+    await expect(page.getByRole('list', { name: 'Documents' }).getByRole('listitem')).toHaveCount(1);
+
+    await setTheme(page, theme.label);
+    const shot = async (name: string) => {
+      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await page.screenshot({ path: `${DIR}/${name}-${theme.id}.png`, fullPage: true });
+    };
+
+    await page.goto('./#/budget');
+    await expect(page.locator('.ring').first()).toBeVisible();
+    await shot('budget-dashboard');
+    await page.goto('./#/budget/trends');
+    await expect(page.getByRole('figure', { name: 'Balances over time' }).getByRole('img')).toBeVisible();
+    await page.getByLabel('Category').selectOption({ label: 'Groceries, food & drink' });
+    await shot('budget-trends');
+    await page.goto('./#/budget/forecast');
+    await expect(page.locator('figure svg').first()).toBeVisible();
+    await shot('budget-forecast');
+    await page.goto('./#/budget/add');
+    await expect(page.getByRole('group', { name: 'Amount pad' })).toBeVisible();
+    await shot('budget-add');
+
+    await page.goto('./#/library');
+    await page.getByLabel('Search library').fill('exchange');
+    await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
+    await shot('library-search');
+    await page.getByRole('list', { name: 'Search results' }).getByRole('link', { name: /Page 3/ }).click();
+    await expect(page.locator('.pdf-page[data-page="3"] .textLayer mark').first()).toBeVisible();
+    await shot('library-pdf');
+
+    await page.goto('./#/ship/survey');
+    await page.getByRole('button', { name: 'New initial survey' }).click();
+    const labels: Record<string, string> = { fP: 'Forward port', fS: 'Forward starboard', mP: 'Midships port', mS: 'Midships starboard', aP: 'Aft port', aS: 'Aft starboard' };
+    for (const [key, label] of Object.entries(labels)) await page.getByLabel(label, { exact: true }).fill(String(FAKE_INITIAL.drafts[key as keyof typeof FAKE_INITIAL.drafts]));
+    await page.getByLabel('Density (t/m³)').fill(String(FAKE_INITIAL.density));
+    await expect(page.locator('.survey-result-value')).toBeVisible();
+    await page.locator('.survey-result').scrollIntoViewIfNeeded();
+    await shot('survey-result');
+
+    await page.goto('./#/tools/length');
+    await page.getByTestId('unit-m').fill('12,5');
+    await expect(page.getByTestId('unit-ft')).toHaveValue('41.01');
+    await shot('tools-length');
   });
 }

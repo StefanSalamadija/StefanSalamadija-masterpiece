@@ -1,44 +1,41 @@
 /* The draft survey screens. Numbers line up (tabular figures); everything fits a 360 px phone. */
-.survey-actions, .survey-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.survey-row-actions { margin: 8px 0 0; }
-.survey-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.survey-link { display: grid; gap: 2px; color: inherit; text-decoration: none; }
-.survey-kind { font-weight: 600; }
-.survey-where { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.survey-figure { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+.survey-actions, .survey-row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-3) 0; }
+.survey-row-actions { margin: var(--sp-2) 0 0; }
+.survey-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.survey-link { display: grid; gap: var(--sp-1); color: inherit; text-decoration: none; }
+.survey-where { font-size: var(--fs-label); line-height: var(--lh-label); color: var(--text-muted); overflow-wrap: anywhere; }
+.survey-figure, .survey-drafts input, .survey-result-value, .survey-difference strong, .survey-table td, .survey-report-table td { font-family: var(--font-mono); }
+.survey-figure { font-variant-numeric: tabular-nums; }
 
-.survey-group { min-width: 0; margin: 16px 0; padding: 0; border: 0; }
-.survey-group legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
-.survey-drafts, .survey-pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
-.survey-drafts input { font-family: 'IBM Plex Mono', monospace; font-size: 20px; }
+.survey-group { min-width: 0; margin: var(--sp-4) 0; padding: 0; border: 0; }
+.survey-group legend { padding: 0; margin-bottom: var(--sp-2); }
+.survey-drafts, .survey-pairs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-3); }
+.survey-drafts input { font-size: var(--fs-title); }
 .survey .field input[inputmode='decimal'] { min-width: 0; width: 100%; font-variant-numeric: tabular-nums; }
 
-.survey-result { margin: 16px 0; }
+.survey-result { margin: var(--sp-4) 0; }
 .survey-result p { margin: 0; }
-.survey-result-label { font-weight: 600; }
-.survey-result-value { font-family: 'IBM Plex Mono', monospace; font-size: 34px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
-.survey-result-error { font-weight: 600; }
-.survey-result .warning { margin-top: 8px; }
-.survey-difference { margin-top: 8px !important; }
-.survey-difference strong { font-family: 'IBM Plex Mono', monospace; }
-.survey-lcf, .survey-shown { margin: 8px 0; }
+/* The result figure: the display size of the mono font, at its one weight. */
+.survey-result-value { font-size: var(--fs-display); line-height: var(--lh-display); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.survey-result .warning, .survey-difference { margin-top: var(--sp-2) !important; }
+.survey-lcf, .survey-shown { margin: var(--sp-2) 0; }
 
-.survey-calc h3 { margin: 16px 0 8px; }
-.survey-table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
-.survey-table th, .survey-table td { padding: 6px 6px 6px 0; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
-.survey-table th:first-child { text-align: left; font-weight: 500; white-space: normal; }
-.survey-table td { font-family: 'IBM Plex Mono', monospace; }
-.survey .table-scroll { max-width: 100%; overflow-x: auto; margin: 0 0 12px; }
-.survey-preview { margin: 16px 0; }
+.survey-calc h3 { margin: var(--sp-4) 0 var(--sp-2); }
+.survey-table { width: 100%; border-collapse: collapse; font-size: var(--fs-label); line-height: var(--lh-label); font-variant-numeric: tabular-nums; }
+.survey-table th, .survey-table td { padding: var(--sp-2) var(--sp-2) var(--sp-2) 0; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.survey-table th:first-child { text-align: left; white-space: normal; }
+.survey .table-scroll { max-width: 100%; overflow-x: auto; margin: 0 0 var(--sp-3); }
+.survey-preview { margin: var(--sp-4) 0; }
 .survey-preview p { overflow-wrap: anywhere; }
-.survey-warnings { padding-left: 18px; }
+.survey-warnings { padding-left: var(--sp-4); }
 
 /* The DS Report: drawn as the paper it becomes, with the base app's sheet styles (theme.css, print.css). */
-.survey-report { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); }
-.survey-report-table td { text-align: right; font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
-.survey-report-table th[scope='row'] { font-weight: 500; white-space: normal; }
-.survey-report-totals th[scope='row'] { font-weight: 600; }
+.survey-report { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-4); padding: var(--sp-4); border: var(--bw) solid var(--line); border-radius: var(--r-md); }
+.survey-report-table td { text-align: right; font-variant-numeric: tabular-nums; }
+.survey-report-table th[scope='row'] { white-space: normal; }
 .survey-report-remarks { margin: 0; overflow-wrap: anywhere; }
+.survey-table th:first-child, .survey-report-table th[scope='row'] { font-weight: var(--fw-medium); }
+.survey-kind, .survey-group legend, .survey-result-label, .survey-result-error, .survey-report-totals th[scope='row'] { font-weight: var(--fw-strong); }
 /* On paper the report drops its screen frame; its tables and signatures print by print.css's sheet rules. */
 @media print {
   .survey-report { margin: 0; padding: 0; border: 0; border-radius: 0; font-size: 10pt; }

@@ -44,7 +44,7 @@ export function LineChart({ name, months, series, shade, shadeLabel = 'Home mont
             <text class="chart-label" x={PAD.left - 4} y={y(t) + 3} text-anchor="end">{compactMoney(t)}</text>
           </g>
         ))}
-        {tickIndexes(n, 5).map((i) => (
+        {tickIndexes(n, 5, true).map((i) => (
           <text key={i} class="chart-label" x={x(i)} y={H - 6} text-anchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>{shortMonth(months[i])}</text>
         ))}
         {series.map((s, k) => (

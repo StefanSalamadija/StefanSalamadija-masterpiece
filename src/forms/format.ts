@@ -1,6 +1,5 @@
-import { formatDisplayDate, isValidIsoDate } from '../domain/dates';
+import { formatDisplayDate, isValidIsoDate, MONTH_NAMES as SHORT_MONTHS } from '../domain/dates';
 
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 const LONG_MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December',
 ] as const;

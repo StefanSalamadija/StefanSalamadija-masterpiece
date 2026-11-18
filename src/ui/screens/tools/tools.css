@@ -1,17 +1,16 @@
-.tool-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.tool-link { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 12px 14px; color: inherit; text-decoration: none; }
-.tool-title { font-weight: 600; }
-.tool-last { font-size: 12px; font-weight: 600; color: var(--accent); align-self: center; }
-.tool-detail { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
-.tool-rows { display: grid; gap: 12px; margin-top: 12px; }
-.tool-symbol { color: var(--muted); font-weight: 400; }
-.tool-note { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
-.tool-input { display: flex; gap: 8px; align-items: center; }
-.tool-input input { flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; }
+.tool-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-3); }
+.tool-link { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-3) var(--sp-4); color: inherit; text-decoration: none; }
+.tool-title, .tool-last, .tool-eta { font-weight: var(--fw-strong); }
+.tool-last { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--accent); align-self: center; }
+.tool-detail { grid-column: 1 / -1; font-size: var(--fs-label); line-height: var(--lh-label); color: var(--text-muted); }
+.tool-rows { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.tool-symbol, .tool-note { color: var(--text-muted); font-weight: var(--fw-regular); }
+.tool-note { display: block; font-size: var(--fs-caption); line-height: var(--lh-caption); }
+.tool-input, .tool-pick, .tool-label { display: flex; gap: var(--sp-2); align-items: center; }
+.tool-input input { flex: 1; min-width: 0; font-family: var(--font-mono); }
 .tool-copy { flex: none; min-width: 72px; }
-.tool-actions { margin-top: 16px; }
-.tool-calculated input { font-weight: 700; }
-.tool-pick { display: flex; gap: 8px; }
+.tool-actions, .tool-eta { margin-top: var(--sp-4); }
+.tool-calculated input { font-weight: var(--fw-strong); }
+.tool-pick { align-items: stretch; }
 .tool-pick select { flex: none; width: auto; max-width: 45%; }
-.tool-eta { margin-top: 16px; font-weight: 600; }
-.tool-label { display: flex; gap: 8px; align-items: baseline; font-size: 14px; }
+.tool-label { align-items: baseline; font-size: var(--fs-label); line-height: var(--lh-label); }

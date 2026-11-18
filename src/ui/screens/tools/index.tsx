@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { useRoute } from '../../../app/router';
+import { MONTH_NAMES } from '../../../domain/dates';
 import { formatOffset, shipOffsetAt, toShipLocal } from '../../../domain/shipTime';
 import { parseDecimal } from '../../../domain/numbers';
 import { beaufortRange, convertFrom, formatUnit, fromBase, parseUnitInput, toBase } from '../../../domain/units/convert';
@@ -343,10 +344,9 @@ const SDT_ROWS: SolverRow<SdtId>[] = [
   },
 ];
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** `YYYY-MM-DDTHH:mm` as `25 Oct 18:00`. */
 function dayTime(dateTime: string): string {
-  return `${Number(dateTime.slice(8, 10))} ${MONTHS[Number(dateTime.slice(5, 7)) - 1]} ${dateTime.slice(11, 16)}`;
+  return `${Number(dateTime.slice(8, 10))} ${MONTH_NAMES[Number(dateTime.slice(5, 7)) - 1]} ${dateTime.slice(11, 16)}`;
 }
 
 /** `/tools/sdt`: any two of speed, distance and time give the third, and the ETA from now in ship's time. */

@@ -220,25 +220,6 @@
   --bw: 2px;
 }
 
-/*
- * The names used before the tokens, kept as aliases so that the rules below keep working while the screens move onto the
- * tokens. Task 8 removes them.
- */
-:root {
-  --bg: var(--surface-0);
-  --surface: var(--surface-1);
-  --muted: var(--text-muted);
-  --bar-border: var(--bar-line);
-  --amber: #f2b33d; /* the old amber of the warning edges and the budget's fourth series, until Task 8 */
-  --red: var(--danger);
-  --on-red: var(--on-danger);
-  --radius: var(--r-md);
-}
-
-:root[data-theme='red'] {
-  --amber: var(--warn);
-}
-
 /* ---- Base ---- */
 
 :root {
@@ -854,7 +835,7 @@ textarea {
 .field-warning {
   margin: 0;
   padding-left: var(--sp-2);
-  border-left: 4px solid var(--amber);
+  border-left: 4px solid var(--warn);
   font-size: var(--fs-label);
   line-height: var(--lh-label);
 }
@@ -2265,7 +2246,7 @@ dialog.sheet {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
-  border-left-color: var(--amber);
+  border-left-color: var(--warn);
   overflow-wrap: anywhere;
 }
 
