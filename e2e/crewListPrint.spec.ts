@@ -560,3 +560,27 @@ test('crew list sheet in Night red: the screen is red and black, with 44 px cont
   await expectTargets(page);
   await expectInputFonts(page);
 });
+
+test('the printed sheet keeps the sizes it printed with before the design tokens', async ({ page }) => {
+  await setUpCrew(page);
+  await page.goto('./#/ship/crew/print');
+  await expect(page.locator('.sheet-table')).toBeVisible();
+  await page.emulateMedia({ media: 'print' });
+  const printed = await page.evaluate(() => {
+    const css = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+    return {
+      titleLineHeight: css('.sheet-title').lineHeight,
+      titleWeight: css('.sheet-title').fontWeight,
+      detailsRowGap: css('.sheet-details').rowGap,
+      signatureTop: css('.sheet-signature').marginTop,
+      stampPadding: css('.sheet-stamp').padding,
+      footerGap: css('.sheet-footer').columnGap,
+      footerSize: css('.sheet-footer').fontSize,
+    };
+  });
+  await page.emulateMedia({ media: null });
+  // 16 pt is 21.33 px, at a line height of 1.2.
+  expect({ ...printed, titleLineHeight: Math.round(parseFloat(printed.titleLineHeight) * 10) / 10 }).toEqual({
+    titleLineHeight: 25.6, titleWeight: '700', detailsRowGap: '2px', signatureTop: '44px', stampPadding: '6px 8px', footerGap: '6px', footerSize: '11px',
+  });
+});

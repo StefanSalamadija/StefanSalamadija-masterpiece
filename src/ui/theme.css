@@ -359,6 +359,12 @@ textarea:disabled {
   cursor: default;
 }
 
+/* Night red: a select's list of options is drawn by the browser in its own colours unless they are given. */
+:root[data-theme='red'] option {
+  background: var(--surface-0);
+  color: var(--text);
+}
+
 /* Night red: the browser draws a text box's resize grip in grey, which no style reaches; the box keeps its height instead. */
 :root[data-theme='red'] textarea {
   resize: none;
@@ -1634,12 +1640,12 @@ textarea {
 
 /* ---- Certificates, crew documents and reliefs: `.list-row`s, their details parted by a dot ---- */
 
-/* A detail is kept whole (a date would split at its hyphens); the line wraps between details. */
+/* A detail is kept whole (a date would split at its hyphens); the line wraps between details, after the dot. */
 .list-row-meta > span {
   display: inline-block;
 }
 
-.list-row-meta > span + span::before {
+.list-row-meta > span:not(:last-child)::after {
   content: ' · ';
   white-space: pre;
 }

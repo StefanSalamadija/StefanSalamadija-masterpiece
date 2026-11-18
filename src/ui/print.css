@@ -136,8 +136,28 @@
     font-size: 10pt;
   }
 
+  /* The sheet prints as it did before the design tokens (d10e002): the screen's frame moved onto the scale, the paper did not. */
   .sheet-title {
     font-size: 16pt;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  .sheet-details {
+    row-gap: 2px;
+  }
+
+  .sheet-signature {
+    margin-top: 44px;
+  }
+
+  .sheet-stamp {
+    padding: 6px 8px;
+  }
+
+  .sheet-footer {
+    gap: 6px;
+    font-size: 11px;
   }
 
   .sheet-table-wrap {

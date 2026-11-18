@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { makeBudgetXlsx } from './fixtures/makeBudgetXlsx';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectNoHorizontalScroll, expectTargets, freshApp, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25 (October 2026).
 // Every wait is on what the page shows, never a fixed sleep.
@@ -1099,4 +1099,21 @@ test('budget excel: a 3-month workbook is reviewed and imported, the months matc
   expect(book.SheetNames).toEqual(['Summary', 'August 2026', 'September 2026', 'October 2026']);
   const summary = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets.Summary, { header: 1 });
   expect(summary[1].slice(0, 8)).toEqual(['August 2026', 3200, 100, 1415.5, 800, 105, 300, 200]);
+});
+
+test('budget plan: each section is a whole-row link of 44 px or more, its title apart from its words', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget/plan');
+  const plan = page.getByRole('list', { name: 'Plan' });
+  const starting = plan.getByRole('link', { name: /Starting balances/ });
+  await expect(starting).toBeVisible();
+  // A list row: no bullets, no underline, and the title on a line of its own above its words.
+  const look = await starting.evaluate((a) => {
+    const title = a.querySelector('.list-row-title')!.getBoundingClientRect();
+    const meta = a.querySelector('.list-row-meta')!.getBoundingClientRect();
+    return { bullet: getComputedStyle(a.closest('li')!).listStyleType, underline: getComputedStyle(a).textDecorationLine, below: meta.top >= title.bottom - 1 };
+  });
+  expect(look).toEqual({ bullet: 'none', underline: 'none', below: true });
+  await expectTargets(page);
+  await expectNoHorizontalScroll(page);
 });
