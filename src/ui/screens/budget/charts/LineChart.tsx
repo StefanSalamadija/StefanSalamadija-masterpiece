@@ -4,11 +4,13 @@ import type { Cents, Ym } from '../../../../domain/types';
 import { ChartFrame, Legend } from './ChartFrame';
 import { compactMoney, linePath, niceTicks, scaleLinear, shortMonth, tickIndexes } from './scale';
 
-export interface Series { label: string; values: Cents[] }
+/** A series; `index` picks its colour and dash (`series-N`), else its place in the list does. */
+export interface Series { label: string; values: Cents[]; index?: number }
 
 const W = 320;
 const H = 180;
-const PAD = { left: 46, right: 8, top: 8, bottom: 22 };
+// The left pad fits the widest y label, "−€150k" or "−€1.5M" (43 units at 12 px, 600), with room to spare.
+const PAD = { left: 50, right: 8, top: 8, bottom: 22 };
 
 /**
  * A line chart of amounts by month: each series a line of its own (told apart by dash as well as colour, so that it
@@ -28,7 +30,7 @@ export function LineChart({ name, months, series, shade, shadeLabel = 'Home mont
     rows: months.map((ym, i) => [monthLabel(ym), ...series.map((s) => formatMoney(s.values[i] ?? 0)), ...(shade ? [shade[i] ? 'Home' : ''] : [])]),
   };
   const legend = (
-    <Legend items={[...series.map((s, i) => ({ label: s.label, kind: 'line' as const, index: i })),
+    <Legend items={[...series.map((s, i) => ({ label: s.label, kind: 'line' as const, index: s.index ?? i })),
       ...(shade?.some(Boolean) ? [{ label: shadeLabel, kind: 'shade' as const, index: 0 }] : [])]} />
   );
   return (
@@ -44,11 +46,11 @@ export function LineChart({ name, months, series, shade, shadeLabel = 'Home mont
             <text class="chart-label" x={PAD.left - 4} y={y(t) + 3} text-anchor="end">{compactMoney(t)}</text>
           </g>
         ))}
-        {tickIndexes(n, 5).map((i) => (
+        {tickIndexes(n, 5, true).map((i) => (
           <text key={i} class="chart-label" x={x(i)} y={H - 6} text-anchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>{shortMonth(months[i])}</text>
         ))}
         {series.map((s, k) => (
-          <path key={s.label} class={`chart-line series-${k}`} d={linePath(s.values.map((v, i) => [x(i), y(v)]))} />
+          <path key={s.label} class={`chart-line series-${s.index ?? k}`} d={linePath(s.values.map((v, i) => [x(i), y(v)]))} />
         ))}
       </svg>
     </ChartFrame>

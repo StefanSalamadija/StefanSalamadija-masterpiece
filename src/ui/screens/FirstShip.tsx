@@ -10,7 +10,7 @@ import { logoMode } from '../theme';
 
 /** The welcome screen, shown full screen while there is no ship: create the first ship, or import a backup. */
 export function FirstShip() {
-  const { db, settings } = useAppState();
+  const { db, theme } = useAppState();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [offset, setOffset] = useState(() => deviceOffsetMinutes());
@@ -43,7 +43,7 @@ export function FirstShip() {
   return (
     <main class="welcome">
       <div class="welcome-band">
-        <LogoMark size={120} mode={logoMode(settings.theme)} />
+        <LogoMark size={120} mode={logoMode(theme)} />
         <h1>Masterpiece</h1>
       </div>
       <div class="welcome-body">

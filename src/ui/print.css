@@ -11,25 +11,67 @@
 }
 
 @media print {
+  /* The tokens are black on white in print: a danger fill prints as the accent's does, and danger text in black. */
   :root,
   :root[data-theme] {
     color-scheme: light;
-    --bg: #ffffff;
-    --surface: #ffffff;
+    --surface-0: #ffffff;
+    --surface-1: #ffffff;
+    --surface-2: #ffffff;
     --line: #000000;
     --text: #000000;
-    --muted: #000000;
+    --text-muted: #000000;
     --bar-bg: #ffffff;
     --bar-text: #000000;
     --bar-muted: #000000;
+    --bar-line: #000000;
+    --bar-focus: #000000;
+    --nav-bg: #ffffff;
+    --nav-text: #000000;
     --nav-active: #000000;
+    --nav-pill: transparent;
     --accent: #000000;
     --on-accent: #ffffff;
-    --amber: #ffffff;
-    --on-amber: #000000;
-    --red: #ffffff;
-    --on-red: #000000;
-    --bar-border: #000000;
+    --ok: #000000;
+    --ok-bg: #ffffff;
+    --warn: #000000;
+    --warn-bg: #ffffff;
+    --danger: #000000;
+    --danger-bg: #ffffff;
+    --on-danger: #ffffff;
+    --focus: #000000;
+    --mark-bg: #ffffff;
+    --mark-text: #000000;
+    --chart-1: #000000;
+    --chart-2: #000000;
+    --chart-3: #000000;
+    --chart-4: #000000;
+    --chart-5: #000000;
+    --media-filter: none;
+    --picker-filter: none;
+    --shadow-2: none;
+    --backdrop: transparent;
+  }
+
+  /* Photos and page images print as they are, whatever the theme. */
+  img,
+  canvas {
+    filter: none;
+  }
+
+  /* A Due row prints as text, and its chip as its words in an outline, whatever its tone. */
+  .list-row {
+    border-color: #000000;
+    background: #ffffff;
+    color: #000000;
+  }
+
+  /* Overdue and due soon print as their words in an outline (a border, which prints without background graphics too). */
+  .status[data-tone='danger'],
+  .status[data-tone='warn'] {
+    border-color: #000000;
+    background: #ffffff;
+    color: #000000;
   }
 
   html,
@@ -40,6 +82,21 @@
 
   .app-header {
     position: static;
+  }
+
+  /* Home prints its card and its Due list; the room kept for the tiles (which do not print) is not kept on paper. */
+  .home {
+    min-height: 0;
+  }
+
+  /* The ship pill prints as the ship's name alone. */
+  .ship-pill {
+    padding: 0;
+    border: 0;
+  }
+
+  .ship-pill svg {
+    display: none;
   }
 
   .no-print {
@@ -75,8 +132,28 @@
     font-size: 10pt;
   }
 
+  /* The sheet prints as it did before the design tokens (d10e002): the screen's frame moved onto the scale, the paper did not. */
   .sheet-title {
     font-size: 16pt;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  .sheet-details {
+    row-gap: 2px;
+  }
+
+  .sheet-signature {
+    margin-top: 44px;
+  }
+
+  .sheet-stamp {
+    padding: 6px 8px;
+  }
+
+  .sheet-footer {
+    gap: 6px;
+    font-size: 11px;
   }
 
   .sheet-table-wrap {

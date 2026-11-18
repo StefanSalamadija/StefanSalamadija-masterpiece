@@ -21,7 +21,9 @@ import { BudgetFrame, useCurrentYm } from './Frame';
 import { entryLabel, monthLabel } from './quickAddView';
 
 const YM = /^\d{4}-(0[1-9]|1[0-2])$/;
-const BAND_TEXT: Record<CategoryBand, string | undefined> = { ok: 'On track', amber: 'Near target', red: 'Over target', none: undefined };
+const BAND_TEXT: Record<CategoryBand, string | undefined> = { ok: '✓ On track', amber: 'Near target', red: 'Over target', none: undefined };
+/** The status pill of a category's band: near target outlined, over target filled, on track a ✓ and the words. */
+const BAND_TONE = { ok: 'ok', amber: 'warn', red: 'danger', none: undefined } as const;
 
 /** An amount typed by the user, in cents above zero, or undefined. */
 function typed(text: string): number | undefined {
@@ -340,7 +342,7 @@ export function MonthView() {
               <li key={c.categoryId} class="budget-cat">
                 <span class="budget-row-name">{categoryName.get(c.categoryId)}</span>
                 <span class="budget-amount">{formatMoney(c.spent)}{c.target !== undefined ? ` of ${formatMoney(c.target)}` : ''}</span>
-                {BAND_TEXT[c.band] && <span class="badge band-badge budget-band" data-band={c.band}>{BAND_TEXT[c.band]}</span>}
+                {BAND_TEXT[c.band] && <span class="status" data-tone={BAND_TONE[c.band]} data-band={c.band}>{BAND_TEXT[c.band]}</span>}
               </li>
             ))}
           </ul>

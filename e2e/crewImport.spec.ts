@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 import { makeCrewXlsx } from './fixtures/makeCrewXlsx';
 import type { CrewSheetRow } from './fixtures/makeCrewXlsx';
 
@@ -721,4 +721,17 @@ test('a file without a names column opens Adjust columns with a plain message', 
   await page.getByLabel('Col A', { exact: true }).selectOption({ label: 'Full name' });
   await expect(page.getByRole('status')).toHaveText('Found 1 crew member. Check the list below and tap Import.');
   await expect(page.getByLabel('Header row')).toBeVisible();
+});
+
+test('crew import in Night red: the preview is red and black, with 44 px controls and 16 px inputs', async ({ page }, info) => {
+  const file = info.outputPath('crew.xlsx'); await makeCrewXlsx(file);
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew/import');
+  await page.getByLabel('Crew list file').setInputFiles(file);
+  await expect(previewRow(page, 'New')).toHaveCount(2);
+  await adjust(page);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

@@ -3,6 +3,7 @@ import { useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../../app/AppState';
 import { reportError } from '../../../app/errors';
 import type { BudgetData } from '../../../budget/forecast';
+import { MONTH_NAMES } from '../../../domain/dates';
 import { balancesByMonth } from '../../../budget/ledger';
 import type { Account } from '../../../budget/ledger';
 import { parseMoney } from '../../../budget/money';
@@ -78,12 +79,10 @@ export function typedWhole(text: string, min: number, max: number): number | und
   return Number.isInteger(value) && value >= min && value <= max ? value : 'invalid';
 }
 
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /** `2026-06-15` → `15 Jun 2026`. */
 export function dayLabel(date: string): string {
   const [y, m, d] = date.split('-');
-  return `${Number(d)} ${SHORT_MONTHS[Number(m) - 1]} ${y}`;
+  return `${Number(d)} ${MONTH_NAMES[Number(m) - 1]} ${y}`;
 }
 
 /**

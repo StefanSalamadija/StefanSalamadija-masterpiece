@@ -1,19 +1,17 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, holdWrites, releaseWrites, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, holdWrites, openMore, openShipSection, releaseWrites, setTheme, setupShip } from './helpers';
 
-const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
 const row = (page: Page, name: string) => shipList(page).getByRole('listitem').filter({ hasText: name });
 
 async function openParticulars(page: Page): Promise<void> {
-  await mainNav(page).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Particulars' }).click();
+  await openShipSection(page, 'Particulars');
   await expect(page.getByLabel('Ship name')).toBeVisible();
 }
 
 async function openProfiles(page: Page): Promise<void> {
-  await mainNav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+  await openMore(page, 'Profiles');
   await expect(page.getByRole('button', { name: 'New ship' })).toBeVisible();
 }
 
@@ -461,4 +459,14 @@ test('particulars: Enter does not save while a number is invalid', async ({ page
   await page.waitForTimeout(300); // a save, if one wrongly started, would be finished by now
   await expect(page.getByText('Saved')).toHaveCount(0);
   expect((await storedShips(page))[0].particulars.beam).toBe(32.2);
+});
+
+test('profiles in Night red: red and black, with 44 px controls', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await setTheme(page, 'Night red');
+  await openProfiles(page);
+  await expect(row(page, 'MV OCEAN STAR')).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

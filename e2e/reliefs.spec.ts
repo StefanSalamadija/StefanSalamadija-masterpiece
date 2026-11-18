@@ -1,14 +1,15 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
 const reliefList = (page: Page) => page.getByRole('list', { name: 'Reliefs' });
 const reliefRow = (page: Page, name: string) => reliefList(page).getByRole('listitem').filter({ hasText: name });
-const alertsRegion = (page: Page) => page.getByRole('region', { name: 'Alerts' });
-const alertItems = (page: Page) => alertsRegion(page).getByRole('listitem');
-const shipChips = (page: Page) => page.getByRole('navigation', { name: 'Ship sections' });
+/** Home's Due list: the three most urgent alerts. */
+const dueRegion = (page: Page) => page.getByRole('region', { name: 'Due', exact: true });
+const alertItems = (page: Page) => dueRegion(page).getByRole('listitem');
+const shipHub = (page: Page) => page.getByRole('navigation', { name: 'Ship sections', exact: true });
 
 interface NewMember {
   surname: string;
@@ -124,11 +125,16 @@ test('the Reliefs chip follows Crew, and the screen lists the onboard crew by co
   await page.getByRole('dialog').getByRole('button', { name: 'Sign off' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  await shipChips(page).getByRole('link', { name: 'Reliefs' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
+  // By accessible name: each tile also holds its status line, which is its description.
+  const tiles = ['Crew', 'Crew documents', 'Certificates', 'Contracts & reliefs', 'Voyage', "Ship's time", 'Draft survey', 'Particulars'];
+  await expect(shipHub(page).getByRole('link')).toHaveCount(tiles.length);
+  for (const [i, name] of tiles.entries()) await expect(shipHub(page).getByRole('link').nth(i)).toHaveAccessibleName(name);
+  await shipHub(page).getByRole('link', { name: 'Contracts & reliefs', exact: true }).click();
   await expect(page).toHaveURL(/#\/ship\/reliefs$/);
   await expect(page.getByRole('heading', { name: 'Reliefs' })).toBeVisible();
-  await expect(shipChips(page).getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Expiring', 'Certificates', 'Voyage', "Ship's time", 'Draft survey']);
-  await expect(shipChips(page).getByRole('link', { name: 'Reliefs' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Ship section', exact: true })).toContainText('Contracts & reliefs');
+  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(reliefList(page).getByRole('listitem')).toHaveText([/Soon SOONER/, /Late LATER/, /No NOLENGTH/]);
   await expect(reliefRow(page, 'Soon SOONER')).toContainText('Contract ends 2026-12-01');
   await expect(reliefRow(page, 'Soon SOONER')).toContainText('Onboard 86 days');
@@ -225,9 +231,11 @@ test('a contract that is near its end, or past the onboard limit, is an alert on
   await page.goto('./#/');
   await expect(alertItems(page)).toHaveCount(1);
   const alert = alertItems(page).first();
-  await expect(alert).toContainText('Ivan PETROVIĆ');
-  await expect(alert).toContainText('Contract ends 2026-11-01');
-  await expect(alert.locator('[data-band="amber"]')).toHaveText('Relief due soon');
+  await expect(alert).toContainText('Contract end · Master I. PETROVIĆ');
+  await expect(alert).toContainText('Relief not planned');
+  // The contract ends on 2026-11-01: due soon, in words.
+  await expect(alert.locator('.status')).toHaveText('in 7 d');
+  await expect(alert.locator('.status')).toHaveAttribute('data-tone', 'warn');
   await expect(alert.getByRole('link')).toHaveAttribute('href', '#/ship/reliefs');
   await expectNoHorizontalScroll(page);
 
@@ -242,12 +250,16 @@ test('a contract that is near its end, or past the onboard limit, is an alert on
   await expect(alertItems(page)).toHaveCount(3);
   // Red first, by date: the limit (2026-08-01) is reached before the contract ended (2026-09-01).
   await expect(alertItems(page)).toContainText([
-    'Over 11-month onboard limit since 2026-08-01',
-    'Contract ended 2026-09-01 — relief overdue',
-    'Contract ends 2026-11-01',
+    '11-month limit · Master S. LONG',
+    'Contract end · Master S. LONG',
+    'Contract end · Master I. PETROVIĆ',
   ]);
-  await expect(alertItems(page).nth(0).locator('[data-band="red"]')).toHaveText('Onboard limit reached');
-  await expect(alertItems(page).nth(1).locator('[data-band="red"]')).toHaveText('Relief overdue');
+  await expect(alertItems(page).nth(0)).toContainText('Reached 1 Aug');
+  await expect(alertItems(page).nth(0).locator('.status')).toHaveText('85 d over');   // the limit, 2026-08-01
+  await expect(alertItems(page).nth(0).locator('.status')).toHaveAttribute('data-tone', 'danger');
+  await expect(alertItems(page).nth(1).locator('.status')).toHaveText('54 d over');   // the contract, ended 2026-09-01
+  await expect(alertItems(page).nth(1).locator('.status')).toHaveAttribute('data-tone', 'danger');
+  await expect(alertItems(page).nth(2).locator('.status')).toHaveText('in 7 d');
 });
 
 test("the ship's own maximum months onboard changes the limit badge and the alert", async ({ page }) => {
@@ -268,7 +280,9 @@ test("the ship's own maximum months onboard changes the limit badge and the aler
   await expect(reliefRow(page, 'Ivan PETROVIĆ').getByText('Onboard limit reached')).toBeVisible();
   await page.goto('./#/');
   await expect(alertItems(page)).toHaveCount(1);
-  await expect(alertItems(page).first()).toContainText('Over 9-month onboard limit since 2026-10-25');
+  await expect(alertItems(page).first()).toContainText('9-month limit · Master I. PETROVIĆ');
+  await expect(alertItems(page).first()).toContainText('Reached 25 Oct');
+  await expect(alertItems(page).first().locator('.status')).toHaveAttribute('data-tone', 'danger');
 
   // A reload keeps it, and a blank box goes back to the default of 11 months.
   await page.reload();
@@ -354,7 +368,7 @@ test('long names and port names do not push the screens past 360 px', async ({ p
   await expectNoHorizontalScroll(page);
 
   await page.goto('./#/');
-  await expect(alertItems(page).filter({ hasText: longName })).toHaveCount(2);
+  await expect(alertItems(page).filter({ hasText: 'J. VAN DER BERG-PETROVIĆ-SCHMIDT-ALEXANDRAKOPOULOS' })).toHaveCount(2);
   await expectNoHorizontalScroll(page);
 
   await page.goto('./#/ship/reliefs');
@@ -378,9 +392,10 @@ test('a damaged maximum months onboard in the ship record is not used: 11 months
     await page.goto('./#/');
     await expect(alertItems(page), `Home with ${JSON.stringify(damaged)}`).toHaveCount(2);
     await expect(alertItems(page)).toContainText([
-      'Over 11-month onboard limit since 2026-08-01',
-      'Contract ended 2026-09-01 — relief overdue',
+      '11-month limit · Master I. PETROVIĆ',
+      'Contract end · Master I. PETROVIĆ',
     ]);
+    await expect(alertItems(page).first()).toContainText('Reached 1 Aug');
     await page.goto('./#/ship/reliefs');
     await expect(reliefList(page).getByRole('listitem'), `Reliefs with ${JSON.stringify(damaged)}`).toHaveCount(2);
     await expect(reliefRow(page, 'Ivan PETROVIĆ').getByText('Onboard limit reached')).toBeVisible();
@@ -398,4 +413,16 @@ test('a damaged maximum months onboard in the ship record is not used: 11 months
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   expect((await stored(page, 'ships'))[0]).toMatchObject({ maxMonthsOnboard: 9 });
+});
+
+test('reliefs in Night red: the list is red and black, with 44 px rows', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'EXAMPLE', givenNames: 'R.', signOn: '2025-09-01', contractMonths: '4' });
+  await addMember(page, { surname: 'SAMPLE', givenNames: 'J.' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/reliefs');
+  await expect(reliefRow(page, 'EXAMPLE')).toContainText('Relief overdue');
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

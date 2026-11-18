@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Download, Locator, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, openShipSection, setTheme, setupShip, skipProtectStep } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25. Sealing or opening a
 // backup derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow are given more time than
@@ -12,8 +12,16 @@ const CRYPTO = { timeout: 20_000 };
 const crewRow = (page: Page, name: string) => page.getByRole('list', { name: 'Crew' }).getByRole('listitem').filter({ hasText: name });
 const documentList = (page: Page) => page.getByRole('list', { name: 'Documents' });
 const expiringList = (page: Page) => page.getByRole('list', { name: 'Expiring' });
-const alertsRegion = (page: Page) => page.getByRole('region', { name: 'Alerts' });
+/** Home's Due list: the three most urgent alerts. */
+const dueRegion = (page: Page) => page.getByRole('region', { name: 'Due', exact: true });
 const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
+const beforeNextPort = (page: Page) => page.getByRole('navigation', { name: 'Due views' }).getByRole('link', { name: 'Before next port' });
+
+/** The Due screen is open on its Before next port view (once the Expiring screen). */
+async function expectBeforeNextPort(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: 'Due', exact: true })).toBeVisible();
+  await expect(beforeNextPort(page)).toHaveAttribute('aria-current', 'page');
+}
 
 interface NewDocument {
   /** The option of the select: a paper of the catalogue, or `Other`. */
@@ -130,7 +138,7 @@ test('documents: warning, expiring before next port, carry-over on re-join', asy
   // set up a ship, add crew PETROVIĆ Ivan (Master, sign-on 2026-06-01, passport and SB expiry 2030-01-01)
   await addMember(page, 'PETROVIĆ', 'Ivan');
   const row = crewRow(page, 'Ivan PETROVIĆ');
-  await expect(row.locator('[data-band]')).toHaveCount(0);
+  await expect(row.locator('[data-band]')).toHaveText('✓ Valid');
 
   // on his edit screen: Add document → Document 'Medical fitness certificate', Number 'M-1', Expiry date 2026-12-24 → Save
   await openMember(page, 'Ivan PETROVIĆ');
@@ -157,11 +165,11 @@ test('documents: warning, expiring before next port, carry-over on re-join', asy
   // Voyage: Next port 'Rotterdam', ETA (local) 2027-01-05T08:00 → Save
   await setNextPort(page, 'Rotterdam', '2027-01-05T08:00');
 
-  // #/ship/expiring shows 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
-  await page.goto('./#/ship/crew');
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Expiring' }).click();
-  await expect(page).toHaveURL(/#\/ship\/expiring$/);
-  await expect(page.getByRole('heading', { name: 'Expiring before next port' })).toBeVisible();
+  // The Crew documents tile, then Before next port, opens Due before the next port (#/due/port): 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
+  await openShipSection(page, 'Crew documents');
+  await page.getByRole('main').getByRole('link', { name: 'Before next port' }).click();
+  await expect(page).toHaveURL(/#\/due\/port$/);
+  await expectBeforeNextPort(page);
   await expect(page.getByText('Next port Rotterdam, ETA 2027-01-05')).toBeVisible();
   const expiringRow = expiringList(page).getByRole('listitem').filter({ hasText: 'Medical fitness certificate' });
   await expect(expiringRow).toHaveCount(1);
@@ -171,8 +179,8 @@ test('documents: warning, expiring before next port, carry-over on re-join', asy
   await expect(expiringRow.locator('[data-band="amber"]')).toHaveText('Expires soon');
   // The passport and the seaman's book expire in 2030, long after the ETA, so only the medical is listed.
   await expect(expiringList(page).getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Expiring' })).toHaveAttribute('aria-current', 'page');
-  // expectNoHorizontalScroll on the Expiring screen
+  await expect(beforeNextPort(page)).toHaveAttribute('aria-current', 'page');
+  // expectNoHorizontalScroll on the Before next port view
   await expectNoHorizontalScroll(page);
 
   // Sign off 2026-10-26 Santos; set As at 2026-10-26; Re-join sign-on 2026-11-01 Rotterdam
@@ -249,7 +257,7 @@ test('crew delete removes the documents with the contract', async ({ page }) => 
   expect(after.map((d) => d.number).sort()).toEqual(['M-1', 'T-1']);
 
   // Nothing of them is left to warn about, or to find.
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('Nothing expires in that time.')).toBeVisible();
   await page.goto(`./#/ship/crew/${member.id}/documents/${after[0].id}`);
   await expect(page.getByText('Crew member not found.')).toBeVisible();
@@ -361,14 +369,17 @@ test('home: a crew certificate that runs out is an alert that opens the crew mem
   await addDocument(page, { document: 'Schengen visa', number: 'S-1', expiry: '2027-01-24' }); // 91 days out, no alert
 
   await page.goto('./#/');
-  const alerts = alertsRegion(page).getByRole('listitem');
+  const alerts = dueRegion(page).getByRole('listitem');
   await expect(alerts).toHaveCount(2);
   // Red first: the visa that has run out, then the medical that is about to.
-  await expect(alerts.first()).toContainText('Ivan PETROVIĆ');
-  await expect(alerts.first()).toContainText('US C1/D visa expired 2026-09-01');
-  await expect(alerts.first().getByText('Expired', { exact: true })).toBeVisible();
-  await expect(alerts.last()).toContainText('Medical fitness certificate expires 2026-12-24');
-  await expect(alerts.last().getByText('Expires soon', { exact: true })).toBeVisible();
+  await expect(alerts.first()).toContainText('US C1/D visa · Master I. PETROVIĆ');
+  await expect(alerts.first()).toContainText('Expired 1 Sep');
+  await expect(alerts.first().locator('.status')).toHaveText('54 d over');
+  await expect(alerts.first().locator('.status')).toHaveAttribute('data-tone', 'danger');
+  await expect(alerts.last()).toContainText('Medical fitness certificate · Master I. PETROVIĆ');
+  await expect(alerts.last()).toContainText('Expires 24 Dec');
+  await expect(alerts.last().locator('.status')).toHaveText('in 60 d');
+  await expect(alerts.last().locator('.status')).toHaveAttribute('data-tone', 'warn');
   await expectNoHorizontalScroll(page);
 
   // The alert opens the crew member, where the document is.
@@ -385,8 +396,8 @@ test('expiring: with no next port ETA it shows the next 90 days, whatever the vo
   await addDocument(page, { document: 'Basic safety training', expiry: '2027-01-23' }); // 90 days out: in
   await addDocument(page, { document: 'Advanced fire fighting', expiry: '2027-01-24' }); // 91 days out: out
 
-  await page.goto('./#/ship/expiring');
-  await expect(page.getByRole('heading', { name: 'Expiring before next port' })).toBeVisible();
+  await page.goto('./#/due/port');
+  await expectBeforeNextPort(page);
   await expect(page.getByText('No next port ETA set — showing the next 90 days.')).toBeVisible();
   await expect(expiringList(page).getByRole('listitem')).toHaveCount(1);
   await expect(expiringList(page)).toContainText('Basic safety training expires 2027-01-23');
@@ -397,21 +408,27 @@ test('expiring: with no next port ETA it shows the next 90 days, whatever the vo
   await page.getByLabel('Next port', { exact: true }).fill('Rotterdam');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('No next port ETA set — showing the next 90 days.')).toBeVisible();
   await expect(expiringList(page).getByRole('listitem')).toHaveCount(1);
 
   await setNextPort(page, 'Rotterdam', '2027-01-24T00:30');
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('Next port Rotterdam, ETA 2027-01-24')).toBeVisible();
   await expect(page.getByText('No next port ETA set')).toHaveCount(0);
   await expect(expiringList(page).getByRole('listitem')).toHaveText([/Basic safety training/, /Advanced fire fighting/]);
+  // Advanced fire fighting is 91 days out, so still valid: a plain row with no tint, and ✓ Valid. Basic safety training is due soon.
+  const valid = expiringList(page).getByRole('listitem').filter({ hasText: 'Advanced fire fighting' });
+  await expect(valid.locator('.list-row')).not.toHaveAttribute('data-tone', /.*/);
+  await expect(valid.locator('[data-band]')).toHaveText('✓ Valid');
+  const soon = expiringList(page).getByRole('listitem').filter({ hasText: 'Basic safety training' });
+  await expect(soon.locator('.list-row')).toHaveAttribute('data-tone', 'warn');
   await expectNoHorizontalScroll(page);
 });
 
 test('expiring: says when nothing runs out, and a row opens the crew member', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('Nothing expires in that time.')).toBeVisible();
   await expect(expiringList(page)).toHaveCount(0);
 
@@ -419,7 +436,7 @@ test('expiring: says when nothing runs out, and a row opens the crew member', as
   const [member] = await stored(page, 'crew');
   await openMember(page, 'Ivan PETROVIĆ');
   await addDocument(page, { document: 'Yellow fever certificate', expiry: '2026-12-01' });
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(expiringList(page).getByRole('listitem')).toHaveCount(1);
   await expiringList(page).getByRole('link').click();
   await expect(page).toHaveURL(new RegExp(`#/ship/crew/${member.id}$`));
@@ -591,7 +608,7 @@ test('expiring: an ETA that has passed falls back to the next 90 days, and says 
 
   // The ETA is 5 days ago: a window that ended then would show nothing of what is coming.
   await setNextPort(page, 'Rotterdam', '2026-10-20T08:00');
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('ETA 2026-10-20 has passed — showing the next 90 days.')).toBeVisible();
   await expect(page.getByText('Next port Rotterdam')).toHaveCount(0);
   await expect(page.getByText('No next port ETA set')).toHaveCount(0);
@@ -601,7 +618,7 @@ test('expiring: an ETA that has passed falls back to the next 90 days, and says 
 
   // An ETA today has not passed.
   await setNextPort(page, 'Rotterdam', '2026-10-25T18:00');
-  await page.goto('./#/ship/expiring');
+  await page.goto('./#/due/port');
   await expect(page.getByText('Next port Rotterdam, ETA 2026-10-25')).toBeVisible();
   await expect(expiringList(page)).toHaveCount(0);
   await expect(page.getByText('Nothing expires in that time.')).toBeVisible();
@@ -654,4 +671,19 @@ test('crew edit: unsaved changes are not lost to Add document or a document row;
   await expect(saveFirst).toHaveCount(0);
   await documentList(page).getByRole('link').click();
   await expect(page.getByRole('heading', { name: 'Edit document' })).toBeVisible();
+});
+
+test('crew documents in Night red: the member\'s documents are red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, 'EXAMPLE', 'R.');
+  await openMember(page, 'R. EXAMPLE');
+  await addDocument(page, { document: 'Medical fitness certificate', number: 'M-1', expiry: '2020-01-01' });
+  await addDocument(page, { document: 'Other', name: 'Made-up course', expiry: '2031-01-01' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew');
+  await openMember(page, 'R. EXAMPLE');
+  await expect(documentList(page).getByRole('listitem')).toHaveCount(2);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

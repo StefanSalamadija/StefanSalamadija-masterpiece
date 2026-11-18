@@ -17,13 +17,13 @@ import { useFingerprintAvailable } from '../useFingerprintAvailable';
  * forgotten passcode means and what the lock is not (spec 4.10), before the passcode is set rather than after.
  */
 export function ProtectApp() {
-  const { db, settings } = useAppState();
+  const { db, theme } = useAppState();
   const fingerprint = useFingerprintAvailable() === true;
 
   return (
     <main class="lock">
       <div class="lock-card">
-        <LogoMark size={64} mode={logoMode(settings.theme)} />
+        <LogoMark size={64} mode={logoMode(theme)} />
         <h1>Protect Masterpiece</h1>
         <p class="lock-intro">{protectIntro(fingerprint)}</p>
         <div class="lock-notes">

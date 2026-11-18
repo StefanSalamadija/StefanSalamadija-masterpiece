@@ -1,5 +1,5 @@
 import type { RefObject } from 'preact';
-import { useId, useRef, useState } from 'preact/hooks';
+import { useEffect, useId, useRef, useState } from 'preact/hooks';
 import { useAppState } from '../../app/AppState';
 import { reportError } from '../../app/errors';
 import { exportAndShare } from '../../backup/exportFlow';
@@ -9,7 +9,7 @@ import { updateSettings } from '../../db/settings';
 import { listShips } from '../../db/ships';
 import { listSnapshots, restoreSnapshot, SNAPSHOTS_KEPT } from '../../db/snapshots';
 import type { SnapshotSummary } from '../../db/snapshots';
-import type { FieldError, Theme } from '../../domain/types';
+import type { FieldError, Settings, Theme } from '../../domain/types';
 import { AppLockSettings } from '../components/AppLockSettings';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Field } from '../components/Field';
@@ -19,6 +19,7 @@ import {
   parseReminderDays, REMINDER_ERROR, restoreExplanation, snapshotCountsText, snapshotDate, snapshotReason,
 } from '../settingsView';
 import { THEME_LABELS, THEMES } from '../theme';
+import { NIGHT_TIMES } from '../themeSchedule';
 import { useDialogAction } from '../useDialogAction';
 import { useLive } from '../useLive';
 
@@ -57,8 +58,8 @@ function BackupSection() {
   };
 
   return (
-    <div class="settings-section">
-      <h3>Backup</h3>
+    <div class="settings-section" id="settings-backup">
+      <h3 tabIndex={-1}>Backup</h3>
       <p class="helper-text">A backup is one encrypted file. Keep a copy somewhere other than this device.</p>
       <div class="form-actions">
         <button ref={fullButton} type="button" class="btn btn-primary" onClick={() => open('full')}>Export full backup</button>
@@ -279,39 +280,123 @@ function DeviceSection() {
   );
 }
 
+/** Shown, and nothing saved, when From and To are set to the same time: the window would be empty. */
+export const NIGHT_TIMES_CLASH = 'From and To must differ.';
+
 /**
- * The theme, as the header button has it: both read `settings.theme` and write it with `updateSettings`, and `AppState`
- * puts whatever is stored on `<html>` (and into the mirror for the first paint), so neither needs to tell the other.
- * It applies at once; there is nothing to save.
+ * The theme settings (spec §12.5): the base theme, and automatic night with its hours in ship's time. The header button
+ * reads and writes the same settings with `updateSettings`, and `AppState` puts the theme that results on `<html>` (and
+ * the mirror for the first paint), so neither needs to tell the other. Everything applies at once; there is nothing to
+ * save. Any change here ends a theme held with the header button (`themeOverride`).
  */
 function ThemeSection() {
   const { db, settings } = useAppState();
-  const id = useId();
+  const themeId = useId();
+  const fromId = useId();
+  const toId = useId();
+  const errorId = `${toId}-error`;
+  // Hours picked but not saved yet: while they are being written, or because From and To are the same.
+  const [draft, setDraft] = useState<{ from: string; to: string; changed: 'from' | 'to' }>();
+  const from = draft?.from ?? settings.nightFrom;
+  const to = draft?.to ?? settings.nightTo;
+  const clash = draft !== undefined && draft.from === draft.to ? draft.changed : undefined;
 
-  async function choose(theme: Theme): Promise<void> {
+  useEffect(() => {
+    // The picked hours are stored: from here on the settings are what the lists show.
+    if (draft && draft.from === settings.nightFrom && draft.to === settings.nightTo) setDraft(undefined);
+  }, [draft, settings.nightFrom, settings.nightTo]);
+
+  async function save(patch: Partial<Settings>): Promise<void> {
     try {
-      await updateSettings(db, { theme });
+      await updateSettings(db, { ...patch, themeOverride: undefined });
     } catch (err) {
+      setDraft(undefined); // not saved: the lists go back to what is stored
       reportError(err);
     }
   }
 
+  function chooseTime(changed: 'from' | 'to', value: string): void {
+    const next = { from, to, changed, [changed]: value };
+    setDraft(next);
+    if (next.from !== next.to) void save({ nightFrom: next.from, nightTo: next.to });
+  }
+
+  const timeSelect = (which: 'from' | 'to', id: string, label: string, value: string) => (
+    <div class="field">
+      <label for={id}>{label}</label>
+      <select
+        id={id} value={value}
+        aria-invalid={clash === which ? 'true' : undefined} aria-describedby={clash === which ? errorId : undefined}
+        onChange={(event) => chooseTime(which, event.currentTarget.value)}
+      >
+        {NIGHT_TIMES.map((time) => <option key={time} value={time}>{time}</option>)}
+      </select>
+      {clash === which && <p id={errorId} class="field-error" role="alert">{NIGHT_TIMES_CLASH}</p>}
+    </div>
+  );
+
   return (
-    <div class="settings-section">
-      <h3>Display</h3>
+    <div class="settings-section" id="settings-display">
+      <h3 tabIndex={-1}>Display</h3>
       <div class="field">
-        <label for={id}>Theme</label>
-        <select id={id} value={settings.theme} onChange={(event) => void choose(event.currentTarget.value as Theme)}>
+        <label for={themeId}>Theme</label>
+        <select id={themeId} value={settings.theme} onChange={(event) => void save({ theme: event.currentTarget.value as Theme })}>
           {THEMES.map((theme) => <option key={theme} value={theme}>{THEME_LABELS[theme]}</option>)}
         </select>
       </div>
-      <p class="helper-text">High contrast is for bright sun on deck. The button at the top of every screen changes the theme too. Printing is always black on white.</p>
+      <label class="check">
+        <input
+          type="checkbox" checked={settings.nightAuto}
+          onChange={(event) => {
+            setDraft(undefined);
+            void save({ nightAuto: event.currentTarget.checked });
+          }}
+        />
+        Night red automatically
+      </label>
+      {settings.nightAuto && (
+        <>
+          {timeSelect('from', fromId, "From (ship's time)", from)}
+          {timeSelect('to', toId, "To (ship's time)", to)}
+        </>
+      )}
+      <p class="helper-text">
+        Between From and To in ship's time the app is Night red. The button at the top of every screen changes the theme until
+        the next switch. Printing is always black on white.
+      </p>
     </div>
   );
 }
 
-/** Backup and restore, this device's preferences, and the version. */
+/** The section that `?at=` in the address asks for (`#/settings?at=lock`), following the address as it changes. */
+function useSectionAsked(): string | null {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = (): void => setHash(window.location.hash);
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  return new URLSearchParams(hash.split('?')[1] ?? '').get('at');
+}
+
+/**
+ * Backup and restore, this device's preferences, and the version. Opened with `?at=backup`, `?at=lock` or `?at=display`
+ * (from More), it scrolls that section into view and puts the focus on its heading.
+ */
 export function Settings() {
+  const at = useSectionAsked();
+  useEffect(() => {
+    const section = at ? document.getElementById(`settings-${at}`) : null;
+    const heading = section?.querySelector<HTMLElement>('h3');
+    if (!section || !heading) return;
+    // After the app has moved a new screen to the top, which it does once every screen has drawn.
+    const frame = requestAnimationFrame(() => {
+      heading.focus({ preventScroll: true });
+      section.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [at]);
+
   return (
     <section class="screen">
       <h2>Settings</h2>

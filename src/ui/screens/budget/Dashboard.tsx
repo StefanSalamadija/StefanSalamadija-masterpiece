@@ -19,11 +19,13 @@ const FUNDS_DAYS = 60;
 
 function StartCard() {
   return (
-    <ul class="alert-list" role="list" aria-label="Get started">
-      <li class="card alert-row">
-        <a class="alert-link" href="#/budget/plan/start">
-          <span class="alert-title">Starting balances</span>
-          <span class="alert-detail">Enter your bank balance, investments, emergency fund and debts to start</span>
+    <ul class="row-list" role="list" aria-label="Get started">
+      <li>
+        <a class="list-row" href="#/budget/plan/start">
+          <span class="list-row-text">
+            <span class="list-row-title">Starting balances</span>
+            <span class="list-row-meta">Enter your bank balance, investments, emergency fund and debts to start</span>
+          </span>
         </a>
       </li>
     </ul>
@@ -108,35 +110,45 @@ function DashboardBody({ data }: { data: PlanData }) {
         <p class="helper-text">{DISCLAIMER}</p>
       </section>
 
-      <ul class="alert-list budget-section no-print" role="list" aria-label="Budget">
-        <li class="card alert-row">
-          <a class="alert-link" href={`#/budget/month/${ym}`}>
-            <span class="alert-title">{monthLabel(ym)}</span>
-            <span class="alert-detail">Pots, entries, items to confirm and the surplus</span>
+      <ul class="row-list budget-section no-print" role="list" aria-label="Budget">
+        <li>
+          <a class="list-row" href={`#/budget/month/${ym}`}>
+            <span class="list-row-text">
+              <span class="list-row-title">{monthLabel(ym)}</span>
+              <span class="list-row-meta">Pots, entries, items to confirm and the surplus</span>
+            </span>
           </a>
         </li>
-        <li class="card alert-row">
-          <a class="alert-link" href="#/budget/catch-up">
-            <span class="alert-title">Catch up</span>
-            <span class="alert-detail">Several entries in a row, after days without entering</span>
+        <li>
+          <a class="list-row" href="#/budget/catch-up">
+            <span class="list-row-text">
+              <span class="list-row-title">Catch up</span>
+              <span class="list-row-meta">Several entries in a row, after days without entering</span>
+            </span>
           </a>
         </li>
-        <li class="card alert-row">
-          <a class="alert-link" href="#/budget/trends">
-            <span class="alert-title">Trends</span>
-            <span class="alert-detail">Pots and categories across months, income, balances over time</span>
+        <li>
+          <a class="list-row" href="#/budget/trends">
+            <span class="list-row-text">
+              <span class="list-row-title">Trends</span>
+              <span class="list-row-meta">Pots and categories across months, income, balances over time</span>
+            </span>
           </a>
         </li>
-        <li class="card alert-row">
-          <a class="alert-link" href="#/budget/import">
-            <span class="alert-title">Import from Excel</span>
-            <span class="alert-detail">Your budget workbook, a sheet per month</span>
+        <li>
+          <a class="list-row" href="#/budget/import">
+            <span class="list-row-text">
+              <span class="list-row-title">Import from Excel</span>
+              <span class="list-row-meta">Your budget workbook, a sheet per month</span>
+            </span>
           </a>
         </li>
-        <li class="card alert-row">
-          <a class="alert-link" href="#/budget/export">
-            <span class="alert-title">Export to Excel</span>
-            <span class="alert-detail">A month, a range or a year, a sheet per month</span>
+        <li>
+          <a class="list-row" href="#/budget/export">
+            <span class="list-row-text">
+              <span class="list-row-title">Export to Excel</span>
+              <span class="list-row-meta">A month, a range or a year, a sheet per month</span>
+            </span>
           </a>
         </li>
       </ul>

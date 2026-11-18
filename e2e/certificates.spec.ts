@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openMore, openShipSection, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -97,10 +97,13 @@ test('certificates list: overdue first, then due soon, then the rest by name; a 
   await expect(rows.nth(3)).toContainText('Certificate of Registry');
   await expect(rows.nth(4)).toContainText('Class Certificate (Hull)');
 
-  await expect(rows.locator('[data-band]')).toHaveCount(3);
+  await expect(rows.locator('[data-band]:not([data-band="ok"])')).toHaveCount(3);
   await expect(rows.nth(0).locator('[data-band="red"]')).toHaveText('Overdue');
   await expect(rows.nth(1).locator('[data-band="red"]')).toHaveText('Overdue');
   await expect(rows.nth(2).locator('[data-band="amber"]')).toHaveText('Due soon');
+  // Valid says so, in green (ruling U1); a certificate with no expiry has nothing to say.
+  await expect(rows.nth(3).locator('[data-band]')).toHaveCount(0);
+  await expect(rows.nth(4).locator('[data-band="ok"][data-tone="ok"]')).toHaveText('✓ Valid');
 
   // The number and the dates are shown year first, as kept.
   await expect(rows.nth(2)).toContainText('No. LL-1');
@@ -130,10 +133,9 @@ test('certificates list: the Add link and an empty register', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Delete' })).toHaveCount(0); // nothing to delete yet
 });
 
-test('certificates list: the ship nav leads to the register', async ({ page }) => {
+test('certificates list: the Ship hub leads to the register', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Certificates' }).click();
+  await openShipSection(page, 'Certificates');
   await expect(page).toHaveURL(/#\/ship\/certificates$/);
   await expect(page.getByRole('link', { name: 'Add certificate' })).toBeVisible();
 });
@@ -397,11 +399,10 @@ test('certificates: the screens and the dialog fit a 360 px phone, even with lon
 });
 
 test.describe('with the ship profiles', () => {
-  const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
   const shipRow = (page: Page, name: string) => page.getByRole('list', { name: 'Ships' }).getByRole('listitem').filter({ hasText: name });
 
   async function openProfiles(page: Page): Promise<void> {
-    await mainNav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+    await openMore(page, 'Profiles');
     await expect(page.getByRole('button', { name: 'New ship' })).toBeVisible();
   }
 
@@ -484,4 +485,16 @@ test.describe('with the ship profiles', () => {
     await shipRow(page, 'MV OCEAN STAR').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByRole('dialog')).toContainText('This removes 0 crew, 1 certificate, 0 voyages, 0 crew documents and 1 clock change from this device.');
   });
+});
+
+test('certificates in Night red: the register is red and black, with 44 px rows and controls', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addCertificate(page, { certificate: 'Class Certificate (Hull)', number: 'CL-9', expiryDate: '2020-01-01' });
+  await addCertificate(page, { certificate: 'Certificate of Registry', number: 'REG-1', expiryDate: '2031-01-01' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/certificates');
+  await expect(certificateList(page).getByRole('listitem')).toHaveCount(2);
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

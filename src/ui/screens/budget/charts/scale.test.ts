@@ -43,6 +43,13 @@ describe('tickIndexes', () => {
     expect(tickIndexes(1, 4)).toEqual([0]);
     expect(tickIndexes(0, 4)).toEqual([]);
   });
+
+  it('keeps a whole step before a last label drawn from its end (the line charts), so that two labels never overlap', () => {
+    expect(tickIndexes(12, 5)).toEqual([0, 3, 6, 9, 11]); // centred labels: two months apart is room enough
+    expect(tickIndexes(12, 5, true)).toEqual([0, 3, 6, 11]); // Sep 26 would run into Nov 26, which ends at the edge
+    expect(tickIndexes(13, 5, true)).toEqual([0, 3, 6, 9, 12]);
+    expect(tickIndexes(4, 5, true)).toEqual([0, 1, 2, 3]);
+  });
 });
 
 describe('compactMoney', () => {

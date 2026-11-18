@@ -285,7 +285,7 @@ describe('restoreSnapshot', () => {
   it('leaves the settings alone', async () => {
     const { db } = await shipWithCrew();
     const snap = await takeSnapshot(db, 'manual');
-    await updateSettings(db, { theme: 'night', backupReminderDays: 3, lastExportAt: '2026-10-20T10:00:00.000Z' });
+    await updateSettings(db, { theme: 'dark', backupReminderDays: 3, lastExportAt: '2026-10-20T10:00:00.000Z' });
     const before = await getSettings(db);
     at(1);
     await restoreSnapshot(db, snap.id);

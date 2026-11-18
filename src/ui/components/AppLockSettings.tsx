@@ -239,8 +239,9 @@ export function AppLockSettings() {
   const { pin } = settings;
 
   return (
-    <div class="settings-section">
-      <h3>App lock</h3>
+    <div class="settings-section" id="settings-lock">
+      {/* More's App lock row opens Settings here (`?at=lock`), and the focus is put on this heading. */}
+      <h3 tabIndex={-1}>App lock</h3>
       <p class="helper-text">{LOCK_LIMITS_NOTE}</p>
       <p class="helper-text">{LOCK_FORGOTTEN_NOTE}</p>
       <p class="helper-text">{LOCK_NO_REUSE_NOTE}</p>

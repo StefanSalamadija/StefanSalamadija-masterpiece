@@ -5,7 +5,8 @@ import { compactMoney, niceTicks, scaleLinear, tickIndexes } from './scale';
 
 const W = 320;
 const H = 170;
-const PAD = { left: 46, right: 8, top: 8, bottom: 22 };
+// The left pad fits the widest y label (see LineChart); the right pad, the last centred month label.
+const PAD = { left: 50, right: 10, top: 8, bottom: 22 };
 
 /**
  * A bar chart, plan against actual: for each label a group of bars, one per series (the plan an outline, the actual

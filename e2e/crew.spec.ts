@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openMore, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -151,14 +151,16 @@ test('crew: an expired passport shows Expired, measured at the as-at date', asyn
   await page.getByRole('button', { name: 'All' }).click(); // before the sign-on, so only All lists the contract
   await page.getByLabel('As at').fill('2026-01-01');
   await expect(row).toHaveCount(1);
-  await expect(row.locator('[data-band]')).toHaveCount(0);
+  await expect(row.locator('[data-band]')).toHaveText('✓ Valid');
 });
 
-test('crew: a member with valid documents has no badge', async ({ page }) => {
+test('crew: a member with valid documents shows ✓ Valid', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await addMember(page, { surname: 'PETROVIĆ' });
   await expect(crewRow(page, 'Ivan PETROVIĆ')).toContainText('Master');
-  await expect(crewRow(page, 'Ivan PETROVIĆ').locator('[data-band]')).toHaveCount(0);
+  const status = crewRow(page, 'Ivan PETROVIĆ').locator('[data-band]');
+  await expect(status).toHaveText('✓ Valid');
+  await expect(status).toHaveAttribute('data-tone', 'ok');
 });
 
 test('crew list: the Add and Import links, and an empty list', async ({ page }) => {
@@ -509,7 +511,7 @@ test('crew list: coming back from Edit restores the scroll position of a long li
 test('profiles: the delete dialog counts the crew of the ship', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await addMember(page, { surname: 'PETROVIĆ' });
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Profiles', exact: true }).click();
+  await openMore(page, 'Profiles');
   await page.getByRole('list', { name: 'Ships' }).getByRole('listitem').filter({ hasText: 'MV OCEAN STAR' })
     .getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('dialog')).toContainText('This removes 1 crew, 0 certificates, 0 voyages, 0 crew documents and 1 clock change from this device.');
@@ -755,20 +757,32 @@ test('crew list: Back and Forward through Edit keep the place in a long list', a
 test('crew list: Back to the screen before it, then the Crew link, restores the place', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   await seedCrew(page, 40);
-  const chip = (name: string) => page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name });
+  const tile = (name: string) => page.getByRole('navigation', { name: 'Ship sections', exact: true }).getByRole('link', { name, exact: true });
   const scrollY = () => page.evaluate(() => window.scrollY);
-  await page.goto('./#/ship/particulars');
-  await chip('Crew').click();
+  await page.goto('./#/ship');
+  await tile('Crew').click();
   const rows = crewList(page).getByRole('listitem');
   await expect(rows).toHaveCount(40);
 
   await page.evaluate(() => window.scrollTo(0, 1500));
   await expect.poll(scrollY).toBeCloseTo(1500, -1);
   await page.goBack();
-  await expect(page.getByLabel('Ship name')).toBeVisible();
+  await expect(tile('Particulars')).toBeVisible();
   await expect.poll(scrollY).toBe(0);
 
-  await chip('Crew').click();
+  await tile('Crew').click();
   await expect(rows).toHaveCount(40);
   await expect.poll(scrollY).toBeCloseTo(1500, -1);
+});
+
+test('crew list in Night red: only red and black, every control 44 px or more, inputs at 16 px', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await addMember(page, { surname: 'EXAMPLE', givenNames: 'R.', passportExpiry: '2026-01-10' });
+  await addMember(page, { surname: 'SAMPLE', givenNames: 'J.', rank: 'Chief Officer' });
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew');
+  await expect(crewRow(page, 'EXAMPLE')).toContainText('Expired');
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

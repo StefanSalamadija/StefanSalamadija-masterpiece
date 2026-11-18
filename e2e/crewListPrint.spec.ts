@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Download, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -201,7 +201,7 @@ test('print crew list and export to Excel', async ({ page }) => {
   expect(logoBox?.width).toBeCloseTo(16, 0);
   expect(logoBox?.height).toBeCloseTo(16, 0);
   expect(await footerLogo.locator('[fill]:not([fill="none"]), defs, linearGradient, radialGradient, clipPath').count()).toBe(0);
-  await expect(page.getByRole('img', { name: 'Masterpiece logo' })).toHaveCount(1);   // the header's; the footer's is not read out as a second one
+  await expect(page.getByRole('img', { name: 'Masterpiece logo' })).toHaveCount(0);   // none in the header any more, and the footer's is not read out
 
   // One checkbox per column, the default ones ticked.
   const columns = page.getByRole('group', { name: 'Columns' });
@@ -256,7 +256,7 @@ test('print crew list and export to Excel', async ({ page }) => {
   await expect(page.getByLabel('Passport no.')).toBeHidden();
   await expect(page.getByRole('banner')).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden();
-  await expect(page.getByRole('navigation', { name: 'Ship sections' })).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Ship section', exact: true })).toBeHidden();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('columnheader')).toHaveCount(10);
   await page.emulateMedia({ media: null });
@@ -549,4 +549,38 @@ test('the printed table fits the width of an A4 page in landscape, with 11 colum
   await page.emulateMedia({ media: 'print' });
   expect(await fits()).toBe(true);
   expect(await sheetOf(page).locator('td.col-date').first().evaluate((cell) => getComputedStyle(cell).whiteSpace)).toBe('nowrap');
+});
+
+test('crew list sheet in Night red: the screen is red and black, with 44 px controls and 16 px inputs', async ({ page }) => {
+  await setUpCrew(page);
+  await setTheme(page, 'Night red');
+  await page.goto('./#/ship/crew/print');
+  await expect(page.locator('.sheet-table')).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+});
+
+test('the printed sheet keeps the sizes it printed with before the design tokens', async ({ page }) => {
+  await setUpCrew(page);
+  await page.goto('./#/ship/crew/print');
+  await expect(page.locator('.sheet-table')).toBeVisible();
+  await page.emulateMedia({ media: 'print' });
+  const printed = await page.evaluate(() => {
+    const css = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+    return {
+      titleLineHeight: css('.sheet-title').lineHeight,
+      titleWeight: css('.sheet-title').fontWeight,
+      detailsRowGap: css('.sheet-details').rowGap,
+      signatureTop: css('.sheet-signature').marginTop,
+      stampPadding: css('.sheet-stamp').padding,
+      footerGap: css('.sheet-footer').columnGap,
+      footerSize: css('.sheet-footer').fontSize,
+    };
+  });
+  await page.emulateMedia({ media: null });
+  // 16 pt is 21.33 px, at a line height of 1.2.
+  expect({ ...printed, titleLineHeight: Math.round(parseFloat(printed.titleLineHeight) * 10) / 10 }).toEqual({
+    titleLineHeight: 25.6, titleWeight: '700', detailsRowGap: '2px', signatureTop: '44px', stampPadding: '6px 8px', footerGap: '6px', footerSize: '11px',
+  });
 });

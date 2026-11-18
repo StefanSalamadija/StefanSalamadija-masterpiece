@@ -268,10 +268,12 @@ function FormsLibrary({ shipId }: { shipId: string }) {
           <h3 id={draftsHeadingId}>In progress</h3>
           {drafts.length === 0 && <p class="empty">No drafts in progress.</p>}
           {drafts.length > 0 && (
-            <ul class="form-list" role="list" aria-label="In progress">
+            <ul class="row-list" role="list" aria-label="In progress">
               {drafts.map((row) => (
-                <li key={row.draft.id} class="card form-row">
-                  {row.template ? <a class="form-link" href={fillHref(row.template.id)}>{row.text}</a> : <span class="form-missing">{row.text}</span>}
+                <li key={row.draft.id}>
+                  {row.template
+                    ? <a class="list-row" href={fillHref(row.template.id)}><span class="list-row-title">{row.text}</span></a>
+                    : <span class="list-row form-missing"><span class="list-row-title">{row.text}</span></span>}
                 </li>
               ))}
             </ul>

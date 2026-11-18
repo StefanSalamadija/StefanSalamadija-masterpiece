@@ -32,26 +32,30 @@ function WhichDebtFlag() {
   const data = usePlanData();
   const count = data ? unassignedDebtTemplates(data.recurring, data.categories, data.debts).length : 0;
   if (count === 0) return null;
-  return <span class="alert-detail field-warning">Which debt? {count === 1 ? 'A Debts template does' : `${count} Debts templates do`} not say which debt it pays.</span>;
+  return <span class="list-row-meta field-warning">Which debt? {count === 1 ? 'A Debts template does' : `${count} Debts templates do`} not say which debt it pays.</span>;
 }
 
 function PlanIndex() {
   return (
     <BudgetFrame title="Plan">
-      <ul class="alert-list" role="list" aria-label="Plan">
+      <ul class="row-list" role="list" aria-label="Plan">
         {SECTIONS.map((s) => (
-          <li key={s.id} class="card alert-row">
-            <a class="alert-link" href={`#/budget/plan/${s.id}`}>
-              <span class="alert-title">{s.title}</span>
-              <span class="alert-detail">{s.detail}</span>
-              {s.id === 'recurring' && <WhichDebtFlag />}
+          <li key={s.id}>
+            <a class="list-row" href={`#/budget/plan/${s.id}`}>
+              <span class="list-row-text">
+                <span class="list-row-title">{s.title}</span>
+                <span class="list-row-meta">{s.detail}</span>
+                {s.id === 'recurring' && <WhichDebtFlag />}
+              </span>
             </a>
           </li>
         ))}
-        <li class="card alert-row">
-          <a class="alert-link" href="#/budget/plan/start">
-            <span class="alert-title">Starting balances</span>
-            <span class="alert-detail">The bank, investments, emergency fund, debts, funds and assets at a start month</span>
+        <li>
+          <a class="list-row" href="#/budget/plan/start">
+            <span class="list-row-text">
+              <span class="list-row-title">Starting balances</span>
+              <span class="list-row-meta">The bank, investments, emergency fund, debts, funds and assets at a start month</span>
+            </span>
           </a>
         </li>
       </ul>

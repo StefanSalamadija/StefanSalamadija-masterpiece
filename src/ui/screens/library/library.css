@@ -1,36 +1,40 @@
-.lib-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
-.lib-chips .chip { cursor: pointer; font-family: inherit; }
-.lib-tools { display: grid; gap: 0 12px; grid-template-columns: 1fr; }
-.lib-list { display: flex; flex-direction: column; gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
-.lib-row { display: flex; flex-direction: column; gap: 4px; }
-.lib-link { min-height: var(--target); display: flex; align-items: center; font-weight: 600; color: inherit; overflow-wrap: anywhere; }
-.lib-meta { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.lib-flag { font-size: 13px; font-weight: 600; color: var(--warning, var(--muted)); }
-.lib-section { margin-top: 24px; }
-.lib-section h3 { margin: 0 0 8px; font-size: 16px; }
-.lib-links { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; }
-.lib-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-.lib-row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.lib-part { display: block; min-height: var(--target); padding: 6px 0; color: inherit; overflow-wrap: anywhere; border-top: 1px solid var(--border, transparent); }
-.lib-row mark, .viewer mark { background: #ffd54a; color: #000; border-radius: 2px; }
+.lib-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
+.lib-chips .chip { cursor: pointer; }
+.lib-tools { display: grid; gap: 0 var(--sp-3); grid-template-columns: 1fr; }
+.lib-list { display: flex; flex-direction: column; gap: var(--sp-3); margin: 0 0 var(--sp-4); padding: 0; list-style: none; }
+.lib-row { display: flex; flex-direction: column; gap: var(--sp-1); }
+.lib-link { min-height: var(--target); display: flex; align-items: center; color: inherit; overflow-wrap: anywhere; }
+.lib-meta, .lib-flag { font-size: var(--fs-label); line-height: var(--lh-label); color: var(--text-muted); overflow-wrap: anywhere; }
+.lib-link, .lib-flag { font-weight: var(--fw-strong); }
+.lib-section { margin-top: var(--sp-5); }
+.lib-section h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-body); }
+.lib-links { display: flex; flex-wrap: wrap; gap: 0 var(--sp-4); margin: var(--sp-4) 0; }
+.lib-links a { min-height: var(--target); display: inline-flex; align-items: center; }
+.lib-actions, .lib-row-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-4) 0; }
+.lib-row-actions { margin: var(--sp-1) 0 0; }
+.lib-part { display: block; min-height: var(--target); padding: var(--sp-2) 0; color: inherit; overflow-wrap: anywhere; border-top: 1px solid var(--line); }
+.lib-row mark, .viewer mark { background: var(--mark-bg); color: var(--mark-text); border-radius: calc(var(--r-sm) / 4); }
 
 /* The viewer: a toolbar above a box that scrolls, so the page itself never scrolls sideways (even when zoomed in). */
-.viewer { margin: 0 0 16px; }
-.viewer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
-.viewer-bar .btn { min-width: var(--target); padding-inline: 12px; }
-.viewer-page { display: flex; align-items: center; gap: 6px; margin: 0; }
+.viewer { margin: 0 0 var(--sp-4); }
+.viewer-bar, .viewer-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-2); }
+.viewer-bar .btn { min-width: var(--target); padding-inline: var(--sp-3); }
+.viewer-page { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
 .viewer-page input { width: 4.5em; min-height: var(--target); text-align: center; }
 .viewer-find input { flex: 1 1 10em; min-width: 0; min-height: var(--target); }
-.viewer-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
-.viewer-tabs .chip[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-.viewer-box { position: relative; max-width: 100%; height: min(75vh, 720px); overflow: auto; background: var(--surface); border-radius: 8px; padding: 8px; box-sizing: border-box; }
+/* Drawn as the app's fields are, not by the browser (a grey box under Night red's dark color-scheme). */
+.viewer-bar input { padding: 0 var(--sp-2); border: 1.5px solid var(--text-muted); border-radius: var(--r-md); background: var(--surface-1); }
+.viewer-tabs .chip[aria-selected='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: var(--fw-strong); }
+.viewer-box { position: relative; max-width: 100%; height: min(75vh, 720px); overflow: auto; background: var(--surface-1); border-radius: var(--r-sm); padding: var(--sp-2); box-sizing: border-box; }
 .docx-view, .xlsx-view { overflow-wrap: anywhere; }
-.docx-view table, .xlsx-view table { border-collapse: collapse; margin: 8px 0; }
-.docx-view td, .xlsx-view td { border: 1px solid var(--muted); padding: 4px 8px; vertical-align: top; text-align: left; }
+.docx-view table, .xlsx-view table { border-collapse: collapse; margin: var(--sp-2) 0; }
+.docx-view td, .xlsx-view td { border: 1px solid var(--text-muted); padding: var(--sp-1) var(--sp-2); vertical-align: top; text-align: left; }
 .docx-view td p { margin: 0; }
+/* The page images and canvases are filtered by the base rule on img and canvas (--media-filter: black and red in Night red). */
 .image-view { display: block; max-width: none; height: auto; margin: 0 auto; }
-.pdf-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: max-content; min-width: 100%; }
-.pdf-page { position: relative; flex: none; margin-inline: auto; background: #fff; box-shadow: 0 0 0 1px var(--muted); }
+.pdf-pages { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); width: max-content; min-width: 100%; }
+/* Behind the canvas until it is drawn: white paper in Day and High contrast, never a white box in Night red. */
+.pdf-page { position: relative; flex: none; margin-inline: auto; background: var(--surface-0); box-shadow: 0 0 0 1px var(--text-muted); }
 .pdf-page-body, .pdf-page canvas { display: block; }
 
 /* The text layer of pdf.js (the parts of its pdf_viewer.css that the text layer needs): invisible text laid over the canvas, in place. */
@@ -47,6 +51,7 @@
   --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .textLayer .markedContent { display: contents; }
-.textLayer mark { color: transparent; background: rgb(255 213 74 / 0.55); border-radius: 2px; padding: 0; }
-.textLayer ::selection { background: rgb(0 0 255 / 0.25); color: transparent; }
+/* The found words and a selection lie over the page's own text, so they are see-through. */
+.textLayer mark { color: transparent; background: color-mix(in srgb, var(--mark-bg) 55%, transparent); border-radius: calc(var(--r-sm) / 4); padding: 0; }
+.textLayer ::selection { background: color-mix(in srgb, var(--accent) 25%, transparent); color: transparent; }
 .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }

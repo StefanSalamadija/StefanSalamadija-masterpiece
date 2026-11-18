@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { makeBudgetXlsx } from './fixtures/makeBudgetXlsx';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, freshApp, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25 (October 2026).
 // Every wait is on what the page shows, never a fixed sleep.
@@ -90,15 +90,15 @@ function seed(page: Page, table: string, records: Record<string, unknown>[]): Pr
   }), { table, records });
 }
 
-test('budget: Home has a Budget card and a "+ Expense" button, and the manifest a shortcut to quick add', async ({ page }) => {
+test('budget: the bottom bar has a Budget tab, Home a "+ Expense" tile, and the manifest a shortcut to quick add', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  const card = page.getByRole('link', { name: /^Budget/ });
-  await expect(card).toBeVisible();
-  await card.click();
+  await expect(page.getByRole('navigation', { name: 'Quick actions' }).getByRole('link', { name: '+ Expense' })).toHaveAttribute('href', '#/budget/add');
+  const tab = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Budget', exact: true });
+  await expect(tab).toBeVisible();
+  await tab.click();
   await expect(page).toHaveURL(/#\/budget$/);
   await expect(page.getByRole('navigation', { name: 'Budget sections' }).getByRole('link'))
     .toHaveText(['Dashboard', 'Month', 'Forecast', 'Net worth', 'Scenarios', 'Plan']);
-  await expect(page.getByRole('link', { name: '+ Expense' })).toBeVisible();
   const manifest = await (await page.request.get('./manifest.webmanifest')).json();
   expect(manifest.shortcuts).toEqual([{ name: 'Add expense', url: './#/budget/add' }]);
 });
@@ -1019,6 +1019,74 @@ test('budget trends: per pot and category across months, income planned vs recei
   await expectChartTable(page, 'Balances over time');
 });
 
+/** Trends with a month of entries, so that its charts have lines and bars to draw. */
+async function openTrends(page: Page): Promise<void> {
+  await seed(page, 'budgetEntries', [
+    { id: 'e-1', kind: 'expense', date: '2026-09-03', amount: 40000, categoryId: 'budget-cat:needs:groceries-food-drink', status: 'actual' },
+    { id: 'e-3', kind: 'income', date: '2026-10-01', amount: 500000, incomeSource: 'salary', status: 'actual' },
+  ]);
+  await page.goto('./#/budget/trends');
+  await expect(page.getByRole('figure', { name: 'Balances over time' }).getByRole('img')).toBeVisible();
+}
+
+test('budget in Night red: the Trends charts and quick add are red and black', async ({ page }) => {
+  await openScenarioPlan(page);
+  await setTheme(page, 'Night red');
+  await openTrends(page);
+  await page.getByLabel('Category').selectOption({ label: 'Groceries, food & drink' });
+  await expect(page.getByRole('figure', { name: 'Groceries, food & drink by month' }).getByRole('img')).toBeVisible();
+  await expectRedOnly(page);
+  await page.goto('./#/budget/add');
+  await expect(pad(page)).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
+});
+
+test('budget in Day: the Debts line is not drawn in the danger colour, and keeps its own dash', async ({ page }) => {
+  await openScenarioPlan(page);
+  await openTrends(page);
+  const look = await page.getByRole('figure', { name: 'Spending by pot' }).evaluate((figure) => {
+    const legend = [...figure.querySelectorAll('.chart-legend li')].find((li) => li.textContent?.trim() === 'Debts')!;
+    const line = getComputedStyle(legend.querySelector('.chart-line')!);
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--danger)';
+    document.body.append(probe);
+    const danger = getComputedStyle(probe).color;
+    probe.remove();
+    return { stroke: line.stroke, danger, dashed: line.strokeDasharray !== 'none' };
+  });
+  expect(look.stroke).not.toBe(look.danger);
+  expect(look.dashed).toBe(true);
+});
+
+test('budget in Day: Debts keeps one colour and one dash in both Trends charts', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetDebts', [{ id: 'debt-house', name: 'House loan', startBalance: 15000000, yearlyRatePct: 4, instalment: 80000, startYm: '2026-01' }]);
+  await openTrends(page);
+  const look = (name: string) => page.getByRole('figure', { name }).evaluate((figure) => {
+    const legend = [...figure.querySelectorAll('.chart-legend li')].find((li) => li.textContent?.trim() === 'Debts')!;
+    const line = getComputedStyle(legend.querySelector('.chart-line')!);
+    return { stroke: line.stroke, dash: line.strokeDasharray };
+  });
+  expect(await look('Balances over time')).toEqual(await look('Spending by pot'));
+});
+
+test('budget: a large negative y-axis label such as −€150k is drawn whole, inside the chart', async ({ page }) => {
+  await openScenarioPlan(page);
+  await seed(page, 'budgetDebts', [{ id: 'debt-house', name: 'House loan', startBalance: 25000000, yearlyRatePct: 4, instalment: 80000, startYm: '2026-01' }]);
+  const outside = () => page.locator('figure svg.chart-svg').evaluateAll((svgs) => svgs.flatMap((svg) => {
+    const width = (svg as SVGSVGElement).viewBox.baseVal.width;
+    return [...svg.querySelectorAll('text')].map((t) => ({ text: t.textContent, box: (t as SVGTextElement).getBBox() }))
+      .filter(({ box }) => box.x < 0 || box.x + box.width > width).map(({ text, box }) => `${text} ${box.x.toFixed(1)}..${(box.x + box.width).toFixed(1)}`);
+  }));
+  await page.goto('./#/budget/net-worth');
+  await expect(page.getByRole('figure', { name: 'Net worth by month' }).locator('text', { hasText: /^−€1\d\dk$/ }).first()).toBeVisible();
+  expect(await outside()).toEqual([]);
+  await openTrends(page);
+  expect(await outside()).toEqual([]);
+});
+
 test('budget: every chart and screen fits 360 px', async ({ page }) => {
   await openScenarioPlan(page);
   await seed(page, 'budgetScenarios', [{ id: 'sc-long', name: 'A scenario with a long name about a car and a longer contract', changes: [
@@ -1099,4 +1167,21 @@ test('budget excel: a 3-month workbook is reviewed and imported, the months matc
   expect(book.SheetNames).toEqual(['Summary', 'August 2026', 'September 2026', 'October 2026']);
   const summary = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets.Summary, { header: 1 });
   expect(summary[1].slice(0, 8)).toEqual(['August 2026', 3200, 100, 1415.5, 800, 105, 300, 200]);
+});
+
+test('budget plan: each section is a whole-row link of 44 px or more, its title apart from its words', async ({ page }) => {
+  await freshApp(page); await setupShip(page);
+  await page.goto('./#/budget/plan');
+  const plan = page.getByRole('list', { name: 'Plan' });
+  const starting = plan.getByRole('link', { name: /Starting balances/ });
+  await expect(starting).toBeVisible();
+  // A list row: no bullets, no underline, and the title on a line of its own above its words.
+  const look = await starting.evaluate((a) => {
+    const title = a.querySelector('.list-row-title')!.getBoundingClientRect();
+    const meta = a.querySelector('.list-row-meta')!.getBoundingClientRect();
+    return { bullet: getComputedStyle(a.closest('li')!).listStyleType, underline: getComputedStyle(a).textDecorationLine, below: meta.top >= title.bottom - 1 };
+  });
+  expect(look).toEqual({ bullet: 'none', underline: 'none', below: true });
+  await expectTargets(page);
+  await expectNoHorizontalScroll(page);
 });

@@ -278,11 +278,22 @@ export interface LockoutState { failures: number; lockedUntil?: string }
 /** A fingerprint (WebAuthn platform credential) registered on this device. Verified locally; there is no server. */
 export interface FingerprintCredential { credentialId: string /* base64url */; publicKey: string /* SPKI, base64 */; alg: -7 | -257 }
 export interface PinSettings { hash: PinHash; relockMinutes: number; lockout: LockoutState; fingerprint?: FingerprintCredential }
-export type Theme = 'day' | 'night' | 'contrast';
+/** The four themes (spec §6). Before piece 7 Dark was stored as `night`: `readTheme` reads it as `dark`. */
+export type Theme = 'day' | 'dark' | 'red' | 'contrast';
 export interface Settings { key: 'device'; deviceId: string; deviceName: string; activeShipId?: string; backupReminderDays: number;
   lastExportAt?: string; lastSync: Record<string, string>; theme: Theme; pin?: PinSettings; firstExportDone?: boolean;
   /** The "Protect Masterpiece" step was answered (lock turned on, or skipped), so it is not offered again. */
-  lockPrompted?: boolean }
+  lockPrompted?: boolean;
+  /**
+   * Automatic night (spec §8, §12.5): between `nightFrom` and `nightTo` (`HH:MM`, ship's time; the window may cross midnight)
+   * the app is Night red. `theme` stays the base theme, shown outside the window.
+   */
+  nightAuto: boolean; nightFrom: string; nightTo: string;
+  /**
+   * A theme chosen with the header button while automatic night is on. It holds until `until`, the ship-local
+   * `YYYY-MM-DDTHH:mm` of the next switch, and is then cleared (the key itself goes).
+   */
+  themeOverride?: { theme: Theme; until: string } }
 export type SnapshotReason = 'before-import' | 'before-update' | 'manual';
 export interface Snapshot { id: string; createdAt: string; reason: SnapshotReason; note?: string; data: Tables }
 export type Band = 'none' | 'ok' | 'amber' | 'red';

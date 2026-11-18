@@ -312,7 +312,7 @@ export function QuickAdd() {
   const { path, params } = useRoute();
   return (
     <BudgetFrame title="Quick add" addButton={false}>
-      <p class="qa-links"><a href="#/budget/catch-up">Catch up</a> — several entries in a row</p>
+      <p class="qa-links"><a class="chip" href="#/budget/catch-up">Catch up</a> for several entries in a row</p>
       <EntryPad
         key={`${path}/${params.id ?? ''}`} income={path === '/budget/add/income'} sameAs={params.id}
         onSaved={(entry) => navigate(`/budget/month/${ymOf(entry.date)}`)}

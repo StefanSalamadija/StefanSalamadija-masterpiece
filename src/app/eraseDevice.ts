@@ -1,14 +1,15 @@
 import { forgetPassword } from '../backup/passwordCache';
 import type { MasterpieceDB } from '../db/schema';
-import { THEME_STORAGE_KEY } from '../ui/theme';
+import { NIGHT_STORAGE_KEY, THEME_STORAGE_KEY } from '../ui/theme';
 
 /** What the erase dialog says while another open page keeps the database from being deleted. The erase cannot be cancelled by then. */
 export const ERASE_WAITING_MESSAGE = 'The erase will finish when Masterpiece is closed in your other tabs.';
 
-/** The traces of the data that live outside the database: the mirrored theme, and the backup password held in memory. */
+/** The traces of the data that live outside the database: the mirrored theme settings, and the backup password held in memory. */
 function forgetLocalTraces(): void {
   try {
     localStorage.removeItem(THEME_STORAGE_KEY);
+    localStorage.removeItem(NIGHT_STORAGE_KEY);
   } catch {
     // Storage blocked: only the first paint of the next start is affected.
   }
@@ -17,7 +18,7 @@ function forgetLocalTraces(): void {
 
 /**
  * "Erase everything" on the lock screen: deletes the whole database (every ship, snapshot and setting, the passcode and
- * the fingerprint key with them), the mirrored theme and the backup password held in memory. The connection is closed
+ * the fingerprint key with them), the mirrored theme settings and the backup password held in memory. The connection is closed
  * first, so that the delete is not blocked by the app's own connection. The caller reloads the page afterwards.
  *
  * If the delete fails the database is opened again and nothing else is touched, so the app still works.

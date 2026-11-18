@@ -3,7 +3,8 @@ import { useEffect } from 'preact/hooks';
 import { pinForLock } from '../security/lockState';
 import { ErrorToast } from '../ui/components/ErrorToast';
 import { Header } from '../ui/components/Header';
-import { Nav, ShipNav } from '../ui/components/Nav';
+import { Nav } from '../ui/components/Nav';
+import { SectionBar } from '../ui/components/SectionBar';
 import { UpdateBanner } from '../ui/components/UpdateBanner';
 import { CertificateEdit } from '../ui/screens/CertificateEdit';
 import { Certificates } from '../ui/screens/Certificates';
@@ -12,7 +13,6 @@ import { CrewDocumentEdit } from '../ui/screens/CrewDocumentEdit';
 import { CrewEdit } from '../ui/screens/CrewEdit';
 import { CrewImport } from '../ui/screens/CrewImport';
 import { CrewListPrint } from '../ui/screens/CrewListPrint';
-import { Expiring } from '../ui/screens/Expiring';
 import { FirstShip } from '../ui/screens/FirstShip';
 import { FormSetup } from '../ui/screens/FormSetup';
 import { Forms } from '../ui/screens/Forms';
@@ -22,7 +22,6 @@ import { Particulars } from '../ui/screens/Particulars';
 import { Profiles } from '../ui/screens/Profiles';
 import { ProtectApp } from '../ui/screens/ProtectApp';
 import { Reliefs } from '../ui/screens/Reliefs';
-import { Settings } from '../ui/screens/Settings';
 import { ShipTime } from '../ui/screens/ShipTime';
 import { Voyage } from '../ui/screens/Voyage';
 import { AppStateProvider, useAppState } from './AppState';
@@ -32,6 +31,16 @@ import { useRoute } from './router';
 import type { RoutePath } from './router';
 import { scrollMemory, scrollToWhenTallEnough } from './scrollMemory';
 import { useAppLock } from './useAppLock';
+
+/** The Ship hub and More: small chunks of their own, loaded on demand, so the main chunk stays as small as it was. */
+const ShipHub = lazyScreen(() => import('../ui/screens/ShipHub').then((m) => m.ShipHub));
+const More = lazyScreen(() => import('../ui/screens/More').then((m) => m.More));
+
+/** Settings (backup, snapshots, the device, the app lock and the display): a chunk of its own, loaded on demand. */
+const Settings = lazyScreen(() => import('../ui/screens/Settings').then((m) => m.Settings));
+
+/** The Due screen (all due, before the next port, and the crew documents): a chunk of its own, loaded on demand. */
+const Due = lazyScreen(() => import('../ui/screens/Due').then((m) => m.Due));
 
 /** Importing a backup: its screen, the backup service and the import review are a chunk of their own, loaded on demand. */
 const ImportBackup = lazyScreen(() => import('../ui/screens/ImportBackup').then((m) => m.ImportBackup));
@@ -47,8 +56,13 @@ const survey = (name: keyof SurveyScreens) => lazyScreen(() => import('../ui/scr
 /** The screens built so far. A route with no screen yet (or an unknown one) shows Home. */
 const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/': Home,
+  '/due': Due,
+  '/due/port': Due,
+  '/more': More,
+  '/ship': ShipHub,
   '/ship/particulars': Particulars,
   '/ship/crew': Crew,
+  '/ship/crew-documents': Due,
   '/ship/crew/new': CrewEdit,
   '/ship/crew/import': CrewImport,
   '/ship/crew/print': CrewListPrint,
@@ -59,7 +73,6 @@ const SCREENS: Partial<Record<RoutePath, ComponentType>> = {
   '/ship/certificates/new': CertificateEdit,
   '/ship/certificates/:id': CertificateEdit,
   '/ship/reliefs': Reliefs,
-  '/ship/expiring': Expiring,
   '/ship/voyage': Voyage,
   '/ship/time': ShipTime,
   '/ship/survey': survey('Surveys'),
@@ -124,8 +137,9 @@ function Shell() {
     <div class="shell">
       <Header />
       <UpdateBanner />
-      {route.path.startsWith('/ship') && <ShipNav />}
       <main class="container page">
+        {/* Every Ship section screen leads back to the hub; the hub itself has the tab. */}
+        {route.path.startsWith('/ship/') && <SectionBar path={route.path} />}
         <Screen />
       </main>
       <Nav />

@@ -1,5 +1,6 @@
 // The e2e files run in Node, but the project has no @types/node, and adding a dependency needs a plan change.
-// This declares the few Node calls they (and the test of the form fixtures, which writes to a temporary folder) make.
+// This declares the few Node calls they (and the test of the form fixtures, which writes to a temporary folder, and the token
+// test, which reads every file under src/) make.
 declare module 'node:fs' {
   export function cpSync(from: string, to: string, options?: { recursive?: boolean }): void;
   export const promises: {
@@ -7,6 +8,7 @@ declare module 'node:fs' {
     readFile(path: string): Promise<Uint8Array>;
     mkdtemp(prefix: string): Promise<string>;
     rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+    readdir(path: string, options: { withFileTypes: true }): Promise<{ name: string; isDirectory(): boolean }[]>;
   };
 }
 declare module 'node:os' {

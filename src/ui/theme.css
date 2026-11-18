@@ -1,78 +1,371 @@
 /*
- * Themes ("Bridge Console"). Every theme defines the same variables on :root[data-theme]; the rest of this file only
- * ever uses the variables. The day theme is also the default before the theme has been read from the settings.
+ * Design tokens (spec §6). The scale tokens (type, weight, spacing, radius, target) are on :root and are the same in every
+ * theme, except that High contrast raises the regular and medium weights. Each theme then defines the same palette tokens
+ * on :root[data-theme]; the rest of this file only ever uses the tokens. The day theme is also the default before the
+ * theme has been read from the settings. src/ui/tokens.test.ts holds the values to the spec.
  */
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  /* Type: size and line height. Display and figure are set in Mono. */
+  --fs-display: 36px;
+  --lh-display: 40px;
+  --fs-figure: 28px;
+  --lh-figure: 32px;
+  --fs-title: 22px;
+  --lh-title: 28px;
+  --fs-heading: 18px;
+  --lh-heading: 24px;
+  --fs-body: 16px;
+  --lh-body: 24px;
+  --fs-label: 14px;
+  --lh-label: 20px;
+  --fs-caption: 12px;
+  --lh-caption: 16px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-strong: 600;
+
+  /* Spacing, radius and the touch target. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+  --target: 48px;
+  --bw: 1px; /* the width of a line around a card, a row, a chip or a button: 2 px in High contrast */
+  --page-width: 960px;
+  --backdrop: rgb(0 0 0 / 0.6);
+}
+
+/* Day. */
 :root,
 :root[data-theme='day'] {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #f3f6fa;
+  --surface-0: #ffffff;
+  --surface-1: #f3f6fa;
+  --surface-2: #e8eef5;
   --line: #d5dee8;
   --text: #0b1622;
-  --muted: #4a6380;
+  --text-muted: #4a6380;
   --bar-bg: #0b2545;
   --bar-text: #ffffff;
-  --bar-muted: #b8c7d9;
-  --nav-active: #7ab8ff;
+  --bar-muted: #c9d6e5;
+  --bar-line: #3b5878;
+  --bar-focus: #7ab8ff;
+  --nav-bg: #ffffff;
+  --nav-text: #4a6380;
+  --nav-active: #1d5fd1;
+  --nav-pill: #e3ecfb;
   --accent: #1d5fd1;
   --on-accent: #ffffff;
-  --amber: #f2b33d;
-  --on-amber: #241703;
-  --red: #c81e1e;
-  --on-red: #ffffff;
+  --ok: #1e7a46;
+  --ok-bg: #e3f4ea;
+  --warn: #8a5a00;
+  --warn-bg: #fff1d1;
+  --danger: #b3261e;
+  --danger-bg: #fde7e5;
+  --on-danger: #ffffff;
+  --focus: #1d5fd1;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #1d5fd1;
+  --chart-2: #0f8b8d;
+  --chart-3: #8a5a00;
+  --chart-4: #7b4fc9;
+  --chart-5: #5e6b7a;
+  --media-filter: none;
+  --picker-filter: none;
+  --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3); /* under a dialog or a toast */
 }
 
-:root[data-theme='night'] {
+/* Dark: the navy theme for the cabin (Night before piece 7), with its values kept. */
+:root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #0b1622;
-  --surface: #12243a;
+  --surface-0: #0b1622;
+  --surface-1: #12243a;
+  --surface-2: #18283a;
   --line: #1e3550;
   --text: #e6edf5;
-  --muted: #9fb3c8;
+  --text-muted: #9fb3c8;
   --bar-bg: #0e1b2b;
   --bar-text: #e6edf5;
   --bar-muted: #9fb3c8;
+  --bar-line: color-mix(in srgb, var(--bar-text) 18%, transparent);
+  --bar-focus: #5fd4ce;
+  --nav-bg: #0e1b2b;
+  --nav-text: #9fb3c8;
   --nav-active: #5fd4ce;
+  --nav-pill: color-mix(in srgb, #5fd4ce 18%, transparent);
   --accent: #5fd4ce;
   --on-accent: #04211f;
-  --amber: #f2b33d;
-  --on-amber: #241703;
-  --red: #ff6b5e;
-  --on-red: #1a0503;
+  --ok: #5ccb8a;
+  --ok-bg: #12301f;
+  --warn: #f2b33d;
+  --warn-bg: #3a2a08;
+  --danger: #ff6b5e;
+  --danger-bg: #3d1210;
+  --on-danger: #1a0503;
+  --focus: #7ab8ff;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #4fb8d6;
+  --chart-2: #5ccb8a;
+  --chart-3: #f2b33d;
+  --chart-4: #b79cff;
+  --chart-5: #9fb3c8;
+  --media-filter: none;
+  --picker-filter: none; /* the dark color-scheme already draws the picker icon light */
+  --shadow-2: 0 -2px 12px rgb(0 0 0 / 0.12);
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3); /* under a dialog or a toast */
 }
 
+/*
+ * Night red: for a dark bridge. Black and red only, nothing bright, white or blue (spec §5). Images and canvases are drawn
+ * through --media-filter (white paper turns black, black ink turns red) and the date-picker icon through --picker-filter.
+ */
+:root[data-theme='red'] {
+  color-scheme: dark;
+  --surface-0: #000000;
+  --surface-1: #120000;
+  --surface-2: #1e0303;
+  --line: #3a0a0a;
+  --text: #e04a3a;
+  --text-muted: #d04030;
+  --bar-bg: #000000;
+  --bar-text: #e04a3a;
+  --bar-muted: #d04030;
+  --bar-line: #3a0a0a;
+  --bar-focus: #ff5a45;
+  --nav-bg: #000000;
+  --nav-text: #d04030;
+  --nav-active: #ff5a45;
+  --nav-pill: #2a0505;
+  --accent: #c8372a;
+  --on-accent: #000000;
+  --ok: #d04030;
+  --ok-bg: transparent;
+  --warn: #e04a3a;
+  --warn-bg: #120000;
+  --danger: #ff5a45;
+  --danger-bg: #4a0606;
+  --on-danger: #000000;
+  --focus: #ff5a45;
+  --mark-bg: #4a0606;
+  --mark-text: #ff5a45;
+  --chart-1: #e04a3a;
+  --chart-2: #e04a3a;
+  --chart-3: #e04a3a;
+  --chart-4: #e04a3a;
+  --chart-5: #e04a3a;
+  --media-filter: grayscale(1) invert(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
+  --picker-filter: grayscale(1) brightness(0.3) sepia(1) saturate(8) hue-rotate(-30deg) brightness(1.05);
+  --shadow-2: none;
+  --shadow-3: none;
+}
+
+/* High contrast: for bright sun on deck. Today's black on white, with the semantic tokens in the same style. */
 :root[data-theme='contrast'] {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #ffffff;
+  --surface-0: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
   --line: #000000;
   --text: #000000;
-  --muted: #000000;
+  --text-muted: #000000;
   --bar-bg: #000000;
   --bar-text: #ffffff;
   --bar-muted: #e6e6e6;
+  --bar-line: #ffffff;
+  --bar-focus: #ffffff;
+  --nav-bg: #000000;
+  --nav-text: #e6e6e6;
   --nav-active: #ffffff;
+  --nav-pill: transparent; /* the active tab is underlined instead */
   --accent: #000000;
   --on-accent: #ffffff;
-  --amber: #f2b33d;
-  --on-amber: #000000;
-  --red: #c81e1e;
-  --on-red: #ffffff;
+  --ok: #000000;
+  --ok-bg: #ffffff;
+  --warn: #000000; /* due soon is told from overdue by outline against fill, and by its words */
+  --warn-bg: #ffffff;
+  --danger: #c81e1e;
+  --danger-bg: #ffffff;
+  --on-danger: #ffffff;
+  --focus: #000000;
+  --mark-bg: #ffd54a;
+  --mark-text: #000000;
+  --chart-1: #000000;
+  --chart-2: #000000;
+  --chart-3: #000000;
+  --chart-4: #000000;
+  --chart-5: #000000;
+  --media-filter: none;
+  --picker-filter: none;
+  --shadow-2: none;
+  --shadow-3: 0 8px 32px rgb(0 0 0 / 0.3);
+}
+
+/* High contrast's heavier type: regular and medium text are set at 600, as before piece 7. */
+:root[data-theme='contrast'] {
+  --fw-regular: 600;
+  --fw-medium: 600;
+  --bw: 2px;
 }
 
 /* ---- Base ---- */
 
 :root {
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --radius: 12px;
-  --target: 44px;
-  --page-width: 960px;
-  --bar-border: color-mix(in srgb, var(--bar-text) 18%, transparent);
+  background-color: var(--surface-0);
+  color: var(--text);
+  accent-color: var(--accent);
+  caret-color: var(--text);
+  scrollbar-color: var(--line) var(--surface-0);
+  -webkit-tap-highlight-color: transparent;
 }
 
-:root[data-theme='contrast'] {
-  --target: 48px;
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Fields take the page's text colour rather than the browser's field colour (white under the dark color-scheme). */
+input,
+select,
+textarea {
+  color: inherit;
+}
+
+/* A control that takes no input is greyed, inside a field or not (PdfView's Go to page). */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--text-muted);
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* The button of a file input: the browser's own is grey, which Night red must not show. */
+::file-selector-button {
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* The native date and time pickers' icon: drawn red in Night red. */
+::-webkit-calendar-picker-indicator {
+  filter: var(--picker-filter);
+}
+
+/*
+ * Night red: the browser highlights the date or time segment being edited in its own blue. The segments stay transparent;
+ * the field's red focus ring shows where the typing goes. (A `:focus` rule on a segment is never matched, so there is none.)
+ */
+:root[data-theme='red'] ::-webkit-datetime-edit-year-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-month-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-day-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-hour-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-minute-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-second-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-millisecond-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-ampm-field,
+:root[data-theme='red'] ::-webkit-datetime-edit-week-field {
+  background: transparent;
+  color: var(--text);
+}
+
+/*
+ * Night red: the browser draws a ticked checkbox and a chosen radio with a white mark, whatever accent-color says. Here
+ * they are drawn by hand: a red outline, and a red tick or dot. They stay native inputs, so the keyboard, the focus ring
+ * (--focus) and the label around them work as before.
+ */
+:root[data-theme='red'] input[type='checkbox'],
+:root[data-theme='red'] input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0;
+  border: 2px solid var(--text);
+  border-radius: calc(var(--r-sm) / 2);
+  background: var(--surface-0);
+  color: var(--text);
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+:root[data-theme='red'] input[type='radio'] {
+  border-radius: 50%;
+}
+
+:root[data-theme='red'] .check input {
+  width: 24px;
+  height: 24px;
+}
+
+:root[data-theme='red'] input[type='checkbox']:checked::before {
+  content: '';
+  width: 0.35em;
+  height: 0.65em;
+  border-right: 3px solid var(--text);
+  border-bottom: 3px solid var(--text);
+  transform: translateY(-0.075em) rotate(45deg); /* a tick sits a little high in its box */
+}
+
+:root[data-theme='red'] input[type='radio']:checked::before {
+  content: '';
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+:root[data-theme='red'] input[type='checkbox']:disabled,
+:root[data-theme='red'] input[type='radio']:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Night red: a select's list of options is drawn by the browser in its own colours unless they are given. */
+:root[data-theme='red'] option {
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+/* Night red: the browser draws a text box's resize grip in grey, which no style reaches; the box keeps its height instead. */
+:root[data-theme='red'] textarea {
+  resize: none;
+}
+
+/* The browser's autofill paints its own pale fill: keep the field in the theme. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--surface-1) inset;
+  caret-color: var(--text);
+}
+
+/* Photos, page images and canvases: as they are, except in Night red, where they are turned black and red. */
+img,
+canvas {
+  filter: var(--media-filter);
 }
 
 *,
@@ -88,22 +381,12 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--surface-0);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-regular);
   line-height: 1.45;
-}
-
-:root[data-theme='contrast'] body {
-  font-weight: 600;
-}
-
-/* Text that sets its own medium weight gets the high-contrast weight too. The mono clock stays 500: the only weight bundled. */
-:root[data-theme='contrast'] .brand h1,
-:root[data-theme='contrast'] .field label,
-:root[data-theme='contrast'] .field-error {
-  font-weight: 600;
 }
 
 h1,
@@ -123,24 +406,22 @@ textarea {
   font: inherit;
 }
 
+/* Never under 16 px in a field, wherever it is, or iOS zooms in on it (spec §5). */
+input,
+select,
+textarea {
+  font-size: max(var(--fs-body), 1em);
+}
+
 :focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
+/* On the bars the ring takes the bars' own focus colour. High contrast's bottom bar is one of the bars. */
 .app-header :focus-visible,
-.app-nav :focus-visible,
-.update-banner :focus-visible {
-  outline-color: var(--nav-active);
-}
-
-:root[data-theme='contrast'] :focus-visible {
-  outline-color: #000000;
-}
-
-:root[data-theme='contrast'] .app-header :focus-visible,
 :root[data-theme='contrast'] .app-nav :focus-visible {
-  outline-color: #ffffff;
+  outline-color: var(--bar-focus);
 }
 
 .container {
@@ -149,7 +430,7 @@ textarea {
   margin: 0 auto;
 }
 
-/* ---- Shell: header, content, bottom bar ---- */
+/* ---- Shell: header, content, bottom bar (the canvas "Main" and "Ship hub") ---- */
 
 .shell {
   min-height: 100vh;
@@ -158,9 +439,10 @@ textarea {
   flex-direction: column;
 }
 
+/* The page keeps clear of the phone's rounded corners and notch when it is turned on its side. */
 .page {
   flex: 1;
-  padding: 16px;
+  padding: var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-right)) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-left));
 }
 
 .bar-inner {
@@ -169,102 +451,93 @@ textarea {
   margin: 0 auto;
 }
 
+/* 56 px under the status bar: the ship pill, the clock and the theme button. */
 .app-header {
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-top: env(safe-area-inset-top);
   background: var(--bar-bg);
   color: var(--bar-text);
-  border-bottom: 1px solid var(--bar-border);
+  border-bottom: 1px solid var(--bar-line);
 }
 
 .app-header .bar-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px 12px;
+  gap: var(--sp-3);
+  height: 55px; /* and its line below: 56 */
+  padding: 0 calc(var(--sp-4) + env(safe-area-inset-right)) 0 calc(var(--sp-4) + env(safe-area-inset-left));
 }
 
-.header-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.brand {
+.ship-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
+  min-width: 0;
+  height: 44px;
+  padding: 0 var(--sp-3);
+  border: var(--bw) solid var(--bar-line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--bar-text);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
 }
 
-.brand svg {
-  flex: none;
-}
-
-/* The logo's navy waves are the colour of the bars, so a faint ring keeps the tile's edge visible on them. */
-.brand svg,
-.welcome-band svg {
-  border-radius: 22%;
-  box-shadow: 0 0 0 1px var(--bar-border);
-}
-
-.brand h1 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--bar-muted);
-}
-
-.ship-name {
-  margin: 2px 0 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.2;
+.ship-pill-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-side {
+.ship-pill svg {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  transform: rotate(90deg);
 }
 
 .clock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.clock-time {
+  flex: none;
+  margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.clock-zone {
-  font-size: 11px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: 500; /* the only weight of the mono font bundled */
   color: var(--bar-muted);
   white-space: nowrap;
 }
 
 .theme-btn {
+  position: relative;
+  flex: none;
   width: 44px;
   height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--bar-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bar-text) 10%, transparent);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--bar-text);
   cursor: pointer;
+}
+
+/* Night red's moon is solid, so it reads apart from Dark's outline moon. */
+.theme-btn[data-icon='red'] path {
+  fill: currentColor;
+}
+
+/* The "A" of automatic night, in the button's corner. */
+.theme-auto {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-strong);
+  line-height: 1;
 }
 
 :root[data-theme='contrast'] .theme-btn {
@@ -272,12 +545,15 @@ textarea {
   height: 48px;
 }
 
+/* 64 px above the home indicator: Home, Ship, Forms, Budget and More. */
 .app-nav {
   position: sticky;
   bottom: 0;
   z-index: 10;
-  background: var(--bar-bg);
-  border-top: 1px solid var(--bar-border);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: var(--nav-bg);
+  border-top: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
 }
 
 .nav-grid {
@@ -289,22 +565,33 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-height: 56px;
-  padding: 10px 0 14px;
-  font-size: 11px;
+  justify-content: center;
+  gap: var(--sp-1);
+  height: 63px; /* and the line above: 64 */
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-medium);
   text-decoration: none;
-  color: var(--bar-muted);
+  color: var(--nav-text);
+}
+
+/* The icon sits in a pill, which the active tab fills. */
+.nav-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 28px;
+  border-radius: var(--r-pill);
 }
 
 .nav-link[aria-current='page'] {
   color: var(--nav-active);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
-:root[data-theme='contrast'] .nav-link {
-  font-size: 12px;
-  font-weight: 600;
+.nav-link[aria-current='page'] .nav-pill {
+  background: var(--nav-pill);
 }
 
 :root[data-theme='contrast'] .nav-link[aria-current='page'] {
@@ -313,66 +600,165 @@ textarea {
   text-decoration-thickness: 2px;
 }
 
-/* ---- Ship sub-navigation: a row of chips ---- */
+/* ---- The way back from a Ship section to the hub ---- */
 
-.ship-nav {
-  width: 100%;
-  max-width: var(--page-width);
-  margin: 0 auto;
-}
-
-.chips {
+.section-bar {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--target);
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-2);
 }
 
-.chips::-webkit-scrollbar {
-  display: none;
-}
-
-.chip {
-  flex: none;
+.section-back {
   display: inline-flex;
   align-items: center;
   min-height: var(--target);
-  padding: 0 16px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 500;
+  padding-right: var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-strong);
   text-decoration: none;
+}
+
+.section-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-:root[data-theme='contrast'] .chip {
-  border-width: 2px;
-  font-weight: 600;
+/* ---- The Ship hub: eight tiles, two to a row ---- */
+
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.chip[aria-current='page'] {
-  background: var(--accent);
+.hub-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  height: 100%;
+  min-height: 112px;
+  padding: var(--sp-3);
+  border: var(--bw) solid transparent;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.hub-icon,
+.more-icon {
+  display: flex;
+  color: var(--accent);
+}
+
+.hub-name {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.hub-status {
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+.hub-status:empty {
+  display: none;
+}
+
+.hub-status.status {
+  align-self: flex-start;
+}
+
+/* Night red, as drawn: the tiles are outlined, and their icons are in the text's red. High contrast outlines them too. */
+:root[data-theme='red'] .hub-tile,
+:root[data-theme='contrast'] .hub-tile {
+  border-color: var(--line);
+}
+
+:root[data-theme='red'] .hub-icon,
+:root[data-theme='red'] .more-icon {
+  color: var(--text);
+}
+
+/* Night red, as drawn: a tile whose status is danger (something expired or overdue) is filled. Day keeps the pill alone. */
+:root[data-theme='red'] .hub-tile[data-tone='danger'] {
+  background: var(--danger-bg);
+  border-color: transparent;
+  color: var(--danger);
+}
+
+:root[data-theme='red'] .hub-tile[data-tone='danger'] .hub-name,
+:root[data-theme='red'] .hub-tile[data-tone='danger'] .hub-icon {
+  color: var(--danger);
+}
+
+/* ---- More: a large row for each screen with no tab ---- */
+
+.more-row {
+  justify-content: flex-start;
+}
+
+.list-row-chevron {
+  display: flex;
+  color: var(--text-muted);
+}
+
+/* ---- The ship switcher, a `.sheet` (see Dialogs) ---- */
+
+.switcher-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) calc(var(--sp-4) + env(safe-area-inset-right)) calc(var(--sp-4) + env(safe-area-inset-bottom)) calc(var(--sp-4) + env(safe-area-inset-left));
+}
+
+.switcher-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+}
+
+.switcher-ship {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switcher-ship[aria-pressed='true'] {
   border-color: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
+}
+
+:root[data-theme='red'] .switcher-ship[aria-pressed='true'] {
+  border-color: var(--text);
 }
 
 /* ---- Buttons and form fields ---- */
 
+/* Every button is 48 px high (56 for the large one) with the medium radius. Secondary is the outlined one. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: var(--target);
-  padding: 0 18px;
-  border: 1.5px solid transparent;
-  border-radius: var(--radius);
-  font-size: 16px;
-  font-weight: 600;
+  padding: 0 var(--sp-4);
+  border: var(--bw) solid transparent;
+  border-radius: var(--r-md);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-strong);
   text-decoration: none;
   cursor: pointer;
 }
@@ -386,14 +772,13 @@ textarea {
 
 .btn-large {
   min-height: 56px;
-  font-size: 17px;
+  font-size: var(--fs-heading);
 }
 
 .btn-small {
-  min-height: var(--target);
-  padding: 0 14px;
-  font-size: 14px;
-  border-radius: 8px;
+  min-width: 44px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-label);
 }
 
 .btn-primary {
@@ -402,80 +787,111 @@ textarea {
 }
 
 .btn-danger {
-  background: var(--red);
-  color: var(--on-red);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
 .btn-outline {
-  border-color: var(--muted);
+  border-color: var(--text-muted);
   background: transparent;
   color: var(--text);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
-:root[data-theme='night'] .btn-outline {
+:root[data-theme='dark'] .btn-outline {
   border-color: var(--line);
-  background: var(--surface);
+  background: var(--surface-1);
 }
 
-:root[data-theme='contrast'] .btn-outline {
-  border-width: 2px;
-  font-weight: 600;
-}
-
+/* The label sits 8 px above its input; the form puts 12 px between a field and the next label. */
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-2);
 }
 
-.field label {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.field input,
-.field select,
-.field textarea {
-  width: 100%;
-  min-height: 48px;
-  padding: 10px 12px;
-  border: 1.5px solid var(--muted);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 16px;
-}
-
-.field textarea {
-  resize: vertical;
+.field label,
+.field-label {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
 }
 
 /* A control that is scrolled into view (a failed Save focuses the first one with a problem) must clear the sticky bars and show its label. */
 .field input,
 .field select,
 .field textarea {
+  width: 100%;
+  min-height: var(--target);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1.5px solid var(--text-muted);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
   scroll-margin-block: 120px;
 }
 
+.field textarea {
+  resize: vertical;
+}
+
 .field input[aria-invalid='true'] {
-  border-color: var(--red);
+  border-color: var(--danger);
 }
 
 .field-error {
   margin: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--red);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--danger);
 }
 
 /* A warning is advice, not a blocker: the text stays in the normal colour with an amber edge, so it reads in every theme. */
 .field-warning {
   margin: 0;
-  padding-left: 10px;
-  border-left: 4px solid var(--amber);
-  font-size: 13px;
-  line-height: 1.4;
+  padding-left: var(--sp-2);
+  border-left: 4px solid var(--warn);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+/* ---- Filter chips: a row of them (budget, library), or one link drawn as a chip (Catch up) ---- */
+
+/* After the buttons, so that a pressed toggle button (crew list) is filled over Dark's outline. */
+
+.chips {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: 0 var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chip[aria-current='page'],
+.toggle .btn[aria-pressed='true'],
+.segmented .btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--fw-strong);
 }
 
 /* ---- Welcome screen ---- */
@@ -487,26 +903,33 @@ textarea {
   flex-direction: column;
 }
 
+/* The logo's navy waves are the colour of the bars, so a faint ring keeps the tile's edge visible on them. */
+.welcome-band svg {
+  border-radius: 22%;
+  box-shadow: 0 0 0 1px var(--bar-line);
+}
+
 .welcome-band {
   min-height: 300px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 18px;
-  padding: 32px 24px 36px;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-5);
   background: var(--bar-bg);
   color: var(--bar-text);
 }
 
-:root[data-theme='night'] .welcome-band {
-  background: var(--bg);
+:root[data-theme='dark'] .welcome-band {
+  background: var(--surface-0);
 }
 
 .welcome-band h1 {
   margin: 0;
-  font-size: 32px;
-  font-weight: 600;
+  font-size: var(--fs-display);
+  line-height: var(--lh-display);
+  font-weight: var(--fw-strong);
   letter-spacing: -0.01em;
 }
 
@@ -515,25 +938,18 @@ textarea {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 28px 24px 24px;
+  padding: var(--sp-5);
 }
 
 .tagline {
-  margin: 0 0 8px;
-  font-size: 17px;
-  line-height: 1.45;
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
   text-align: center;
 }
 
 .helper {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
   text-align: center;
-  color: var(--muted);
 }
 
 .welcome-spacer {
@@ -544,64 +960,83 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--sp-2);
   margin: 0;
-  font-size: 12px;
-  color: var(--muted);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--text-muted);
 }
 
-.first-ship-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+/* ---- Banners and the error toast ---- */
 
-.first-ship-form h2 {
-  margin: 0;
-  font-size: 20px;
-}
-
-/* ---- Update banner and error toast ---- */
-
+/* The update banner: a strip under the header, the width of the page. */
 .update-banner {
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  background: var(--surface-1);
+  border-bottom: var(--bw) solid var(--line);
 }
 
 .banner-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
 }
 
 .banner-text {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
-  line-height: 1.35;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
 }
 
+/* A banner in a screen (the backup reminder, the storage notice). The words carry it; the warn edge only marks it. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-left: calc(2 * var(--bw) + 4px) solid var(--warn); /* 6 px, 8 in High contrast */
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+}
+
+.banner p {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Filled in the light themes; in Dark and Night red a dark red box with a red edge, which is not bright at night. */
 .toast {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 88px;
   z-index: 20;
-  width: calc(100% - 32px);
+  width: calc(100% - 2 * var(--sp-4));
   max-width: 520px;
   margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 8px 12px 16px;
-  border-radius: var(--radius);
-  background: var(--red);
-  color: var(--on-red);
-  font-size: 14px;
-  line-height: 1.35;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--danger);
+  border-radius: var(--r-md);
+  background: var(--danger);
+  color: var(--on-danger);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  box-shadow: var(--shadow-3);
+}
+
+:root[data-theme='dark'] .toast,
+:root[data-theme='red'] .toast {
+  background: var(--danger-bg);
+  color: var(--text);
 }
 
 .toast-message {
@@ -616,7 +1051,7 @@ textarea {
   align-items: center;
   min-height: var(--target);
   color: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 .toast-dismiss {
@@ -628,7 +1063,7 @@ textarea {
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -637,9 +1072,11 @@ textarea {
 /* ---- Screens: headings, cards, forms ---- */
 
 .screen > h1,
-.screen > h2 {
-  margin: 0 0 16px;
-  font-size: 22px;
+.screen > h2,
+.screen-head h2 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
 }
 
 .screen-head {
@@ -647,108 +1084,108 @@ textarea {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
 
 .screen-head h2 {
   margin: 0;
-  font-size: 22px;
 }
 
-.card {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
+.card,
+.fill-row,
+.import-adjust {
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
 }
 
-:root[data-theme='contrast'] .card {
-  border-width: 2px;
+/* A word on a pill: Active, Scheduled, Hidden. A status (`.status`, below) and an import status have the same shape. */
+.badge,
+.status,
+.import-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1.5px solid transparent;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
 }
 
 .badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border-radius: 999px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
 }
 
 .ship-list,
 .crew-list,
-.cert-list,
-.relief-list,
-.expiring-list,
-.document-list,
 .voyage-list,
-.history-list {
+.history-list,
+.snapshot-list,
+.import-list,
+.form-list,
+.setup-list,
+.setup-unsupported {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.ship-row {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
 }
 
 .ship-row-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-}
-
-.ship-row-name {
-  min-width: 0;
-  font-size: 18px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+  gap: var(--sp-2);
 }
 
 .ship-row-actions,
-.row-actions {
+.row-actions,
+.head-actions,
+.toggle,
+.relief-badges,
+.segmented,
+.fill-row-actions,
+.fill-helpers {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
-.particulars-form,
-.crew-form,
-.certificate-form,
-.crew-document-form,
-.voyage-form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+/* The heading of a part of a form or a screen: small capitals in the muted colour. */
+.form-section h3,
+.time-section h3,
+.settings-section h3 {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .form-section h3 {
-  margin: 0 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
+  margin-bottom: var(--sp-3);
 }
 
-.form-grid {
+.form-grid,
+.mapping-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--sp-3);
 }
 
 @media (min-width: 640px) {
-  .form-grid {
+  .form-grid,
+  .mapping-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -757,26 +1194,35 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 .save-status {
   margin: 0;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: var(--fw-strong);
+  color: var(--text-muted);
 }
 
-.helper-text {
+/* Quiet words under a field or a name: help, a contract, a snapshot's date. */
+.helper-text,
+.helper,
+.crew-row-meta,
+.crew-signed-off,
+.snapshot-date,
+.snapshot-counts {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
+/* A checkbox or a radio with its words: the whole row, 48 px high, is what is tapped; the box itself is 24 px. */
 .check {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
   min-height: var(--target);
   cursor: pointer;
 }
@@ -786,23 +1232,255 @@ textarea {
   width: 24px;
   height: 24px;
   margin: 0;
-  accent-color: var(--accent);
+}
+
+/* ---- The parts the screens below share ---- */
+
+/* A screen's parts in a column, at the steps of the spacing scale: 8 px, 12 between a field and the next, 16, and 24 between sections. */
+.crew-row,
+.import-row,
+.lock-notes,
+.forms-import {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.ship-row,
+.welcome-body,
+.crew-documents,
+.crew-list-sheet,
+.import-open,
+.import-section,
+.time-section,
+.settings-section,
+.lock-form,
+.lock-actions,
+.setup-section,
+.setup-group,
+.fill-section,
+.fill-group,
+.fill-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.first-ship-form,
+.crew-list-options,
+.import-form,
+.lock-card,
+.db-notice-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.particulars-form,
+.crew-form,
+.certificate-form,
+.crew-document-form,
+.voyage-form,
+.setup-form,
+.fill-form,
+.fill-questions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+/* A heading at the top of a form or a card that is not the screen's own. */
+.first-ship-form h2,
+.crew-list-options h2,
+.setup-form > h2,
+.fill-form > h2,
+.lock-card h1,
+.db-notice-card h1,
+.sheet-title,
+.time-now {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+/* A name at the head of a card. */
+.ship-row-name,
+.crew-name,
+.import-row-name,
+.import-summary {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+  font-weight: var(--fw-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* A line in the strong weight: the file read, the ship locked, a form's period. */
+.import-file,
+.import-from,
+.lock-ship,
+.lock-message,
+.db-notice-message,
+.snapshot-reason,
+.forms-summary p,
+.setup-identity,
+.fill-period {
+  margin: 0;
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.lock-ship,
+.fill-period {
+  color: var(--text-muted);
+}
+
+.setup-identity,
+.fill-period {
+  margin-top: calc(-1 * var(--sp-4));
+}
+
+.lock-message,
+.db-notice-message {
+  text-align: center;
+}
+
+/* A rank or a row number above the name, in capitals. */
+.crew-rank,
+.import-row-number {
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The name and its rank on the left, the status on the right, wrapping under it on a phone. */
+.crew-row-head,
+.import-row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.crew-row-who,
+.import-row-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Words with the buttons that act on them, wrapping under them where there is no room. */
+.form-row,
+.history-row,
+.snapshot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+/* A field with the button that acts on it, or a row of equal buttons: side by side where there is room, stacked on a phone. */
+.crew-controls,
+.time-actions,
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.home p,
+.dialog-body p,
+.import-row p,
+.settings-section p,
+.setup-notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A list with a bullet, and a table's legend. */
+.forms-summary ul,
+.import-deletions,
+.setup-unsupported {
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.conflict legend,
+.fill-row legend {
+  padding: 0 var(--sp-2);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+/* A status line that only says something now and then: "Imported 3 crew.", and a form's notice. */
+.live:not(:empty),
+.setup-notice {
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-left: calc(2 * var(--bw) + 2px) solid var(--accent); /* 4 px, 6 in High contrast */
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  font-weight: var(--fw-strong);
+}
+
+/* Text for a screen reader only: in the page and in the accessibility tree, but not seen. An empty status line (it is
+   announced when its text comes) and the file input behind its label are hidden the same way. */
+.visually-hidden,
+.live:empty,
+.import-form > .field-error:empty,
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.crew-sheet-actions,
+.forms-import,
+.screen > .live:not(:empty) {
+  margin-bottom: var(--sp-4);
+}
+
+.voyage-form,
+.time-now,
+.time-section,
+.settings-section,
+.crew-list-options {
+  margin-bottom: var(--sp-5);
+}
+
+/* An empty list says so in one sentence, in the quiet colour. */
+.empty {
+  margin: 0 0 var(--sp-4);
+  color: var(--text-muted);
+}
+
+.crew-documents .empty,
+.setup-section .empty,
+.fill-group .empty {
+  margin: 0;
 }
 
 /* ---- Crew list ---- */
 
-.head-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .crew-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px 16px;
-  margin-bottom: 16px;
+  column-gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
 
 .crew-controls .field {
@@ -810,78 +1488,11 @@ textarea {
   max-width: 260px;
 }
 
-.toggle {
-  display: flex;
-  gap: 8px;
+.crew-signed-off {
+  white-space: nowrap;
 }
 
-.toggle .btn[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
-.crew-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.crew-row-head,
-.cert-row-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.crew-row-who {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.crew-rank {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.crew-name,
-.cert-name {
-  font-size: 18px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.crew-row-meta {
-  margin: 0;
-  font-size: 13px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
-/* ---- Printed crew list ---- */
-
-.crew-sheet-actions {
-  margin-bottom: 16px;
-}
-
-.crew-list-options {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.crew-list-options h2 {
-  margin: 0;
-  font-size: 22px;
-}
+/* ---- Printed crew list (the screen's frame; print.css sets the page) ---- */
 
 .column-picker {
   min-width: 0;
@@ -890,39 +1501,24 @@ textarea {
   border: 0;
 }
 
-.column-picker legend {
-  padding: 0;
-  margin-bottom: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .column-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
-  gap: 0 16px;
+  gap: 0 var(--sp-4);
 }
 
 .column-picker .field-error {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 /* The sheet is drawn as the paper it becomes; print.css takes the frame away and sets the page. */
 .crew-list-sheet {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  padding: var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
 }
 
 .sheet-title {
-  margin: 0;
-  font-size: 22px;
   letter-spacing: 0.12em;
   text-align: center;
 }
@@ -930,13 +1526,13 @@ textarea {
 .sheet-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 24px;
+  gap: 0 var(--sp-5);
   margin: 0;
   overflow-wrap: anywhere;
 }
 
 .sheet-key {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 /* A wide table scrolls inside its own box, never the page. */
@@ -948,26 +1544,21 @@ textarea {
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-label);
 }
 
 .sheet-table th,
 .sheet-table td {
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
   white-space: nowrap;
 }
 
-:root[data-theme='contrast'] .sheet-table th,
-:root[data-theme='contrast'] .sheet-table td {
-  border-color: var(--text);
-}
-
 .sheet-table th {
-  background: var(--surface);
-  font-weight: 600;
+  background: var(--surface-1);
+  font-weight: var(--fw-strong);
 }
 
 /* A date or a number is never broken, wherever the sheet is drawn: `05-JAN-1985` would split at its hyphens. Names and places may wrap. */
@@ -979,12 +1570,12 @@ textarea {
 /* Room for the 11 default columns on a screen of a laptop or a tablet: the text wraps, and the table fits its box. A phone scrolls it. */
 @media (min-width: 900px) {
   .sheet-table {
-    font-size: 13px;
+    font-size: var(--fs-caption);
   }
 
   .sheet-table th,
   .sheet-table td {
-    padding: 5px 6px;
+    padding: var(--sp-1);
     white-space: normal;
   }
 }
@@ -994,8 +1585,8 @@ textarea {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
-  margin-top: 16px;
+  gap: var(--sp-5);
+  margin-top: var(--sp-4);
 }
 
 .sheet-master {
@@ -1008,386 +1599,330 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.sheet-signature,
+.sheet-stamp,
+.sheet-footer {
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
 /* The space above the line is where the Master signs. */
 .sheet-signature {
-  margin: 44px 0 0;
-  padding-top: 4px;
+  margin: var(--sp-7) 0 0;
+  padding-top: var(--sp-1);
   border-top: 1px solid var(--text);
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .sheet-stamp {
   flex: 0 1 220px;
   min-height: 110px;
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--text);
-  font-size: 12px;
-  color: var(--muted);
 }
 
 .sheet-footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: var(--muted);
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
 }
 
 .sheet-footer svg {
   flex: none;
 }
 
-/* ---- Certificates ---- */
+/* ---- Certificates, crew documents and reliefs: `.list-row`s, their details parted by a dot ---- */
 
-.cert-row,
-.relief-row,
-.expiring-row,
-.document-row {
-  padding: 0;
+/* A detail is kept whole (a date would split at its hyphens); the line wraps between details, after the dot. */
+.list-row-meta > span {
+  display: inline-block;
 }
 
-/* The whole card is the link to the certificate, the crew member or the document. */
-.cert-link,
-.relief-link,
-.expiring-link,
-.document-link {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: var(--target);
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  color: inherit;
-  text-decoration: none;
-}
-
-.cert-details,
-.relief-details,
-.expiring-details,
-.document-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 16px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.cert-details > span,
-.relief-details > span,
-.expiring-details > span,
-.document-details > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* ---- Crew documents and the Expiring screen ---- */
-
-/* The label on the left, the warning on the right, wrapping under it on a phone. */
-.document-head,
-.expiring-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.document-label {
-  min-width: 0;
-  font-size: 16px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+.list-row-meta > span:not(:last-child)::after {
+  content: ' · ';
+  white-space: pre;
 }
 
 .crew-documents {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 32px;
+  margin-top: var(--sp-6);
 }
 
-.crew-documents h3,
-.crew-documents .empty {
+.crew-documents h3 {
   margin: 0;
 }
 
 .crew-documents-note {
-  margin-top: 32px;
+  margin-top: var(--sp-6);
 }
 
 .crew-documents .btn {
   align-self: flex-start;
 }
 
-.expiring-window {
-  margin: 0 0 16px;
-  overflow-wrap: anywhere;
-}
-
-/* ---- Reliefs ---- */
-
-/* The name on the left, the warnings (a contract near its end, the onboard limit) on the right, wrapping under it on a phone. */
-.relief-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+/* A relief's warnings (a contract near its end, the onboard limit) go under the name when there is no room beside it. */
+.relief-row {
   flex-wrap: wrap;
-  gap: 8px 12px;
 }
 
-.relief-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
+/* ---- List rows and status pills (the Due screen; Home, the hub and the lists reuse them) ---- */
 
-.crew-signed-off {
-  font-size: 13px;
-  white-space: nowrap;
-  color: var(--muted);
-}
-
-.empty {
-  margin: 0 0 16px;
-  color: var(--muted);
-}
-
-/* Amber and red are never the only sign: the badge says it in words. */
-.band-badge {
-  white-space: nowrap;
-}
-
-.band-badge[data-band='amber'] {
-  background: var(--amber);
-  color: var(--on-amber);
-}
-
-.band-badge[data-band='red'] {
-  background: var(--red);
-  color: var(--on-red);
-}
-
-/* ---- Home ---- */
-
-/* A reminder above the alerts. The words carry it; the amber edge only marks it. */
-.home-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  margin: 0 0 16px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-left: 6px solid var(--amber);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-:root[data-theme='contrast'] .home-notice {
-  border-width: 2px;
-  border-left-width: 8px;
-}
-
-.home-notice p {
-  flex: 1 1 16rem;
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.alerts {
-  margin: 0 0 16px;
-}
-
-.alerts h2 {
-  margin: 0 0 12px;
-  font-size: 18px;
-}
-
-.alerts .empty {
-  margin: 0;
-}
-
-.alert-list {
+.row-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-2);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.alert-row {
-  padding: 0;
-}
-
-/* The whole card is the link to the record. */
-.alert-link {
+/* The whole row is the link. Overdue and due soon rows are tinted as drawn; the chip carries the status in words and shape. */
+.list-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: var(--target);
-  padding: 14px 16px;
-  border-radius: var(--radius);
-  color: inherit;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: calc(var(--target) + var(--sp-2));
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text);
   text-decoration: none;
 }
 
-.alert-head {
+.list-row[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.list-row[data-tone='danger'] {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* Night red: a due soon row is a plain surface with a faint line; only the overdue ones are tinted. */
+:root[data-theme='red'] .list-row[data-tone='warn'] {
+  border-color: var(--line);
+  background: var(--surface-1);
+}
+
+.list-row-text {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.alert-title {
+  flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
-  font-size: 18px;
-  font-weight: 600;
+}
+
+.list-row-overline,
+.list-row-meta {
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
-.alert-detail {
-  font-size: 13px;
-  color: var(--muted);
+.list-row-overline {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-strong);
+}
+
+.list-row-title {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-strong);
   overflow-wrap: anywhere;
 }
 
-.clock-change {
-  margin: 0 0 16px;
+.list-row-meta {
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+/*
+ * A status in words (its shape is `.badge`'s, above), never told by colour alone: overdue is a filled pill, due soon an
+ * outlined one, valid a ✓ and a word.
+ */
+.status[data-tone='danger'] {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.status[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.status[data-tone='ok'] {
+  padding-inline: 0;
+  color: var(--ok);
+}
+
+/* ---- Due ---- */
+
+/* All due and Before next port: a segmented pair of links, the one shown filled. (Form fill's `.segmented` is another control.) */
+.view-switch {
+  display: flex;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-5);
+  padding: var(--sp-1);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.view-switch a {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  text-align: center;
+  text-decoration: none;
+}
+
+.view-switch a[aria-current='page'] {
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: var(--fw-strong);
+}
+
+.due-views {
+  margin: 0 0 var(--sp-5);
+}
+
+.due-group {
+  margin: 0 0 var(--sp-5);
+}
+
+.due-group h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+}
+
+.due-none {
+  margin: 0;
+  color: var(--ok);
+  font-weight: var(--fw-medium);
+}
+
+.expiring-window {
+  margin: 0 0 var(--sp-4);
   overflow-wrap: anywhere;
+}
+
+/* ---- Home ---- */
+
+/* Today: a column at least as tall as the room between the bars (56 + 64, and the page's padding), so the tiles sit at its foot. */
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-height: calc(100dvh - 152px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.home p {
+  margin: 0;
+}
+
+/* The voyage card is drawn as a hub tile, with more room. Its overline is in spaced capitals, as drawn. */
+.voyage-card {
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+}
+
+.voyage-card .list-row-overline {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.voyage-route {
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.figures,
+.home-head {
+  display: flex;
+  gap: var(--sp-5);
+}
+
+.figure,
+.home-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.figure-value {
+  font: var(--fw-medium) var(--fs-figure) / var(--lh-figure) var(--font-mono);
+}
+
+.home-head {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.home-section h2 {
+  margin: 0;
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
+}
+
+.home-head a {
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+}
+
+.list-row.compact {
+  min-height: var(--target);
+}
+
+/* Six tiles, three to a row, at the foot. They are hub tiles, smaller; `+ Expense` is filled with the accent. */
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+
+.home-tile {
+  align-items: center;
+  justify-content: center;
+  height: 76px;
+  min-height: 0;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  text-align: center;
+}
+
+.home-tile[data-accent] {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* ---- Crew import ---- */
 
 /*
  * A status message: "Imported 3 crew.", "Reading file…". The element stays on the page and only its text changes, so that a
- * screen reader announces it; while it is empty it takes no room.
+ * screen reader announces it; while it is empty it takes no room (see `.visually-hidden`).
  */
 .live {
   margin: 0;
 }
 
-.live:empty {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.live:not(:empty) {
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--accent);
-  border-radius: 8px;
-  background: var(--surface);
-  font-weight: 600;
-}
-
-:root[data-theme='contrast'] .live:not(:empty) {
-  border-width: 2px;
-  border-left-width: 6px;
-}
-
-.screen > .live:not(:empty) {
-  margin-bottom: 16px;
-}
-
-.import-file {
-  margin: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.import-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.import-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.import-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.import-section .helper-text {
-  margin: 0;
-}
-
-.mapping-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-@media (min-width: 640px) {
-  .mapping-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .mapping-grid .field label {
-  overflow-wrap: anywhere;
-}
-
-.import-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.import-row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.import-row-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-}
-
-.import-row-who {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.import-row-number {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.import-row-name {
-  font-size: 18px;
-  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -1395,26 +1930,14 @@ textarea {
   text-decoration: line-through;
 }
 
-.import-row p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .import-change {
-  font-size: 14px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
 }
 
 /* The status is always in words; the colour only backs it up. */
 .import-status {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border: 1.5px solid var(--muted);
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
+  border-color: var(--text-muted);
 }
 
 .import-status[data-status='new'] {
@@ -1429,59 +1952,79 @@ textarea {
 
 .import-status[data-status='same'] {
   border-color: var(--line);
-  color: var(--muted);
-}
-
-:root[data-theme='contrast'] .import-status[data-status='same'] {
-  border-color: var(--text);
-  color: var(--text);
+  color: var(--text-muted);
 }
 
 .import-status[data-status='error'] {
-  border-color: var(--red);
-  background: var(--red);
-  color: var(--on-red);
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--on-danger);
 }
 
-/* ---- Dialogs ---- */
+/* What was found, and the settings folded under "Adjust columns" (a `.card`). */
+.import-adjust {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
 
-.dialog {
-  width: calc(100% - 32px);
+.import-adjust > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  font-weight: var(--fw-strong);
+  cursor: pointer;
+}
+
+/* ---- Dialogs, and the sheet that rises from the foot of the screen (the ship switcher) ---- */
+
+dialog.dialog {
+  width: calc(100% - 2 * var(--sp-4));
   max-width: 440px;
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--bg);
+  border: var(--dialog-bw, var(--bw)) solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-1);
   color: var(--text);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+  box-shadow: var(--shadow-3);
 }
 
-:root[data-theme='contrast'] .dialog {
-  border: 3px solid var(--text);
+/* High contrast keeps its heavy 3 px frame. */
+:root[data-theme='contrast'] dialog.dialog {
+  --dialog-bw: 3px;
+  border-color: var(--text);
 }
 
-.dialog::backdrop {
-  background: rgb(0 0 0 / 0.55);
+dialog.dialog::backdrop {
+  background: var(--backdrop);
+}
+
+dialog.sheet {
+  width: 100%;
+  max-width: none;
+  max-height: 85dvh;
+  margin: auto 0 0;
+  border-width: var(--dialog-bw, var(--bw)) 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+
+.dialog-form,
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
 }
 
 .dialog-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px 16px 16px;
+  padding: var(--sp-5) var(--sp-4) var(--sp-4);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
   overflow-wrap: anywhere;
-}
-
-.dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .dialog-body p {
@@ -1489,24 +2032,24 @@ textarea {
 }
 
 .dialog-body .dialog-waiting {
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .dialog-error {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--red);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--danger);
 }
 
 .dialog-error p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--sp-1);
 }
 
 .dialog-error a {
@@ -1517,61 +2060,17 @@ textarea {
 
 /* ---- Voyage and ship's time ---- */
 
-.voyage-form {
-  margin-bottom: 24px;
-}
-
 .time-now {
-  margin: 0 0 20px;
-  font-size: 22px;
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-
-.time-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.time-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.time-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
 }
 
 .time-actions .btn {
   flex: 1 1 140px;
 }
 
-/* A select with the button that acts on it, side by side where there is room and stacked on a phone. */
-.inline-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-}
-
 .inline-form .field {
   flex: 1 1 200px;
   min-width: 0;
-}
-
-.history-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
 }
 
 .history-text {
@@ -1584,101 +2083,22 @@ textarea {
 /* ---- Settings and backup ---- */
 
 .settings-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 28px;
-}
-
-.settings-section h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.settings-section p {
-  margin: 0;
-}
-
-.snapshot-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.snapshot-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
+  /* A section opened from More (`?at=`) is scrolled to just below the header. */
+  scroll-margin-top: calc(56px + env(safe-area-inset-top) + var(--sp-2));
 }
 
 .snapshot-text {
   display: flex;
   flex: 1 1 200px;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
-}
-
-.snapshot-reason {
-  font-weight: 600;
-}
-
-.snapshot-date,
-.snapshot-counts {
-  font-size: 14px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
 
 /* ---- Import backup ---- */
 
-.import-from {
-  margin: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.import-open {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/*
- * The one place that says what went wrong. It stays on the page and only its text changes, so that it is announced;
- * while it is empty it takes no room (hidden the way `.live` is, which keeps it in the accessibility tree).
- */
+/* The one place that says what went wrong; while it is empty it takes no room (see `.visually-hidden`). */
 .import-form > .field-error {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.import-form > .field-error:empty {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.import-summary {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  font-weight: var(--fw-strong);
 }
 
 .conflict {
@@ -1686,24 +2106,18 @@ textarea {
   margin: 0;
 }
 
-.conflict legend {
-  padding: 0 6px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
 .conflict-table {
   width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 14px;
+  font-size: var(--fs-label);
 }
 
 .conflict-table th,
 .conflict-table td {
-  padding: 6px 6px 6px 0;
-  border-bottom: 1px solid var(--line);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  border-bottom: var(--bw) solid var(--line);
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
@@ -1714,19 +2128,13 @@ textarea {
 }
 
 .conflict-table thead th {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-strong);
+  color: var(--text-muted);
 }
 
 .conflict-table tbody th {
-  font-weight: 500;
-}
-
-.import-deletions {
-  margin: 0;
-  padding-left: 20px;
-  overflow-wrap: anywhere;
+  font-weight: var(--fw-medium);
 }
 
 /* ---- App lock: the lock screen and the protect step ---- */
@@ -1738,16 +2146,13 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 16px;
+  padding: var(--sp-5) var(--sp-4);
 }
 
 .lock-card,
 .db-notice-card {
   width: 100%;
   max-width: 400px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   text-align: center;
 }
 
@@ -1755,36 +2160,11 @@ textarea {
   align-self: center;
 }
 
-.lock-card h1,
-.db-notice-card h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.lock-ship {
-  margin: 0;
-  font-weight: 600;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
 .lock-intro {
   margin: 0;
 }
 
-/* What a forgotten passcode means and what the lock is not: said before the passcode is set, in the quiet helper style. */
-.lock-notes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lock-form,
-.lock-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.lock-form {
   text-align: left;
 }
 
@@ -1793,26 +2173,19 @@ textarea {
 }
 
 .lock-form .form-actions {
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 /* The passcode is four digits, shown as dots: big and centred, so that each digit is easy to hit and see. */
 .field .passcode-input {
   font-family: var(--font-mono);
-  font-size: 24px;
+  font-size: var(--fs-title);
   letter-spacing: 0.4em;
   text-align: center;
 }
 
-.lock-message,
-.db-notice-message {
-  margin: 0;
-  font-weight: 600;
-  text-align: center;
-}
-
 .lock-message[role='alert'] {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .db-notice-card .btn {
@@ -1823,37 +2196,19 @@ textarea {
 .btn-link {
   background: transparent;
   color: var(--accent);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   text-decoration: underline;
-}
-
-/* Text for a screen reader only: in the page and in the accessibility tree, but not seen. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
 }
 
 /* ---- Forms ---- */
 
 /* The file input sits behind its label, which looks like a button; the input keeps the focus and shows it on the label. */
 .file-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
   opacity: 0;
 }
 
 .file-input:focus-visible + label {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -1863,213 +2218,93 @@ textarea {
   cursor: default;
 }
 
-.forms-import {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
 .forms-summary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sp-1);
   overflow-wrap: anywhere;
 }
 
-.forms-summary p {
-  margin: 0;
-  font-weight: 600;
-}
-
-.forms-summary ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.form-list,
-.setup-list,
-.setup-unsupported {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .form-list {
-  margin-top: 16px;
+  margin-top: var(--sp-4);
 }
 
-.form-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-}
-
-.form-link,
-.form-missing {
+.form-link {
   display: flex;
   align-items: center;
   flex: 1 1 12rem;
   min-width: 0;
   min-height: var(--target);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.form-link {
   color: inherit;
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
 }
 
 .form-missing {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .forms-drafts {
-  margin-top: 28px;
+  margin-top: var(--sp-5);
 }
 
+.column-picker legend,
 .forms-drafts h3,
 .setup-section h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.setup-form {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.setup-form > h2 {
-  margin: 0;
-  font-size: 22px;
-  overflow-wrap: anywhere;
-}
-
-.setup-identity {
-  margin: -16px 0 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+  padding: 0;
+  margin-bottom: var(--sp-1);
 }
 
 .setup-notice {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--amber);
-  border-radius: 8px;
-  background: var(--surface);
-  font-weight: 600;
+  gap: var(--sp-1);
+  border-left-color: var(--warn);
   overflow-wrap: anywhere;
-}
-
-.setup-notice p {
-  margin: 0;
-}
-
-.setup-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.setup-section .empty {
-  margin: 0;
 }
 
 .setup-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 12px;
+  padding-left: var(--sp-3);
   border-left: 3px solid var(--line);
 }
 
-.setup-group h4 {
-  margin: 4px 0 0;
-  font-size: 15px;
+.setup-group h4,
+.fill-group h4 {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   overflow-wrap: anywhere;
 }
 
-.setup-row {
-  min-width: 0;
-}
-
+.setup-row,
 .setup-row-name {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .setup-confirm {
-  margin-top: 6px;
+  margin-top: var(--sp-2);
 }
 
 .setup-unsupported {
-  gap: 6px;
-  padding-left: 20px;
+  gap: var(--sp-1);
   list-style: disc;
 }
 
 /* ---- Fill a form ---- */
 
-.fill-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.fill-form > h2 {
-  margin: 0;
-  font-size: 22px;
-  overflow-wrap: anywhere;
-}
-
-.fill-period {
-  margin: -12px 0 0;
-  font-weight: 600;
-  color: var(--muted);
-}
-
 .fill-questions {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
 
-.fill-section,
-.fill-group {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-
 .fill-section h3 {
-  margin: 8px 0 0;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-  font-size: 17px;
-  overflow-wrap: anywhere;
-}
-
-.fill-group h4 {
-  margin: 4px 0 0;
-  font-size: 15px;
+  margin: var(--sp-2) 0 0;
+  padding-bottom: var(--sp-2);
+  border-bottom: var(--bw) solid var(--line);
+  font-size: var(--fs-heading);
+  line-height: var(--lh-heading);
   overflow-wrap: anywhere;
 }
 
@@ -2077,74 +2312,31 @@ textarea {
   outline: none;
 }
 
-.fill-group .empty {
-  margin: 0;
-}
-
-/* A fieldset is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
+/* A fieldset (a `.card`) is as wide as its widest content unless told otherwise, which would push a phone screen sideways. */
 .fill-row {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
   margin: 0;
-  padding: 12px 14px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.fill-row legend {
-  padding: 0 6px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.fill-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .fill-field,
-.fill-field label,
-.field-label {
+.fill-field label {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.field-label {
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .field-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
+  gap: var(--sp-1) var(--sp-2);
 }
 
 .auto-mark {
-  padding: 1px 8px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
+  padding: 0 var(--sp-2);
+  border: var(--bw) solid var(--accent);
+  border-radius: var(--r-pill);
   color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.segmented {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.segmented .btn[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-strong);
 }
 
 /* ---- Helpers on the fill screen ---- */
@@ -2152,7 +2344,7 @@ textarea {
 /* An input with a button beside it (Now): the input takes the room that is left. */
 .input-row {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: stretch;
 }
 
@@ -2161,36 +2353,18 @@ textarea {
   min-width: 0;
 }
 
-.fill-helpers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .photo-thumb {
   display: block;
   max-width: 100%;
   max-height: 160px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-md);
   object-fit: contain;
   align-self: flex-start;
 }
 
-.crew-pick {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .crew-pick .check {
-  display: flex;
   align-items: flex-start;
-  gap: 10px;
-  min-height: 44px;
 }
 
 /* The hidden file input of Add photo stays inside its row of buttons, so that it never widens the page. */
@@ -2202,7 +2376,3 @@ textarea {
   top: 0;
   left: 0;
 }
-
-/* Crew import: what was found, and the settings folded under "Adjust columns". */
-.import-adjust { display: flex; flex-direction: column; gap: 16px; border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.import-adjust > summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }

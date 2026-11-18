@@ -70,8 +70,8 @@ describe('collectAlerts', () => {
     const member = crew({ id: 'c-1', givenNames: 'Ivan', surname: 'PETROVIĆ', passportExpiry: '2026-11-30' });
     const certificate = cert({ id: 'k-1', name: 'IOPP', expiryDate: '2026-12-01' });
     expect(alerts([member], [certificate])).toEqual([
-      { key: 'crewDoc:c-1', kind: 'crewDoc', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Passport expires 2026-11-30', href: '#/ship/crew/c-1' },
-      { key: 'certificate:k-1', kind: 'certificate', band: 'amber', title: 'IOPP', detail: 'Expires 2026-12-01', href: '#/ship/certificates/k-1' },
+      { key: 'crewDoc:c-1', kind: 'crewDoc', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Passport expires 2026-11-30', href: '#/ship/crew/c-1', due: '2026-11-30', what: 'Passport', person: { rank: 'Master', name: 'I. PETROVIĆ' } },
+      { key: 'certificate:k-1', kind: 'certificate', band: 'amber', title: 'IOPP', detail: 'Expires 2026-12-01', href: '#/ship/certificates/k-1', due: '2026-12-01', what: 'Ship certificate' },
     ]);
   });
 
@@ -214,7 +214,7 @@ describe('collectAlerts', () => {
 
     it('says Contract ends when the end is within 30 days, and links to the reliefs', () => {
       expect(on('2026-11-15')).toEqual([
-        { key: 'contract:c-9', kind: 'contract', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Contract ends 2026-12-01', href: '#/ship/reliefs' },
+        { key: 'contract:c-9', kind: 'contract', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Contract ends 2026-12-01', href: '#/ship/reliefs', due: '2026-12-01', what: 'Contract end', person: { rank: 'Master', name: 'I. PETROVIĆ' } },
       ]);
     });
     it('is amber from 30 days before the end, up to and including the last day', () => {
@@ -224,7 +224,7 @@ describe('collectAlerts', () => {
     });
     it('says the relief is overdue once the contract has ended', () => {
       expect(on('2026-12-02')).toEqual([
-        { key: 'contract:c-9', kind: 'contract', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Contract ended 2026-12-01 — relief overdue', href: '#/ship/reliefs' },
+        { key: 'contract:c-9', kind: 'contract', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Contract ended 2026-12-01 — relief overdue', href: '#/ship/reliefs', due: '2026-12-01', what: 'Contract end', person: { rank: 'Master', name: 'I. PETROVIĆ' } },
       ]);
     });
     it('has nothing to say about a contract with no length', () => {
@@ -248,13 +248,13 @@ describe('collectAlerts', () => {
 
     it('says when the limit will be reached, from 30 days before', () => {
       expect(on('2026-11-01', 11)).toEqual([
-        { key: 'onboardLimit:c-8', kind: 'onboardLimit', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Reaches 11-month onboard limit 2026-12-01', href: '#/ship/reliefs' },
+        { key: 'onboardLimit:c-8', kind: 'onboardLimit', band: 'amber', title: 'Ivan PETROVIĆ', detail: 'Reaches 11-month onboard limit 2026-12-01', href: '#/ship/reliefs', due: '2026-12-01', what: '11-month limit', person: { rank: 'Master', name: 'I. PETROVIĆ' } },
       ]);
       expect(on('2026-10-31', 11)).toEqual([]);
     });
     it('says since when the limit has been passed, from the day it is reached', () => {
       expect(on('2026-12-01', 11)).toEqual([
-        { key: 'onboardLimit:c-8', kind: 'onboardLimit', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Over 11-month onboard limit since 2026-12-01', href: '#/ship/reliefs' },
+        { key: 'onboardLimit:c-8', kind: 'onboardLimit', band: 'red', title: 'Ivan PETROVIĆ', detail: 'Over 11-month onboard limit since 2026-12-01', href: '#/ship/reliefs', due: '2026-12-01', what: '11-month limit', person: { rank: 'Master', name: 'I. PETROVIĆ' } },
       ]);
       expect(on('2027-02-01', 11)[0].detail).toBe('Over 11-month onboard limit since 2026-12-01');
     });
@@ -330,6 +330,7 @@ describe('collectAlerts', () => {
         {
           key: 'crewCertificate:d-1', kind: 'crewCertificate', band: 'amber', title: 'Ivan PETROVIĆ',
           detail: 'Medical fitness certificate expires 2026-12-24', href: '#/ship/crew/c-1',
+          due: '2026-12-24', what: 'Medical fitness certificate', person: { rank: 'Master', name: 'I. PETROVIĆ' },
         },
       ]);
     });
@@ -429,6 +430,74 @@ describe('collectAlerts', () => {
         [cert({ id: 'k-1', name: 'Alpha', expiryDate: '2026-12-01' })],
       );
       expect(a.map((x) => x.title)).toEqual(['Alpha', 'Zed LAST']);
+    });
+  });
+
+  describe('the structured date', () => {
+    /** Every kind of alert, amber and red, of a made-up ship. */
+    const everyKind = () => collectAlerts({
+      today: TODAY,
+      maxMonthsOnboard: 9,
+      crew: [
+        crew({ id: 'c-1', passportExpiry: '2026-11-30' }),
+        crew({ id: 'c-2', seamansBookExpiry: '2026-10-01' }),
+        crew({ id: 'c-3', signOnDate: '2026-06-01', contractMonths: 5, reliefPlannedDate: '2026-11-05' }),
+        crew({ id: 'c-4', signOnDate: '2026-01-10' }),
+        crew({ id: 'c-5', signOnDate: '2026-02-20' }),
+      ],
+      certificates: [
+        cert({ name: 'IOPP', expiryDate: '2026-12-01' }), cert({ name: 'ISSC', expiryDate: '2026-10-01' }),
+        cert({ name: 'Load Line', expiryDate: '2030-01-01', nextSurveyDue: '2026-11-11' }), cert({ name: 'SMC', expiryDate: '2030-01-01', nextSurveyDue: '2026-10-11' }),
+      ],
+      crewDocuments: [
+        crewDoc({ crewId: 'c-1', type: 'medical', expiryDate: '2026-12-24' }),
+        crewDoc({ crewId: 'c-1', type: 'other', typeOther: 'Tanker familiarisation', expiryDate: '2026-10-02' }),
+      ],
+    });
+
+    it('is the date the detail names, for every alert', () => {
+      const found = everyKind();
+      expect(new Set(found.map((x) => `${x.kind}:${x.band}`))).toEqual(new Set([
+        'crewDoc:amber', 'crewDoc:red', 'crewCertificate:amber', 'crewCertificate:red', 'certificate:amber', 'certificate:red',
+        'contract:amber', 'onboardLimit:amber', 'onboardLimit:red',
+      ]));
+      for (const x of found) expect(x.due, x.detail).toBe(/\d{4}-\d{2}-\d{2}/.exec(x.detail)?.[0]);
+    });
+
+    it('says what is due', () => {
+      expect(everyKind().map((x) => [x.detail, x.what])).toEqual([
+        ['Expired 2026-10-01', 'Ship certificate'],
+        ["Seaman's book expired 2026-10-01", "Seaman's book"],
+        ['Tanker familiarisation expired 2026-10-02', 'Tanker familiarisation'],
+        ['Over 9-month onboard limit since 2026-10-10', '9-month limit'],
+        ['Survey overdue 2026-10-11', 'Survey'],
+        ['Contract ends 2026-11-01', 'Contract end'],
+        ['Survey due 2026-11-11', 'Survey'],
+        ['Reaches 9-month onboard limit 2026-11-20', '9-month limit'],
+        ['Passport expires 2026-11-30', 'Passport'],
+        ['Expires 2026-12-01', 'Ship certificate'],
+        ['Medical fitness certificate expires 2026-12-24', 'Medical fitness certificate'],
+      ]);
+    });
+
+    it('names the person by rank and initial for the crew, and nobody for a certificate', () => {
+      const [passport] = alerts([crew({ rank: 'secondOfficer', givenNames: 'Robert James', surname: 'EXAMPLE', passportExpiry: '2026-11-01' })]);
+      expect(passport.person).toEqual({ rank: '2nd Officer', name: 'R. EXAMPLE' });
+      const [noGiven] = alerts([crew({ rank: 'other', rankOther: 'Cadet', givenNames: '  ', surname: 'SAMPLE', passportExpiry: '2026-11-01' })]);
+      expect(noGiven.person).toEqual({ rank: 'Cadet', name: 'SAMPLE' });
+      const [certificate] = alerts([], [cert({ expiryDate: '2026-11-01' })]);
+      expect(certificate.person).toBeUndefined();
+      expect(everyKind().filter((x) => x.kind !== 'certificate').every((x) => x.person?.rank === 'Master')).toBe(true);
+    });
+
+    it('carries the planned relief of a contract, and only when there is one', () => {
+      const on = (over: Partial<CrewMember>) => collectAlerts({
+        today: '2026-11-15', maxMonthsOnboard: 11, certificates: [], crewDocuments: [], crew: [crew({ signOnDate: '2026-06-01', contractMonths: 6, ...over })],
+      });
+      expect(on({ reliefPlannedDate: '2026-12-05' })[0].reliefPlanned).toBe('2026-12-05');
+      expect(on({})[0]).not.toHaveProperty('reliefPlanned');
+      expect(on({ reliefPlannedDate: '' })[0]).not.toHaveProperty('reliefPlanned');
+      expect(everyKind().filter((x) => x.reliefPlanned !== undefined).map((x) => [x.kind, x.reliefPlanned])).toEqual([['contract', '2026-11-05']]);
     });
   });
 

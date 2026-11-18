@@ -3,7 +3,7 @@ import { forgetPassword, getRememberedPassword, rememberPassword } from '../back
 import { openDb } from '../db/schema';
 import { getSettings, updateSettings } from '../db/settings';
 import { createShip, listShips } from '../db/ships';
-import { THEME_STORAGE_KEY } from '../ui/theme';
+import { NIGHT_STORAGE_KEY, THEME_STORAGE_KEY } from '../ui/theme';
 import { ERASE_WAITING_MESSAGE, eraseDeviceData } from './eraseDevice';
 
 const name = () => 't-' + crypto.randomUUID();
@@ -19,7 +19,7 @@ describe('eraseDeviceData', () => {
     const dbName = name();
     const db = openDb(dbName);
     await createShip(db, 'MV OCEAN STAR', 180);
-    await updateSettings(db, { theme: 'night', lockPrompted: true });
+    await updateSettings(db, { theme: 'dark', lockPrompted: true });
     const { deviceId } = await getSettings(db);
 
     await eraseDeviceData(db);
@@ -54,8 +54,8 @@ describe('eraseDeviceData', () => {
     await getSettings(db);
     await eraseDeviceData(db);
     expect(getRememberedPassword()).toBeUndefined();
-    expect(removed).toEqual([THEME_STORAGE_KEY]);
-    expect(THEME_STORAGE_KEY).toBe('mp-theme');
+    expect(removed).toEqual([THEME_STORAGE_KEY, NIGHT_STORAGE_KEY]);
+    expect([THEME_STORAGE_KEY, NIGHT_STORAGE_KEY]).toEqual(['mp-theme', 'mp-night']);
   });
 
   it('does not mind that the browser keeps no local storage', async () => {
@@ -158,7 +158,7 @@ describe('eraseDeviceData', () => {
       other.close();
       await erase;
       expect(getRememberedPassword()).toBeUndefined();
-      expect(removed).toEqual([THEME_STORAGE_KEY]);
+      expect(removed).toEqual([THEME_STORAGE_KEY, NIGHT_STORAGE_KEY]);
       expect(await listShips(openDb(dbName))).toEqual([]);
     });
 

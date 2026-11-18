@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectInputFonts, expectNoHorizontalScroll, expectRedOnly, expectTargets, failWrites, freshApp, openMore, setTheme, setupShip } from './helpers';
 
 // Opening a passcode takes a moment (100,000 PBKDF2 rounds): every wait below is on what the page shows, never a sleep.
 // The clock is the one `freshApp` installs, so a lockout and the time in the background are moved with `page.clock`.
@@ -95,7 +95,7 @@ async function wipeAndOpenImport(page: Page, file: string): Promise<void> {
 }
 
 async function openSettings(page: Page): Promise<void> {
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
+  await openMore(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 }
 
@@ -843,4 +843,13 @@ test('Erase everything: when another page keeps the database open, the dialog sa
   // The other page lets go: the delete that was asked for goes through, and this page starts again from nothing.
   await other.evaluate(() => (window as unknown as { stubborn: IDBDatabase }).stubborn.close());
   await expect(page.getByRole('button', { name: 'Create your first ship' })).toBeVisible();
+});
+
+test('the lock screen in Night red: red and black, with 44 px controls and a 16 px passcode', async ({ page }) => {
+  await deviceWithLock(page);
+  await setTheme(page, 'Night red');
+  await page.reload(); await expect(lockedHeading(page)).toBeVisible();
+  await expectRedOnly(page);
+  await expectTargets(page);
+  await expectInputFonts(page);
 });

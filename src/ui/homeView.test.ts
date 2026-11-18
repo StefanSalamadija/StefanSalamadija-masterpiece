@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { ClockChange, FormDraft, FormTemplate, Settings } from '../domain/types';
+import type { FormDraft, FormTemplate, Settings } from '../domain/types';
 import type { FieldDef, FormSchema, FormSetup, RowGroupDef } from '../forms/types';
-import { historyRows } from './shipTimeView';
-import { alertBadgeKind, backupBannerText, backupReminder, clockChangeText, formsInProgress, PERSISTENCE_DENIED_NOTICE } from './homeView';
+import { backupBannerText, backupReminder, formsInProgress, PERSISTENCE_DENIED_NOTICE } from './homeView';
 
 const NOW = new Date('2026-10-25T12:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
@@ -68,99 +67,6 @@ describe('PERSISTENCE_DENIED_NOTICE', () => {
     expect(PERSISTENCE_DENIED_NOTICE).toBe(
       "This browser may clear Masterpiece's data when storage runs low. Install the app and export backups regularly.",
     );
-  });
-});
-
-let seq = 0;
-function change(effectiveAt: string, toOffsetMinutes: number, over: Partial<ClockChange> = {}): ClockChange {
-  seq += 1;
-  return {
-    id: `cc-${String(seq).padStart(3, '0')}`, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-    updatedBy: 'device', deleted: false, scope: 'ship', shipId: 'ship-1', effectiveAt, toOffsetMinutes, ...over,
-  };
-}
-
-describe('clockChangeText', () => {
-  const past = change('2026-01-01T00:00:00.000Z', 180);
-
-  it('is nothing when no change is scheduled', () => {
-    expect(clockChangeText([], NOW)).toBeUndefined();
-    expect(clockChangeText([past], NOW)).toBeUndefined();
-    expect(clockChangeText([past, change('2026-10-20T00:00:00.000Z', 240)], NOW)).toBeUndefined();
-  });
-
-  it('is nothing for a change that is happening this very instant, which has taken effect', () => {
-    expect(clockChangeText([past, change(NOW.toISOString(), 240)], NOW)).toBeUndefined();
-  });
-
-  it('reads the time on the clocks before the change, as the history does', () => {
-    // 22:00Z at +03:00 is 01:00 on the next day.
-    expect(clockChangeText([past, change('2026-10-25T22:00:00.000Z', 300)], NOW)).toBe('Clock change 26 Oct 01:00 → UTC+05:00');
-  });
-
-  it('reads the time of the first change of a ship at its own offset, as it has nothing before it', () => {
-    expect(clockChangeText([change('2026-10-26T00:00:00.000Z', 180)], NOW)).toBe('Clock change 26 Oct 03:00 → UTC+03:00');
-  });
-
-  it('reads the time before a scheduled change with the change scheduled before it', () => {
-    const changes = [past, change('2026-10-26T00:00:00.000Z', 240), change('2026-10-27T00:00:00.000Z', 120)];
-    // The first of the two is at +03:00, the second is read at +04:00.
-    expect(clockChangeText(changes, NOW)).toBe('Clock change 26 Oct 03:00 → UTC+04:00');
-    expect(clockChangeText(changes, new Date('2026-10-26T00:00:00.000Z'))).toBe('Clock change 27 Oct 04:00 → UTC+02:00');
-  });
-
-  it('is the next change of several, whatever order they are in', () => {
-    const later = change('2026-11-20T00:00:00.000Z', 120);
-    const sooner = change('2026-10-30T00:00:00.000Z', 240);
-    expect(clockChangeText([later, past, sooner], NOW)).toBe('Clock change 30 Oct 03:00 → UTC+04:00');
-  });
-
-  it('leaves out a change that was cancelled', () => {
-    const cancelled = change('2026-10-26T00:00:00.000Z', 240, { deleted: true });
-    const kept = change('2026-11-20T00:00:00.000Z', 120);
-    expect(clockChangeText([past, cancelled], NOW)).toBeUndefined();
-    expect(clockChangeText([past, cancelled, kept], NOW)).toBe('Clock change 20 Nov 03:00 → UTC+02:00');
-  });
-
-  it('writes the offset with a sign, hours and minutes', () => {
-    expect(clockChangeText([change('2026-10-26T12:00:00.000Z', -570)], NOW)).toBe('Clock change 26 Oct 02:30 → UTC-09:30');
-    expect(clockChangeText([change('2026-10-26T12:00:00.000Z', 0)], NOW)).toBe('Clock change 26 Oct 12:00 → UTC+00:00');
-  });
-
-  it('writes the day with two digits and the month with three letters', () => {
-    expect(clockChangeText([change('2026-11-05T00:00:00.000Z', 0)], NOW)).toBe('Clock change 05 Nov 00:00 → UTC+00:00');
-  });
-
-  it.each([
-    ['01', 'Jan'], ['02', 'Feb'], ['03', 'Mar'], ['04', 'Apr'], ['05', 'May'], ['06', 'Jun'],
-    ['07', 'Jul'], ['08', 'Aug'], ['09', 'Sep'], ['10', 'Oct'], ['11', 'Nov'], ['12', 'Dec'],
-  ])('names month %s %s', (month, name) => {
-    const text = clockChangeText([change(`2027-${month}-15T00:00:00.000Z`, 0)], NOW);
-    expect(text).toBe(`Clock change 15 ${name} 00:00 → UTC+00:00`);
-  });
-
-  it('shows the time that the ship time history shows for the same change', () => {
-    const changes = [past, change('2026-10-25T22:00:00.000Z', 300), change('2026-12-01T05:30:00.000Z', -60)];
-    for (const now of [NOW, new Date('2026-10-26T00:00:00.000Z')]) {
-      const next = changes.find((c) => Date.parse(c.effectiveAt) > now.getTime())!;
-      const row = historyRows(changes, now).find((r) => r.id === next.id)!;
-      const [date, time] = row.when.split(' ');
-      expect(clockChangeText(changes, now)).toMatch(new RegExp(` ${date.slice(8)} \\w{3} ${time} `));
-    }
-  });
-});
-
-describe('alertBadgeKind', () => {
-  it('words a crew document as a crew warning and a certificate as a certificate warning', () => {
-    expect(alertBadgeKind('crewDoc')).toBe('crew');
-    expect(alertBadgeKind('certificate')).toBe('certificate');
-  });
-  it('words a crew certificate as a crew warning', () => {
-    expect(alertBadgeKind('crewCertificate')).toBe('crew');
-  });
-  it('words a contract end as a relief, and the months onboard as the onboard limit', () => {
-    expect(alertBadgeKind('contract')).toBe('contract');
-    expect(alertBadgeKind('onboardLimit')).toBe('limit');
   });
 });
 

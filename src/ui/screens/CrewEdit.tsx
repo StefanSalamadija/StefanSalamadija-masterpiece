@@ -5,7 +5,7 @@ import { navigate, useRoute } from '../../app/router';
 import { createRecord, listForShip, updateRecord } from '../../db/records';
 import { docBand, docLabel, sortDocuments } from '../../domain/crewDocs';
 import type { CrewMember, FieldError } from '../../domain/types';
-import { BandBadge } from '../components/BandBadge';
+import { BandBadge, ROW_TONE } from '../components/BandBadge';
 import { CrewFields } from '../components/CrewFields';
 import {
   blankCrewForm, CONTROL_ORDER, crewFieldsOf, crewFormOf, crewFormProblems, crewPatchOf, isCrewFormChanged, problemsByControl,
@@ -107,25 +107,28 @@ function Documents({ member, unsaved }: { member: CrewMember; unsaved: boolean }
       {refused && unsaved && <p class="field-error" role="alert">{SAVE_FIRST}</p>}
       {rows?.length === 0 && <p class="empty">No documents yet.</p>}
       {rows && rows.length > 0 && (
-        <ul class="document-list" role="list" aria-label="Documents">
-          {rows.map((d) => (
-            <li key={d.id} class="card document-row">
-              <a
-                class="document-link" href={`#${documentsScreen}/${encodeURIComponent(d.id)}`}
-                onClick={(event) => {
-                  if (!unsaved || !opensHere(event)) return;
-                  event.preventDefault();
-                  setRefused(true);
-                }}
-              >
-                <span class="document-head">
-                  <span class="document-label">{docLabel(d)}</span>
-                  <BandBadge band={docBand(d, shipToday)} kind="crew" />
-                </span>
-                <span class="document-details">{documentDetails(d).map((detail) => <span key={detail}>{detail}</span>)}</span>
-              </a>
-            </li>
-          ))}
+        <ul class="row-list" role="list" aria-label="Documents">
+          {rows.map((d) => {
+            const band = docBand(d, shipToday);
+            return (
+              <li key={d.id}>
+                <a
+                  class="list-row" data-tone={ROW_TONE[band]} href={`#${documentsScreen}/${encodeURIComponent(d.id)}`}
+                  onClick={(event) => {
+                    if (!unsaved || !opensHere(event)) return;
+                    event.preventDefault();
+                    setRefused(true);
+                  }}
+                >
+                  <span class="list-row-text">
+                    <span class="list-row-title">{docLabel(d)}</span>
+                    <span class="list-row-meta">{documentDetails(d).map((detail) => <span key={detail}>{detail}</span>)}</span>
+                  </span>
+                  <BandBadge band={band} kind="crew" />
+                </a>
+              </li>
+            );
+          })}
         </ul>
       )}
       <button
