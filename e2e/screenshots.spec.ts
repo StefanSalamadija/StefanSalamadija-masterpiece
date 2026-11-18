@@ -20,6 +20,8 @@ const DUE_READY = '.list-row, .due-none, .empty';
  */
 export const SCREENS: { name: string; path: string; ready?: string }[] = [
   { name: 'home', path: '/' },
+  { name: 'ship', path: '/ship' },
+  { name: 'more', path: '/more' },
   { name: 'particulars', path: '/ship/particulars' },
   { name: 'crew', path: '/ship/crew' },
   { name: 'crew-new', path: '/ship/crew/new' },

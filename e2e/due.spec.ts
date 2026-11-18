@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { expectNoHorizontalScroll, expectRedOnly, freshApp, setTheme, setupShip } from './helpers';
+import { expectNoHorizontalScroll, expectRedOnly, freshApp, openShipSection, setTheme, setupShip } from './helpers';
 
 // The clock is 2026-11-17T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-11-17. The data is made up:
 // R. EXAMPLE's passport ran out on 12 Nov (5 days ago) and the International Load Line certificate expires on 1 Dec (in
@@ -81,8 +81,9 @@ test('the old Expiring route opens Before next port, and Back skips it', async (
   await expect(page).toHaveURL(/#\/ship\/crew$/);
   await expect(page.getByRole('heading', { name: 'Crew', exact: true })).toBeVisible();
 
-  // The Ship chip goes straight to the new view; the views link to each other.
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Expiring' }).click();
+  // The Crew documents tile of the Ship hub leads to the new view; the views link to each other.
+  await openShipSection(page, 'Crew documents');
+  await page.getByRole('main').getByRole('link', { name: 'Before next port' }).click();
   await expect(page).toHaveURL(/#\/due\/port$/);
   await views(page).getByRole('link', { name: 'All due' }).click();
   await expect(page).toHaveURL(/#\/due$/);

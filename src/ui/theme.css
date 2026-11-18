@@ -390,7 +390,6 @@ body {
 }
 
 /* Text that sets its own medium weight gets the high-contrast weight too. The mono clock stays 500: the only weight bundled. */
-:root[data-theme='contrast'] .brand h1,
 :root[data-theme='contrast'] .field label,
 :root[data-theme='contrast'] .field-error {
   font-weight: 600;
@@ -430,7 +429,7 @@ textarea {
   margin: 0 auto;
 }
 
-/* ---- Shell: header, content, bottom bar ---- */
+/* ---- Shell: header, content, bottom bar (the canvas "Main" and "Ship hub") ---- */
 
 .shell {
   min-height: 100vh;
@@ -439,9 +438,10 @@ textarea {
   flex-direction: column;
 }
 
+/* The page keeps clear of the phone's rounded corners and notch when it is turned on its side. */
 .page {
   flex: 1;
-  padding: 16px;
+  padding: var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-right)) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-left));
 }
 
 .bar-inner {
@@ -450,10 +450,12 @@ textarea {
   margin: 0 auto;
 }
 
+/* 56 px under the status bar: the ship pill, the clock and the theme button. */
 .app-header {
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-top: env(safe-area-inset-top);
   background: var(--bar-bg);
   color: var(--bar-text);
   border-bottom: 1px solid var(--bar-border);
@@ -462,91 +464,69 @@ textarea {
 .app-header .bar-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px 12px;
+  gap: var(--sp-3);
+  height: 55px; /* and its line below: 56 */
+  padding: 0 calc(var(--sp-4) + env(safe-area-inset-right)) 0 calc(var(--sp-4) + env(safe-area-inset-left));
 }
 
-.header-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.brand {
+.ship-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--bar-line);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--bar-text);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
 }
 
-.brand svg {
-  flex: none;
-}
-
-/* The logo's navy waves are the colour of the bars, so a faint ring keeps the tile's edge visible on them. */
-.brand svg,
-.welcome-band svg {
-  border-radius: 22%;
-  box-shadow: 0 0 0 1px var(--bar-border);
-}
-
-.brand h1 {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--bar-muted);
-}
-
-.ship-name {
-  margin: 2px 0 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.2;
+.ship-pill-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-side {
+.ship-pill svg {
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  transform: rotate(90deg);
 }
 
 .clock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-
-.clock-time {
+  flex: none;
+  margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.clock-zone {
-  font-size: 11px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: 500; /* the only weight of the mono font bundled */
   color: var(--bar-muted);
   white-space: nowrap;
 }
 
 .theme-btn {
   position: relative;
+  flex: none;
   width: 44px;
   height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--bar-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bar-text) 10%, transparent);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--bar-text);
   cursor: pointer;
+}
+
+/* Night red's moon is solid, so it reads apart from Dark's outline moon. */
+.theme-btn[data-icon='red'] path {
+  fill: currentColor;
 }
 
 /* The "A" of automatic night, in the button's corner. */
@@ -564,10 +544,16 @@ textarea {
   height: 48px;
 }
 
+:root[data-theme='contrast'] .ship-pill {
+  border-width: 2px;
+}
+
+/* 64 px above the home indicator: Home, Ship, Forms, Budget and More. */
 .app-nav {
   position: sticky;
   bottom: 0;
   z-index: 10;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--nav-bg);
   border-top: 1px solid var(--line);
   box-shadow: var(--shadow-2);
@@ -582,22 +568,33 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  min-height: 56px;
-  padding: 10px 0 14px;
-  font-size: 11px;
+  justify-content: center;
+  gap: 2px;
+  height: 63px; /* and the line above: 64 */
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  font-weight: var(--fw-medium);
   text-decoration: none;
   color: var(--nav-text);
 }
 
-.nav-link[aria-current='page'] {
-  color: var(--nav-active);
-  font-weight: 600;
+/* The icon sits in a pill, which the active tab fills. */
+.nav-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 28px;
+  border-radius: var(--r-pill);
 }
 
-:root[data-theme='contrast'] .nav-link {
-  font-size: 12px;
-  font-weight: 600;
+.nav-link[aria-current='page'] {
+  color: var(--nav-active);
+  font-weight: var(--fw-strong);
+}
+
+.nav-link[aria-current='page'] .nav-pill {
+  background: var(--nav-pill);
 }
 
 :root[data-theme='contrast'] .nav-link[aria-current='page'] {
@@ -606,13 +603,153 @@ textarea {
   text-decoration-thickness: 2px;
 }
 
-/* ---- Ship sub-navigation: a row of chips ---- */
+/* ---- The way back from a Ship section to the hub ---- */
 
-.ship-nav {
-  width: 100%;
-  max-width: var(--page-width);
-  margin: 0 auto;
+.section-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--target);
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-2);
 }
+
+.section-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-right: var(--sp-2);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  font-weight: var(--fw-strong);
+  text-decoration: none;
+}
+
+.section-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The Ship hub: eight tiles, two to a row ---- */
+
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hub-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  height: 100%;
+  min-height: 112px;
+  padding: var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.hub-icon,
+.more-icon {
+  display: flex;
+  color: var(--accent);
+}
+
+.hub-name {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-strong);
+  overflow-wrap: anywhere;
+}
+
+.hub-status {
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+.hub-status:empty {
+  display: none;
+}
+
+/* Night red, as drawn: the tiles are outlined, and their icons are in the text's red. */
+:root[data-theme='red'] .hub-tile {
+  border-color: var(--line);
+}
+
+:root[data-theme='red'] .hub-icon,
+:root[data-theme='red'] .more-icon {
+  color: var(--text);
+}
+
+:root[data-theme='contrast'] .hub-tile {
+  border: 2px solid var(--line);
+}
+
+/* ---- More: a large row for each screen with no tab ---- */
+
+.more-row {
+  justify-content: flex-start;
+}
+
+.more-chevron {
+  display: flex;
+  color: var(--text-muted);
+}
+
+/* ---- The ship switcher: a sheet from the bottom of the screen ---- */
+
+.switcher {
+  width: 100%;
+  max-width: none;
+  max-height: 85dvh;
+  margin: auto 0 0;
+  border-width: 1px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+
+:root[data-theme='contrast'] .switcher {
+  border-width: 3px 0 0;
+}
+
+.switcher-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) calc(var(--sp-4) + env(safe-area-inset-right)) calc(var(--sp-4) + env(safe-area-inset-bottom)) calc(var(--sp-4) + env(safe-area-inset-left));
+}
+
+.switcher-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+}
+
+.switcher-ship {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switcher-ship[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+
+:root[data-theme='red'] .switcher-ship[aria-pressed='true'] {
+  border-color: var(--text);
+}
+
+/* ---- A row of chips (the budget's and the library's) ---- */
 
 .chips {
   display: flex;
@@ -778,6 +915,12 @@ textarea {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+/* The logo's navy waves are the colour of the bars, so a faint ring keeps the tile's edge visible on them. */
+.welcome-band svg {
+  border-radius: 22%;
+  box-shadow: 0 0 0 1px var(--bar-border);
 }
 
 .welcome-band {
@@ -2036,6 +2179,8 @@ textarea {
   flex-direction: column;
   gap: 12px;
   margin-bottom: 28px;
+  /* A section opened from More (`?at=`) is scrolled to just below the header. */
+  scroll-margin-top: calc(56px + env(safe-area-inset-top) + var(--sp-2));
 }
 
 .settings-section h3 {

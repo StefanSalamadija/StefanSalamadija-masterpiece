@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openMore, setupShip } from './helpers';
 
 // Opening a passcode takes a moment (100,000 PBKDF2 rounds): every wait below is on what the page shows, never a sleep.
 // The clock is the one `freshApp` installs, so a lockout and the time in the background are moved with `page.clock`.
@@ -95,7 +95,7 @@ async function wipeAndOpenImport(page: Page, file: string): Promise<void> {
 }
 
 async function openSettings(page: Page): Promise<void> {
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
+  await openMore(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 }
 

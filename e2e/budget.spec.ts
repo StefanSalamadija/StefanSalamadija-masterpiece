@@ -92,7 +92,7 @@ function seed(page: Page, table: string, records: Record<string, unknown>[]): Pr
 
 test('budget: Home has a Budget card and a "+ Expense" button, and the manifest a shortcut to quick add', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  const card = page.getByRole('link', { name: /^Budget/ });
+  const card = page.getByRole('main').getByRole('link', { name: /^Budget/ });
   await expect(card).toBeVisible();
   await card.click();
   await expect(page).toHaveURL(/#\/budget$/);

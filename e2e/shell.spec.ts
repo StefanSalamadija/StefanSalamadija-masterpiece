@@ -159,24 +159,25 @@ test('welcome asks for a ship name, and links to the import screen', async ({ pa
   await expect(page.getByRole('heading', { name: 'Masterpiece' })).toBeVisible();
 });
 
-test('navigation links, the ship chips, and unknown routes falling back to Home', async ({ page }) => {
+test('navigation links, the Ship hub tiles, and unknown routes falling back to Home', async ({ page }) => {
   await freshApp(page); await setupShip(page);
   const main = page.getByRole('navigation', { name: 'Main' });
-  await expect(main.getByRole('link')).toHaveText(['Home', 'Ship', 'Forms', 'Profiles', 'Settings']);
-  for (const name of ['Home', 'Ship', 'Forms', 'Profiles', 'Settings']) await expect(main.getByRole('link', { name })).toBeVisible();
+  await expect(main.getByRole('link')).toHaveText(['Home', 'Ship', 'Forms', 'Budget', 'More']);
+  for (const name of ['Home', 'Ship', 'Forms', 'Budget', 'More']) await expect(main.getByRole('link', { name, exact: true })).toBeVisible();
   await main.getByRole('link', { name: 'Forms' }).click();
   await expect(page).toHaveURL(/#\/forms$/);
   await expect(main.getByRole('link', { name: 'Forms' })).toHaveAttribute('aria-current', 'page');
   await expectNoHorizontalScroll(page);
   await main.getByRole('link', { name: 'Home' }).click();
-  await expect(page.getByRole('navigation', { name: 'Ship sections' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Ship sections', exact: true })).toHaveCount(0);
 
-  await main.getByRole('link', { name: 'Ship' }).click();
-  await expect(page).toHaveURL(/#\/ship\/particulars$/);
-  const chips = page.getByRole('navigation', { name: 'Ship sections' });
-  await expect(chips.getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Expiring', 'Certificates', 'Voyage', "Ship's time", 'Draft survey']);
-  for (const name of ['Particulars', 'Crew', 'Reliefs', 'Expiring', 'Certificates', 'Voyage', "Ship's time", 'Draft survey']) await expect(chips.getByRole('link', { name })).toBeVisible();
-  await expect(chips.getByRole('link', { name: 'Particulars' })).toHaveAttribute('aria-current', 'page');
+  await main.getByRole('link', { name: 'Ship', exact: true }).click();
+  await expect(page).toHaveURL(/#\/ship$/);
+  const tiles = page.getByRole('navigation', { name: 'Ship sections', exact: true });
+  const names = ['Crew', 'Crew documents', 'Certificates', 'Contracts & reliefs', 'Voyage', "Ship's time", 'Draft survey', 'Particulars'];
+  await expect(tiles.getByRole('link')).toHaveText(names);
+  for (const name of names) await expect(tiles.getByRole('link', { name, exact: true })).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Ship', exact: true })).toHaveAttribute('aria-current', 'page');
   await expectNoHorizontalScroll(page);
 
   await page.goto('./#/nowhere');

@@ -93,6 +93,16 @@
     position: static;
   }
 
+  /* The ship pill prints as the ship's name alone. */
+  .ship-pill {
+    padding: 0;
+    border: 0;
+  }
+
+  .ship-pill svg {
+    display: none;
+  }
+
   .no-print {
     display: none !important;
   }

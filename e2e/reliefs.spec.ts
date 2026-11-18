@@ -8,7 +8,7 @@ const reliefList = (page: Page) => page.getByRole('list', { name: 'Reliefs' });
 const reliefRow = (page: Page, name: string) => reliefList(page).getByRole('listitem').filter({ hasText: name });
 const alertsRegion = (page: Page) => page.getByRole('region', { name: 'Alerts' });
 const alertItems = (page: Page) => alertsRegion(page).getByRole('listitem');
-const shipChips = (page: Page) => page.getByRole('navigation', { name: 'Ship sections' });
+const shipHub = (page: Page) => page.getByRole('navigation', { name: 'Ship sections', exact: true });
 
 interface NewMember {
   surname: string;
@@ -124,11 +124,13 @@ test('the Reliefs chip follows Crew, and the screen lists the onboard crew by co
   await page.getByRole('dialog').getByRole('button', { name: 'Sign off' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  await shipChips(page).getByRole('link', { name: 'Reliefs' }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
+  await expect(shipHub(page).getByRole('link')).toHaveText(['Crew', 'Crew documents', 'Certificates', 'Contracts & reliefs', 'Voyage', "Ship's time", 'Draft survey', 'Particulars']);
+  await shipHub(page).getByRole('link', { name: 'Contracts & reliefs', exact: true }).click();
   await expect(page).toHaveURL(/#\/ship\/reliefs$/);
   await expect(page.getByRole('heading', { name: 'Reliefs' })).toBeVisible();
-  await expect(shipChips(page).getByRole('link')).toHaveText(['Particulars', 'Crew', 'Reliefs', 'Expiring', 'Certificates', 'Voyage', "Ship's time", 'Draft survey']);
-  await expect(shipChips(page).getByRole('link', { name: 'Reliefs' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Ship section', exact: true })).toContainText('Contracts & reliefs');
+  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(reliefList(page).getByRole('listitem')).toHaveText([/Soon SOONER/, /Late LATER/, /No NOLENGTH/]);
   await expect(reliefRow(page, 'Soon SOONER')).toContainText('Contract ends 2026-12-01');
   await expect(reliefRow(page, 'Soon SOONER')).toContainText('Onboard 86 days');

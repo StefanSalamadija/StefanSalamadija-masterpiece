@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openMore, openShipSection, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25.
 
@@ -130,10 +130,9 @@ test('certificates list: the Add link and an empty register', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Delete' })).toHaveCount(0); // nothing to delete yet
 });
 
-test('certificates list: the ship nav leads to the register', async ({ page }) => {
+test('certificates list: the Ship hub leads to the register', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Certificates' }).click();
+  await openShipSection(page, 'Certificates');
   await expect(page).toHaveURL(/#\/ship\/certificates$/);
   await expect(page.getByRole('link', { name: 'Add certificate' })).toBeVisible();
 });
@@ -397,11 +396,10 @@ test('certificates: the screens and the dialog fit a 360 px phone, even with lon
 });
 
 test.describe('with the ship profiles', () => {
-  const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
   const shipRow = (page: Page, name: string) => page.getByRole('list', { name: 'Ships' }).getByRole('listitem').filter({ hasText: name });
 
   async function openProfiles(page: Page): Promise<void> {
-    await mainNav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+    await openMore(page, 'Profiles');
     await expect(page.getByRole('button', { name: 'New ship' })).toBeVisible();
   }
 

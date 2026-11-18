@@ -1,19 +1,17 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, holdWrites, releaseWrites, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, holdWrites, openMore, openShipSection, releaseWrites, setupShip } from './helpers';
 
-const mainNav = (page: Page) => page.getByRole('navigation', { name: 'Main' });
 const shipList = (page: Page) => page.getByRole('list', { name: 'Ships' });
 const row = (page: Page, name: string) => shipList(page).getByRole('listitem').filter({ hasText: name });
 
 async function openParticulars(page: Page): Promise<void> {
-  await mainNav(page).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Particulars' }).click();
+  await openShipSection(page, 'Particulars');
   await expect(page.getByLabel('Ship name')).toBeVisible();
 }
 
 async function openProfiles(page: Page): Promise<void> {
-  await mainNav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+  await openMore(page, 'Profiles');
   await expect(page.getByRole('button', { name: 'New ship' })).toBeVisible();
 }
 

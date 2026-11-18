@@ -201,7 +201,7 @@ test('print crew list and export to Excel', async ({ page }) => {
   expect(logoBox?.width).toBeCloseTo(16, 0);
   expect(logoBox?.height).toBeCloseTo(16, 0);
   expect(await footerLogo.locator('[fill]:not([fill="none"]), defs, linearGradient, radialGradient, clipPath').count()).toBe(0);
-  await expect(page.getByRole('img', { name: 'Masterpiece logo' })).toHaveCount(1);   // the header's; the footer's is not read out as a second one
+  await expect(page.getByRole('img', { name: 'Masterpiece logo' })).toHaveCount(0);   // none in the header any more, and the footer's is not read out
 
   // One checkbox per column, the default ones ticked.
   const columns = page.getByRole('group', { name: 'Columns' });
@@ -256,7 +256,7 @@ test('print crew list and export to Excel', async ({ page }) => {
   await expect(page.getByLabel('Passport no.')).toBeHidden();
   await expect(page.getByRole('banner')).toBeHidden();
   await expect(page.getByRole('navigation', { name: 'Main' })).toBeHidden();
-  await expect(page.getByRole('navigation', { name: 'Ship sections' })).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Ship section', exact: true })).toBeHidden();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('columnheader')).toHaveCount(10);
   await page.emulateMedia({ media: null });

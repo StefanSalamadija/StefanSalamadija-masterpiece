@@ -4,7 +4,7 @@ import type { Page } from '@playwright/test';
 import { strFromU8, unzipSync } from 'fflate';
 import * as XLSX from 'xlsx';
 import { FAKE_FINAL, FAKE_INITIAL, makeSurveyWorkbook, moveCell } from './fixtures/makeSurveyWorkbook';
-import { expectNoHorizontalScroll, freshApp, setupShip } from './helpers';
+import { expectNoHorizontalScroll, freshApp, openShipSection, setupShip } from './helpers';
 
 // The workbook, the ship and every survey figure here are made up (e2e/fixtures/makeSurveyWorkbook.ts). The expected
 // results are the engine's, pinned in src/survey/calc.test.ts: initial nett 4175.858 t, light ship 6850.4 t, final nett
@@ -18,8 +18,7 @@ const surveys = (page: Page) => page.getByRole('list', { name: 'Surveys' }).getB
 /** A ship, then the made-up workbook imported and saved from Ship → Draft survey → Ship data. */
 async function importShipData(page: Page, opts: { reviewPreview?: boolean } = {}): Promise<void> {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Draft survey' }).click();
+  await openShipSection(page, 'Draft survey');
   await expect(page).toHaveURL(/#\/ship\/survey$/);
   await expect(page.getByText("Import the ship's data from the company workbook first.")).toBeVisible();
   await page.getByRole('link', { name: 'Ship data' }).click();

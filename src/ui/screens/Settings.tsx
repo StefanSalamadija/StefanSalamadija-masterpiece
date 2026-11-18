@@ -58,8 +58,8 @@ function BackupSection() {
   };
 
   return (
-    <div class="settings-section">
-      <h3>Backup</h3>
+    <div class="settings-section" id="settings-backup">
+      <h3 tabIndex={-1}>Backup</h3>
       <p class="helper-text">A backup is one encrypted file. Keep a copy somewhere other than this device.</p>
       <div class="form-actions">
         <button ref={fullButton} type="button" class="btn btn-primary" onClick={() => open('full')}>Export full backup</button>
@@ -336,8 +336,8 @@ function ThemeSection() {
   );
 
   return (
-    <div class="settings-section">
-      <h3>Display</h3>
+    <div class="settings-section" id="settings-display">
+      <h3 tabIndex={-1}>Display</h3>
       <div class="field">
         <label for={themeId}>Theme</label>
         <select id={themeId} value={settings.theme} onChange={(event) => void save({ theme: event.currentTarget.value as Theme })}>
@@ -368,8 +368,35 @@ function ThemeSection() {
   );
 }
 
-/** Backup and restore, this device's preferences, and the version. */
+/** The section that `?at=` in the address asks for (`#/settings?at=lock`), following the address as it changes. */
+function useSectionAsked(): string | null {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const update = (): void => setHash(window.location.hash);
+    window.addEventListener('hashchange', update);
+    return () => window.removeEventListener('hashchange', update);
+  }, []);
+  return new URLSearchParams(hash.split('?')[1] ?? '').get('at');
+}
+
+/**
+ * Backup and restore, this device's preferences, and the version. Opened with `?at=backup`, `?at=lock` or `?at=display`
+ * (from More), it scrolls that section into view and puts the focus on its heading.
+ */
 export function Settings() {
+  const at = useSectionAsked();
+  useEffect(() => {
+    const section = at ? document.getElementById(`settings-${at}`) : null;
+    const heading = section?.querySelector<HTMLElement>('h3');
+    if (!section || !heading) return;
+    // After the app has moved a new screen to the top, which it does once every screen has drawn.
+    const frame = requestAnimationFrame(() => {
+      heading.focus({ preventScroll: true });
+      section.scrollIntoView({ block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [at]);
+
   return (
     <section class="screen">
       <h2>Settings</h2>

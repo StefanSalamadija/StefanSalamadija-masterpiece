@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Download, Locator, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
+import { expectNoHorizontalScroll, freshApp, openShipSection, setupShip, skipProtectStep } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's today is 2026-10-25. Sealing or opening a
 // backup derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow are given more time than
@@ -164,9 +164,9 @@ test('documents: warning, expiring before next port, carry-over on re-join', asy
   // Voyage: Next port 'Rotterdam', ETA (local) 2027-01-05T08:00 → Save
   await setNextPort(page, 'Rotterdam', '2027-01-05T08:00');
 
-  // The Expiring chip opens Due before the next port (#/due/port): 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
-  await page.goto('./#/ship/crew');
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Expiring' }).click();
+  // The Crew documents tile, then Before next port, opens Due before the next port (#/due/port): 'Next port Rotterdam, ETA 2027-01-05' and a row containing 'Medical fitness certificate'
+  await openShipSection(page, 'Crew documents');
+  await page.getByRole('main').getByRole('link', { name: 'Before next port' }).click();
   await expect(page).toHaveURL(/#\/due\/port$/);
   await expectBeforeNextPort(page);
   await expect(page.getByText('Next port Rotterdam, ETA 2027-01-05')).toBeVisible();

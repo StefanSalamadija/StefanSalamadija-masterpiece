@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { test, expect } from '@playwright/test';
 import type { Download, Page } from '@playwright/test';
-import { expectNoHorizontalScroll, freshApp, setupShip, skipProtectStep } from './helpers';
+import { expectNoHorizontalScroll, freshApp, openMore, setupShip, skipProtectStep } from './helpers';
 
 // Every device starts at 2026-10-25T09:00Z with the ship at UTC+03:00, so the ship's today is 2026-10-25.
 // Opening or sealing a file derives a key with 600,000 PBKDF2 rounds, which takes a moment: the waits that follow one
@@ -658,7 +658,7 @@ test('restore says when it will push the oldest snapshot out', async ({ page }) 
 
 test('settings: backup reminder days and device name', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
+  await openMore(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   const days = page.getByLabel('Backup reminder (days)');
   const save = page.getByRole('button', { name: 'Save' });
@@ -828,7 +828,7 @@ test('a device with a ship can reach the import screen from Settings and come ba
   await freshApp(page); await setupShip(page);
   await goToImport(page);
   await expect(page.getByRole('banner')).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'More' })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('link', { name: 'Back to Settings' }).click();
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await expect(page.getByText('No snapshots yet.')).toBeVisible();

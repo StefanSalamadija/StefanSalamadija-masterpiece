@@ -51,6 +51,17 @@ describe('matchRoute', () => {
     expect(matchRoute('#/budget/month')).toEqual({ path: '/', params: {} });
   });
 
+  it('knows the Ship hub and More', () => {
+    expect(matchRoute('#/ship')).toEqual({ path: '/ship', params: {} });
+    expect(matchRoute('#/more')).toEqual({ path: '/more', params: {} });
+    expect(matchRoute('#/ship/')).toEqual({ path: '/ship', params: {} });
+  });
+
+  it('opens Settings with the section asked for in the query', () => {
+    expect(matchRoute('#/settings?at=lock')).toEqual({ path: '/settings', params: {} });
+    expect(matchRoute('#/settings?at=backup')).toEqual({ path: '/settings', params: {} });
+  });
+
   it('knows the Expiring route', () => {
     expect(matchRoute('#/ship/expiring')).toEqual({ path: '/ship/expiring', params: {} });
   });
@@ -73,7 +84,7 @@ describe('matchRoute', () => {
   });
 
   it('falls back to Home for unknown routes and bad escapes', () => {
-    for (const hash of ['#/nowhere', '#/ship', '#/ship/crew/abc/extra', '#/ship/crew/abc/documents', '#/ship/crew/abc/documents/d/extra', '#/ship/crew/abc/other/d', '#/ship/crew/%E0%A4%A', '#/settings/import/x']) {
+    for (const hash of ['#/nowhere', '#/ship/nowhere', '#/more/x', '#/ship/crew/abc/extra', '#/ship/crew/abc/documents', '#/ship/crew/abc/documents/d/extra', '#/ship/crew/abc/other/d', '#/ship/crew/%E0%A4%A', '#/settings/import/x']) {
       expect(matchRoute(hash), hash).toEqual({ path: '/', params: {} });
     }
   });

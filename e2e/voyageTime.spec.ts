@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, setupShip } from './helpers';
+import { allowWrites, expectNoHorizontalScroll, failWrites, freshApp, openShipSection, setupShip } from './helpers';
 
 // The clock is 2026-10-25T09:00Z and the ship is at UTC+03:00, so the ship's clock reads 12:00. It keeps running.
 
@@ -180,10 +180,9 @@ test('ship time: a failed write is reported and nothing is changed; trying again
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('ship time: the ship nav leads to the screen', async ({ page }) => {
+test('ship time: the Ship hub leads to the screen', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: "Ship's time" }).click();
+  await openShipSection(page, "Ship's time");
   await expect(page).toHaveURL(/#\/ship\/time$/);
   await expect(page.getByRole('button', { name: 'Advance 1 h' })).toBeVisible();
 });
@@ -326,10 +325,9 @@ test('voyage: a failed save is reported and what was typed is kept', async ({ pa
   expect(await stored(page, 'voyages')).toHaveLength(1);
 });
 
-test('voyage: the ship nav leads to the screen', async ({ page }) => {
+test('voyage: the Ship hub leads to the screen', async ({ page }) => {
   await freshApp(page); await setupShip(page);
-  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Ship sections' }).getByRole('link', { name: 'Voyage' }).click();
+  await openShipSection(page, 'Voyage');
   await expect(page).toHaveURL(/#\/ship\/voyage$/);
   await expect(page.getByLabel('Voyage no.')).toBeVisible();
 });

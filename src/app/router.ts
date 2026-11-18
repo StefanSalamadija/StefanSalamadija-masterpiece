@@ -7,6 +7,9 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 export const ROUTES = [
   '/',
   '/due',
+  '/more',
+  // The Ship hub. Its sections, below, all have more segments, so their order against it does not matter.
+  '/ship',
   '/due/port',
   '/ship/particulars',
   '/ship/crew',

@@ -41,6 +41,18 @@ export async function setupShip(
   await expect(page.getByRole('heading', { name: 'Protect Masterpiece' }).or(page.getByRole('banner'))).toBeVisible();
 }
 
+/** Opens a section of the ship (`Crew`, `Draft survey`, …): the Ship tab of the bottom bar, then that tile of the hub. */
+export async function openShipSection(page: Page, name: string): Promise<void> {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Ship', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Ship sections', exact: true }).getByRole('link', { name, exact: true }).click();
+}
+
+/** Opens a row of More (`Profiles`, `Settings`, …): the More tab of the bottom bar, then that row. */
+export async function openMore(page: Page, name: string): Promise<void> {
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'More', exact: true }).click();
+  await page.getByRole('navigation', { name: 'More', exact: true }).getByRole('link', { name, exact: true }).click();
+}
+
 /** At phone width (360 px) the page must not scroll sideways. */
 export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   await page.setViewportSize({ width: 360, height: 740 });
